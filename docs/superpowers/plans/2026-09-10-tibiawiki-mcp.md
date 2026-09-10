@@ -4,47 +4,54 @@
 
 **Goal:** A local, read-only MCP server that answers attribute queries about Tibia ("which creatures are weak to fire and give over 500 exp?") in milliseconds from a local SQLite snapshot of TibiaWiki.
 
-**Architecture:** A pinned upstream generator (`tibiawiki-sql`) produces a SQLite file at build time; the runtime is a stdio MCP server that reads that file through `node:sqlite` and never touches the network. One `createServer()` factory is bound to stdio in production and driven in-process by tests.
+**Architecture:** A pinned upstream generator (`tibiawiki-sql`) produces a SQLite file at build time; the runtime is a stdio MCP server that reads that file through `node:sqlite` and never touches the network. One `createServer()` factory is bound to stdio in production and to an in-memory transport in tests.
 
-**Tech Stack:** TypeScript 7, Node ≥20 (developed on 24), `@modelcontextprotocol/server` 2.0.0, Zod 4, `node:sqlite` (stdlib), `node:test` (stdlib), pnpm 10 with supply-chain hardening.
+**Tech Stack:** TypeScript 7, Node ≥22.13, `@modelcontextprotocol/server` 2.0.0, Zod 4, `node:sqlite` (stdlib), `node:test` (stdlib), pnpm 10 with supply-chain hardening.
 
 **Spec:** `docs/superpowers/specs/2026-09-10-tibiawiki-mcp-design.md`
 
-**Review tier:** single (`reviewer`). `scripts/review-tier.py ff3b6a4` computes `none`, but that reflects the current docs-only diff; the expected change set is application code with no auth, secrets, concurrency, data-loss or shared-infrastructure surface, which is `single`.
+**Review tier:** single (`reviewer`). `scripts/review-tier.py ff3b6a4` computes `none`, but that reflects the docs-only diff at the time; the expected change set is application code with no auth, secrets, concurrency, data-loss or shared-infrastructure surface, which is `single`.
+
+**Revision note (v2):** This plan was revised after the 2026-09-10 gate returned *Needs revision*. All twelve blockers from that stamp (preserved at the bottom) are resolved in the text below. Each fix was reproduced against `data/tibiawiki.db`, the npm registry, live `tsc` 7.0.2, real `pnpm` 10.33.0, or Node's published API metadata.
 
 ## Global Constraints
 
 Every task's requirements implicitly include this section.
 
-- **Runtime makes no network calls.** Network access exists only in `src/indexer/`. A network call under `src/tools/` or `src/db.ts` is a defect.
-- **Node `>=20`**; `"type": "module"`; ESM output only.
-- **Exact dependency pins** (pnpm `savePrefix: ''`): `@modelcontextprotocol/server@2.0.0`, `zod@4.6.1`, `typescript@7.0.2`, `@types/node@24.13.4`, `@modelcontextprotocol/client@2.0.0` (dev).
-- **No test-framework dependency** — `node:test` + `node:assert/strict`. **No SQLite driver dependency** — `node:sqlite` `DatabaseSync` with `{ readOnly: true }`.
-- **Generator pinned** to `tibiawikisql==9.0.0`, always invoked with `--skip-images`.
-- **Every tool** sets `annotations: { readOnlyHint: true, openWorldHint: false }`, declares an `outputSchema`, returns `structuredContent`, and returns `ttlMs`/`cacheScope` on list results.
-- **Every tool response** carries `source: { page, url, indexGeneratedAt }` or a top-level `indexGeneratedAt`.
+- **Runtime makes no network calls.** Network access exists only in `src/indexer/`.
+- **Node `>=22.13.0`.** Not 20: `node:sqlite`/`DatabaseSync` were **added in v22.5.0** (Node API metadata), and 22.13 is where it is usable without the experimental flag. This floor also covers native TypeScript type-stripping (22.6+), which the test setup relies on.
+- **`"type": "module"`**; ESM only.
+- **Exact dependency pins** (pnpm `savePrefix: ''`), all older than the 7-day `minimumReleaseAge` gate: `@modelcontextprotocol/server@2.0.0`, `@modelcontextprotocol/client@2.0.0` (dev), `zod@4.5.4`, `typescript@7.0.2`, `@types/node@24.13.3`, `@modelcontextprotocol/inspector@2.6.0` (dev). **Do not bump to `zod@4.6.1` or `@types/node@24.13.4`** — both published 2026-09-09; with exact pins and `minimumReleaseAge: 10080` there is no fallback and `pnpm install` hard-fails with `ERR_PNPM_NO_MATURE_MATCHING_VERSION`.
+- **No test-framework dependency** — `node:test` + `node:assert/strict`. **No SQLite driver dependency** — `node:sqlite` `DatabaseSync`, `{ readOnly: true }`.
+- **Generator pinned** to `tibiawikisql==9.0.0`, always `--skip-images`.
+- **`title` is the canonical identity.** `creature.name` is lowercase for **126 of 2,193** rows (`Dragon` → `name='dragon'`, `title='Dragon'`). Every tool uses `title` for identity, display, cross-tool round-tripping and URL construction. Lookup accepts either (both columns are `COLLATE NOCASE`); output always echoes `title`.
+- **Default to `status = 'active'`.** Non-active rows are numerous (creature: 138 event, 45 unavailable, 39 deprecated, 13 ts-only, 1 raid; item: 186 unavailable, 67 event, 40 deprecated). Every query filters to active unless `include_inactive: true` is passed. This rule lives in `src/domain.ts` only.
+- **SQL construction rule:** every SQL fragment comes from a **closed literal map keyed by an already-validated enum value**; no raw input is ever interpolated. This covers four places — the element→`modifier_*` map, the `sort`→`ORDER BY` map, the EAV comparison-operator map, and the search table map — not one. Each map gets a negative test.
+- **Every tool** sets `annotations: { readOnlyHint: true, openWorldHint: false }` and declares an `outputSchema`. **Do not put `ttlMs`/`cacheScope` on tool results** — `CACHEABLE_RESULT_METHODS` in SDK 2.0.0 covers only `tools/list`, `prompts/list`, `resources/list`, `resources/templates/list`, `resources/read` and `server/discover`; `tools/call` is absent and `registerTool` has no `cacheHint` field.
+- **Every tool response** carries `source: { page, url, indexGeneratedAt }` or a top-level `indexGeneratedAt`. Error results (`isError: true`) are exempt: they carry text only.
 - **Attribution string** (committed verbatim in README and server `instructions`):
   `Data from TibiaWiki (https://tibia.fandom.com), licensed CC BY-SA. Tibia is made by CipSoft; game content and images are copyright CipSoft GmbH.`
-- **DB path resolution**, one rule shared by indexer and server: `$TIBIAWIKI_MCP_DB`, else `${XDG_CACHE_HOME:-~/.cache}/tibiawiki-mcp/tibiawiki.db`.
-- **TDD**: write the failing test, watch it fail, implement, watch it pass, commit. Conventional-commit prefixes, no AI attribution trailers.
+- **DB path resolution**, shared by indexer and server: `$TIBIAWIKI_MCP_DB`, else `${XDG_CACHE_HOME:-~/.cache}/tibiawiki-mcp/tibiawiki.db`.
+- **TDD**: failing test → watch it fail → implement → watch it pass → commit. Conventional-commit prefixes, no AI attribution trailers.
 
 ## Verified Facts (established 2026-09-10; do not re-derive)
-
-These were measured against live sources and a real generated database. Treat them as given.
 
 | Fact | Value |
 |---|---|
 | Generator run | `uvx --from tibiawikisql==9.0.0 tibiawikisql generate --skip-images -o <path>` → 3m13s, 14 MB, exit 0 |
 | Corpus | creature 2,193 · item 9,800 · npc 1,245 · quest 370 · spell 211 · creature_drop 19,496 · npc offers 13,964 · item_attribute 23,292 |
-| Creature stats | Typed columns on `creature`: `hitpoints`, `experience`, `armor`, `mitigation`, `speed`, `is_boss`, `bestiary_class`, `location`, `modifier_<element>` |
-| Elements | `physical earth fire ice energy death holy drown lifedrain healing` → columns `modifier_<element>` |
-| Modifier convention | Percentage; 100 is neutral. `> 100` = takes extra damage (weak). `< 100` = resistant |
-| Item stats | **EAV, not columns.** `item_attribute(item_id, name, value)` with `value` as **TEXT** — `attack`, `defense`, `armor`, `required_level`, `required_vocation`, `weapon_type`, `hands`, `imbuement_slots`. Numeric compares need `cast(value as integer)` |
-| Item columns | Only `item_class`, `item_type`, `type_secondary`, `weight`, `value_buy`, `value_sell`, `is_marketable` are real columns |
-| Vendor direction | `npc_offer_sell` = NPC sells **to** the player (Steel Helmet 580g). `npc_offer_buy` = NPC buys **from** the player (293g). Obtaining reads `npc_offer_sell`. Both have `currency_id` joining back to `item` |
-| Drop chances | `creature_drop.chance` is a REAL percentage, populated for 17,382 of 19,496 rows (89.2%) |
-| Known answers | `Dragon` hp 1000, exp 700, `modifier_fire` 0 (immune) · `Dragonbone Staff` from `Dragon` chance ≈ 0.0557% · `Magic Longsword` has zero droppers (genuinely unobtainable) · `Dragon Shield` dropped by `dragon` among others |
-| SDK API | `serveStdio(factory)` from `@modelcontextprotocol/server/stdio`; `McpServer`/`createMcpHandler` from `@modelcontextprotocol/server`; `Client`/`StreamableHTTPClientTransport` from `@modelcontextprotocol/client`; `registerTool(name, {description, inputSchema, outputSchema, annotations}, cb)` with `inputSchema` a full `z.object(...)` (raw shapes deprecated); `ServerOptions.instructions` exists |
+| Creature columns | `article_id, title, name, hitpoints, experience, armor, mitigation, speed, is_boss, bestiary_class, bestiary_level, bestiary_occurrence, spawn_type, location, walks_through, walks_around, status, modifier_<element>` |
+| **No prose columns** | `creature` has **no** `history`, `notes`, `bestiary_text`, `behaviour` or `strategy` column — those are *wikitext infobox* fields the generator does not persist. The only prose-ish column anywhere is `item.flavor_text` |
+| Elements | `physical earth fire ice energy death holy drown lifedrain healing` → `modifier_<element>` |
+| Modifier convention | Percentage; 100 neutral. `> 100` = weak (takes extra). `< 100` = resistant |
+| Item stats | **EAV, not columns.** `item_attribute(item_id, name, value)`, `value` is **TEXT** — `attack, defense, armor, required_level, required_vocation, weapon_type, hands, imbuement_slots`. Numeric compares need `cast(value as integer)` |
+| Item columns | Only `item_class, item_type, type_secondary, weight, value_buy, value_sell, is_marketable, flavor_text, status` are real columns |
+| Vendor direction | `npc_offer_sell` = NPC sells **to** the player (Steel Helmet 580g, 22 vendors). `npc_offer_buy` = NPC buys **from** the player (293g). Obtaining reads `npc_offer_sell`. `currency_id` joins to `item` (Gold Coin = `article_id` 2119) |
+| Drop chances | `creature_drop.chance` is a REAL percentage, populated for 17,382 of 19,496 rows (89.2%) — **~11% are null, so nulls-last ordering is load-bearing** |
+| `database_info` | **Key/value rows, not columns.** Keys: `generate_time, platform, python_version, timestamp, version` |
+| Known answers | `Dragon` hp 1000, exp 700, `modifier_fire` **0** (immune), `modifier_ice` 110 · `Dragonbone Staff` from `Dragon` 0.0557% · `Magic Longsword` zero droppers/vendors/quests, attack 55 / defense 40 / required_level 140 · `Tarantula` `modifier_fire` 115, exp 120 · `Scarab` `modifier_fire` 118, exp 120 |
+| SDK API | `serveStdio(factory)` from `@modelcontextprotocol/server/stdio`; `McpServer`, `createMcpHandler`, `InMemoryTransport` from `@modelcontextprotocol/server`; `Client` from `@modelcontextprotocol/client`; `registerTool(name, {description, inputSchema, outputSchema, annotations}, cb)` with `inputSchema` a full `z.object(...)`; `ServerOptions.instructions` exists; `InMemoryTransport.createLinkedPair(): [InMemoryTransport, InMemoryTransport]` — verified working end to end |
+| Build config | `module`/`moduleResolution` **`nodenext`** (`"node20"` is invalid in TS 7: `TS6046`). `.ts` specifiers need `allowImportingTsExtensions` **and** `rewriteRelativeImportExtensions`; verified to emit `./db.js` and run. `rootDir: "src"` gives a flat `dist/index.js`; `rootDir: "."` would emit `dist/src/index.js` and break `bin` |
 
 ## File Structure
 
@@ -53,27 +60,27 @@ These were measured against live sources and a real generated database. Treat th
 | `src/index.ts` | bin entry; dispatches `serve` (default) vs `build-index` |
 | `src/server.ts` | `createServer()` factory; registers all tools; owns server instructions |
 | `src/db.ts` | DB path resolution, read-only open, schema probe, provenance |
-| `src/domain.ts` | Single source of truth for elements, modifier mapping, verbosity |
+| `src/domain.ts` | Sole home of policy: elements, modifier map, sort maps, status filter, entity types |
 | `src/cursor.ts` | Opaque pagination cursor |
 | `src/tools/{get,search,find-creatures,find-items,how-to-obtain}.ts` | One tool each |
 | `src/indexer/build-index.ts` | Runs the pinned generator |
 | `scripts/make-fixture.mjs` | Builds the committed test fixture from a full DB |
-| `test/harness.ts` | Shared in-process MCP client harness |
+| `test/harness.ts` | `connect()` over `InMemoryTransport`, plus `FIXTURE` path helper |
 | `test/fixtures/tibiawiki-fixture.db` | Committed trimmed DB (not gitignored) |
 
 ---
 
 ### Task 1: Project skeleton with hardened pnpm and a proven toolchain
 
-**Why:** Nothing else is verifiable until `tsc` and `node --test` demonstrably work together. Deliverable: a repo that builds and runs one trivial test.
+**Why:** Nothing is verifiable until `tsc` and `node --test` demonstrably work together. Deliverable: a repo that typechecks, builds a flat `dist/index.js`, and runs one trivial test.
 
-**Files:** Create `package.json`, `pnpm-workspace.yaml`, `.npmrc`, `tsconfig.json`, `test/smoke.test.ts`
+**Files:** Create `package.json`, `pnpm-workspace.yaml`, `.npmrc`, `tsconfig.json`, `tsconfig.build.json`, `test/smoke.test.ts`
 
-**Contract:** `pnpm build` → `dist/`; `pnpm test` runs `node --test` over compiled output.
+**Contract:** `pnpm typecheck` → `tsc --noEmit`; `pnpm build` → flat `dist/index.js`; `pnpm test` → typecheck then `node --test test/*.test.ts`.
 
 **Literal config — committed verbatim.**
 
-`pnpm-workspace.yaml` (the hardening baseline from `dev-skills:node-supply-chain-hardening`):
+`pnpm-workspace.yaml` (hardening baseline from `dev-skills:node-supply-chain-hardening`):
 
 ```yaml
 savePrefix: ''
@@ -89,20 +96,48 @@ managePackageManagerVersions: true
 
 `.npmrc`: `save-exact=true`
 
-`package.json` key fields: `"type": "module"`, `"engines": {"node": ">=20"}`, `"packageManager": "pnpm@10.33.0"`, `"bin": {"tibiawiki-mcp": "dist/index.js"}`, `"files": ["dist"]`, `"mcpName": "io.github.jakubmucha/tibiawiki-mcp"`, scripts `build: tsc`, `pretest: pnpm build`, `test: node --test dist/test/*.test.js`, and the exact dependency pins from Global Constraints.
+`package.json` key fields: `"type": "module"`, `"engines": {"node": ">=22.13.0"}`, `"packageManager": "pnpm@10.33.0"`, `"bin": {"tibiawiki-mcp": "dist/index.js"}`, `"files": ["dist"]`, `"mcpName": "io.github.jakubmucha/tibiawiki-mcp"`, the exact pins from Global Constraints, and scripts `typecheck`, `build`, `test` per the contract above.
 
-`tsconfig.json` key fields: `target es2023`, `module`/`moduleResolution` `node20`, `strict`, `noUncheckedIndexedAccess`, `outDir dist`, `rootDir .`, include `src/**/*.ts` and `test/**/*.ts`, and — because **TypeScript 7 removed auto-inclusion of `@types/*`** — an explicit `"types": ["node"]`.
+`tsconfig.json` (typecheck everything, emit nothing):
 
-**Behavior:** none (scaffolding only).
+```json
+{
+  "compilerOptions": {
+    "target": "es2023",
+    "module": "nodenext",
+    "moduleResolution": "nodenext",
+    "types": ["node"],
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "allowImportingTsExtensions": true,
+    "rewriteRelativeImportExtensions": true,
+    "noEmit": true
+  },
+  "include": ["src/**/*.ts", "test/**/*.ts", "scripts/**/*.mjs"]
+}
+```
+
+`tsconfig.build.json` (emit the publishable tree):
+
+```json
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": { "noEmit": false, "outDir": "dist", "rootDir": "src", "sourceMap": true },
+  "include": ["src/**/*.ts"]
+}
+```
+
+**Behavior:** none (scaffolding).
 
 **Tests to write:** one smoke test asserting `node:sqlite` is importable from the stdlib and round-trips a value through an in-memory database.
 
 **Acceptance:**
-- `pnpm install` succeeds and produces a committed `pnpm-lock.yaml`.
+- `pnpm install` succeeds and commits `pnpm-lock.yaml`. It must not fail with `ERR_PNPM_NO_MATURE_MATCHING_VERSION`; if it does, a pin is younger than 7 days — pick the newest version older than that, do not weaken `minimumReleaseAge`.
 - `pnpm test` passes.
-- If `typescript@7.0.2` or `@types/node@24.13.4` fail to compile, fall back to `typescript@5.9.3` and record the change in the commit message. **Do not proceed with a red build.**
+- `pnpm build && ls dist/index.js` succeeds — **flat, not `dist/src/index.js`**.
+- If TypeScript 7.0.2 proves unworkable, fall back to `5.9.3` **and record the required tsconfig delta in this plan and in the README** — `module: nodenext` and `rewriteRelativeImportExtensions` behave differently across the two majors, so the fallback is not drop-in. A commit message alone is not sufficient record.
 
-**Constraints:** pnpm only; do not add a test framework or a SQLite driver.
+**Constraints:** pnpm only; no test framework, no SQLite driver.
 
 ---
 
@@ -123,31 +158,39 @@ export function openDb(path?: string): TibiaDb;
 ```
 
 **Behavior:**
-- `resolveDbPath` implements the Global Constraints rule exactly: `$TIBIAWIKI_MCP_DB` wins, else `${XDG_CACHE_HOME:-$HOME/.cache}/tibiawiki-mcp/tibiawiki.db`.
-- `openDb` on a missing file throws an `Error` whose message names the path and tells the user to run `tibiawiki-mcp build-index`.
-- `openDb` probes the schema and throws `SchemaError` naming **the specific missing table or column**, with a hint that the index was built by a different generator version. Required shape covers the tables and columns this plan actually queries: `creature`, `item`, `item_attribute`, `creature_drop`, `npc`, `npc_offer_sell`, `npc_offer_buy`, `quest`, `quest_reward`, `database_info`.
-- `provenance` reads `version` and `generate_time` from `database_info`, defaulting to `"unknown"` rather than throwing.
-- The database is opened read-only.
+- `resolveDbPath` implements the Global Constraints rule exactly.
+- Missing file → `Error` naming the path and telling the user to run `tibiawiki-mcp build-index`.
+- Schema probe throws `SchemaError` naming **the specific missing table or column**, hinting at a generator-version mismatch. Covers `creature`, `item`, `item_attribute`, `creature_drop`, `npc`, `npc_offer_sell`, `npc_offer_buy`, `quest`, `quest_reward`, **`spell`**, and `database_info`.
+- **`database_info` is validated by _key_, not by column** — it is a key/value table. Require the keys `version` and `generate_time`.
+- `provenance` reads those two keys, defaulting to `"unknown"` rather than throwing.
+- Opened read-only.
 
-**`scripts/make-fixture.mjs`:** copies a full DB, deletes all but a handful of named creatures (`Dragon`, `Dragon Lord`, `Rotworm`, `Demon`, `Cyclops`) plus everything reachable from them, keeps `Magic Longsword` and `Steel Helmet` for the known-answer cases, then `vacuum`s. It exists so the fixture is reproducible rather than an opaque committed binary.
+**`scripts/make-fixture.mjs` — bounded retention contract.** Not "everything reachable". Retain exactly:
+- **creature:** `Dragon`, `Dragon Lord`, `Rotworm`, `Demon`, `Cyclops` (the fire-immune / neutral cases) **plus `Tarantula` (`modifier_fire` 115) and `Scarab` (`modifier_fire` 118)** so fire-weakness tests have a non-empty result and pagination has ≥2 rows. Also retain one non-`active` creature so the status filter has something to exclude.
+- **item:** every item referenced by a retained `creature_drop`, plus `Magic Longsword` (the zero-source case), `Steel Helmet` (`article_id` 2305, the vendor case) and **`Gold Coin` (`article_id` 2119, the currency join target)**.
+- **npc / npc_offer_sell / npc_offer_buy:** every offer for a retained item, and every NPC referenced by a retained offer.
+- **quest / quest_reward:** every reward row for a retained item, and its quest.
+- **item_attribute:** every row for a retained item. **spell:** a handful, for the search-type test.
+Then `vacuum`. It exists so the fixture is reproducible, not an opaque committed binary.
 
 **Tests to write:**
-- `resolveDbPath` honours the env override.
-- `resolveDbPath` falls back to the cache path.
+- `resolveDbPath` honours the env override; falls back to the cache path.
 - `openDb` on the fixture exposes `provenance.version === '9.0.0'` and an ISO-8601 `generatedAt`.
-- `openDb` on a missing file throws mentioning `build-index`.
-- `openDb` on a hand-built DB with a truncated `creature` table throws `SchemaError` naming the missing column.
+- Missing file throws mentioning `build-index`.
+- A hand-built DB with a truncated `creature` table throws `SchemaError` naming the missing column.
+- A DB whose `database_info` lacks the `version` key throws `SchemaError` (guards the key-vs-column confusion).
 
 **Acceptance:**
 - `node scripts/make-fixture.mjs data/tibiawiki.db test/fixtures/tibiawiki-fixture.db` writes a file under 1 MB.
-- `pnpm test` passes with 5 tests in `db.test.ts`.
+- `pnpm test` passes with 6 tests in `db.test.ts`.
 - `git check-ignore test/fixtures/tibiawiki-fixture.db` exits non-zero (the fixture is committed).
+- A sanity query on the fixture returns **≥ 2** creatures with `modifier_fire > 100`.
 
 ---
 
 ### Task 3: Domain policy and pagination primitives
 
-**Why:** "Weak to fire means `modifier_fire > 100`" is business policy. It must live in exactly one place so no tool can drift and the model never has to know the convention.
+**Why:** The modifier convention, the status filter and every SQL fragment map are business policy. They must live in one place so no tool can drift and the model never has to know the conventions.
 
 **Files:** Create `src/domain.ts`, `src/cursor.ts`, `test/domain.test.ts`
 
@@ -156,25 +199,35 @@ export function openDb(path?: string): TibiaDb;
 ```ts
 export const ELEMENTS: readonly ['physical','earth','fire','ice','energy','death','holy','drown','lifedrain','healing'];
 export type Element = (typeof ELEMENTS)[number];
-export const elementSchema: z.ZodEnum<...>;          // reused by every tool inputSchema
-export function modifierColumn(element: Element): string;
-export const WEAK_TO: (column: string) => string;     // -> `${column} > 100`
-export const RESISTANT_TO: (column: string) => string; // -> `${column} < 100`
-export const verbositySchema: z.ZodDefault<z.ZodEnum<['concise','detailed']>>;
-export const PROSE_FIELDS: readonly ['history','notes','bestiary_text','behaviour','strategy'];
+export const elementSchema: z.ZodEnum<...>;
+export function modifierColumn(element: Element): string;      // closed map; throws on unknown
+export const WEAK_TO: (column: string) => string;              // `${column} > 100`
+export const RESISTANT_TO: (column: string) => string;         // `${column} < 100`
+
+export const ENTITY_TYPES: readonly ['creature','item','npc','quest','spell'];
+export type EntityType = (typeof ENTITY_TYPES)[number];
+export function searchTable(type: EntityType): string;         // closed map; throws on unknown
+export function creatureSort(key: 'experience'|'hitpoints'|'title'): string;  // closed ORDER BY map
+export function itemSort(key: 'title'|'weight'|'value'): string;              // closed ORDER BY map
+export function eavOperator(op: 'gte'|'lte'): string;          // closed map -> '>=' | '<='
+export function statusClause(includeInactive: boolean): string; // '' | "status = 'active'"
 
 export function encodeCursor(offset: number): string;
 export function decodeCursor(cursor: string | undefined): number;
 ```
 
 **Behavior:**
-- `modifierColumn` is **whitelist-only**: its return value is interpolated into SQL, so an unknown element must throw rather than pass through. This is the one place where a string reaches SQL uninterpolated by a parameter, and it is why the whitelist is load-bearing.
-- `encodeCursor`/`decodeCursor` round-trip an offset through an opaque base64url token. `decodeCursor(undefined)` is `0`. A malformed cursor throws.
+- Each of the five map functions is **whitelist-only** and throws on an unknown key. Their return values are the only strings interpolated into SQL anywhere in the codebase.
+- `statusClause(false)` yields the active-only filter; `statusClause(true)` yields an empty string that callers must handle without producing a dangling `and`.
+- `decodeCursor(undefined) === 0`; malformed cursors throw.
+- **`PROSE_FIELDS` is deleted.** The columns it named do not exist. `verbosity: 'detailed'` instead adds real columns — creature: `location`, `spawn_type`, `mitigation`, `bestiary_occurrence`, `walks_through`, `walks_around`; item: `flavor_text`. Export this as `DETAILED_CREATURE_FIELDS` / `DETAILED_ITEM_FIELDS`.
 
 **Tests to write:**
 - All 10 elements map to `modifier_<element>`; spot-check `fire` and `lifedrain`.
-- An element outside the whitelist throws.
-- Cursor round-trips; `undefined` yields 0; garbage throws.
+- **Negative test for each of the five maps**: an out-of-enum key throws rather than returning a fragment.
+- `statusClause` returns the active filter by default and empty when inactive are included.
+- Cursor round-trips; `undefined` → 0; garbage throws.
+- Every name in `DETAILED_CREATURE_FIELDS` exists as a column in the fixture's `creature` table (guards the mistake that produced blocker 6).
 
 **Acceptance:** `pnpm test` green.
 
@@ -182,7 +235,7 @@ export function decodeCursor(cursor: string | undefined): number;
 
 ### Task 4: Server factory, `tibia_get`, and the stdio entry point
 
-**Why:** The first end-to-end slice. Proves the factory, tool registration, the in-process test harness and the stdio binding all work before four more tools are layered on.
+**Why:** The first end-to-end slice. Proves the factory, tool registration, the in-memory harness and the stdio binding before four more tools land.
 
 **Files:** Create `src/server.ts`, `src/tools/get.ts`, `src/index.ts`, `test/harness.ts`, `test/server.test.ts`
 
@@ -190,33 +243,37 @@ export function decodeCursor(cursor: string | undefined): number;
 
 ```ts
 // src/server.ts
-export const ATTRIBUTION: string;               // the Global Constraints string, verbatim
+export const ATTRIBUTION: string;
 export function createServer(handle: TibiaDb): McpServer;
 
 // src/tools/get.ts
-export function sourceBlock(page: string, p: Provenance): { page: string; url: string; indexGeneratedAt: string };
+export function sourceBlock(title: string, p: Provenance): { page: string; url: string; indexGeneratedAt: string };
 export function registerGet(server: McpServer, handle: TibiaDb): void;
 
 // test/harness.ts
+export const FIXTURE: string;                       // resolves the fixture once, for all test files
 export function connect(): Promise<{ client: Client; close(): Promise<void> }>;
 ```
 
 **Behavior:**
-- `createServer` constructs `new McpServer({name:'tibiawiki-mcp', version}, {capabilities:{tools:{}}, instructions})`. The `instructions` state that the data is an offline snapshot, give `provenance.generatedAt` and the generator version, and end with `ATTRIBUTION`.
-- `sourceBlock` builds `https://tibia.fandom.com/wiki/<page with spaces as underscores, URI-encoded>`.
-- `tibia_get` input: `name` (exact page name), `verbosity`. Output: name, type, hitpoints, experience, armor, speed, bestiaryClass, a `modifiers` map over all 10 elements, a `loot` array of `{item, chance, min, max}` ordered by chance ascending with nulls last, an optional `prose` map (only at `detailed`, drawn from `PROSE_FIELDS`), and `source`.
-- An unknown name returns `isError: true` with text pointing the model at `tibia_search` — **not** a JSON-RPC error. JSON-RPC errors are reserved for malformed calls.
-- `src/index.ts` is a shebanged bin dispatching `serve` (default) and `build-index`. `build-index` is loaded by **dynamic import** so `serve` does not depend on Task 9 existing yet. An unknown command exits 2 with usage on stderr.
-- `test/harness.ts` builds `createMcpHandler(() => createServer(handle))` and connects a real `Client` over `StreamableHTTPClientTransport` whose `fetch` calls `handler.fetch` in-process — no subprocess, no port.
+- `createServer` builds `new McpServer({name, version}, {capabilities:{tools:{}}, instructions})`. The instructions state that the data is an offline snapshot, give `provenance.generatedAt` and the generator version, and end with `ATTRIBUTION`.
+- `sourceBlock` uses **`title`** (canonical identity) → `https://tibia.fandom.com/wiki/<title with spaces as underscores, URI-encoded>`.
+- **`tibia_get` covers all five entity types**, resolving blocker 8: input is `name` plus optional `type`; output is a **Zod discriminated union on `type`** so search → get round-trips for anything search can return. `outputSchema` is SDK-enforced, so the union must actually cover every returned shape. Creature carries stats, `modifiers` and `loot`; item carries `item_class`/`item_type`/EAV attributes; npc carries city and location; quest and spell carry their own columns. All five carry `source`.
+- When `type` is omitted and the name is ambiguous across types, return `isError: true` listing the matching types and asking the caller to disambiguate. Unknown name → `isError: true` pointing at `tibia_search`.
+- `verbosity: 'detailed'` adds `DETAILED_CREATURE_FIELDS` / `DETAILED_ITEM_FIELDS` (Task 3), not the deleted prose fields.
+- Loot is ordered by chance ascending **with nulls last** (~11% are null).
+- **`src/index.ts` dispatches only `serve`** and exits 2 with usage for anything else. It must **not** reference `./indexer/build-index.ts` — `import()` is module-resolved and type-checked like a static import, so referencing a file Task 9 has not created yet is a hard `TS2307`. Task 9 adds the `build-index` branch as part of its own change.
+- `test/harness.ts` uses **`InMemoryTransport.createLinkedPair()`** — no HTTP glue layer. (The SDK docs site claims this transport pins the 2025 era; the shipped type docs do not say so and a live round trip works. Protocol-era conformance is covered instead by Task 10's `inspector --cli` run against the real stdio binary. If a test ever needs to assert modern-era behaviour directly, use `createMcpHandler` + `handler.fetch` for that one test.)
 
 **Tests to write:**
 - `tools/list` includes `tibia_get` with `annotations.readOnlyHint === true`.
-- `tibia_get` for `Dragon` returns hitpoints 1000, experience 700, `modifiers.fire === 0`, and `source.url === 'https://tibia.fandom.com/wiki/Dragon'`.
-- An unknown creature name yields `isError: true`.
+- `tibia_get` for `Dragon` returns hitpoints 1000, experience 700, `modifiers.fire === 0`, `title === 'Dragon'` (not `'dragon'`), and `source.url === 'https://tibia.fandom.com/wiki/Dragon'`.
+- `tibia_get` for `Magic Longsword` returns the item shape and validates against the union `outputSchema`.
+- Unknown name → `isError: true`.
 
-**Acceptance:** `pnpm test` green, including the Dragon known-answer case.
+**Acceptance:** `pnpm test` green, including the Dragon known-answer and the `title` casing assertion.
 
-**Constraints:** register tools **inside** the factory, never on a shared outer instance — the factory may be invoked per request.
+**Constraints:** register tools **inside** the factory, never on a shared outer instance.
 
 ---
 
@@ -229,15 +286,17 @@ export function connect(): Promise<{ client: Client; close(): Promise<void> }>;
 **Contract:** `export function registerSearch(server: McpServer, handle: TibiaDb): void;`
 
 **Behavior:**
-- Input: `query` (non-empty substring), optional `types` restricted to `creature|item|npc|quest|spell`, `limit` (1–100, default 25), `cursor`. Output: `results: {name, type}[]`, optional `nextCursor`, `indexGeneratedAt`.
-- Matching is a case-insensitive substring over `name`. Results are ordered shortest-name-first then alphabetically, so an exact-ish match surfaces above longer incidental matches.
-- One prepared statement per table, built from the fixed whitelist. **The table name must never be interpolated from user input.**
-- `nextCursor` is present only when more results remain.
+- Input: `query` (non-empty), optional `types` (from `ENTITY_TYPES`), `include_inactive` (default false), `limit` (1–100, default 25), `cursor`. Output: `results: {title, type}[]`, optional `nextCursor`, `indexGeneratedAt`.
+- Case-insensitive substring over `title`. Table names come from `searchTable()` (Task 3) — **never interpolated from input**.
+- Ordering is deterministic and total: shortest `title` first, then `title` alphabetically, then **`type` alphabetically as the final tiebreaker** so cross-table pagination is stable.
+- `nextCursor` only when more results remain.
+- Note: `test/harness.ts` already exists from Task 4; this task consumes it and does not re-create it.
 
 **Tests to write:**
-- Searching `drag` returns `Dragon` among the results, and every result carries a `type`.
-- Restricting `types: ['item']` returns only items.
-- (Fold Task 4's inline `connect()` into `test/harness.ts` and re-point `test/server.test.ts` at it.)
+- Searching `drag` returns `Dragon` (exact casing) and every result carries a `type`.
+- `types: ['item']` returns only items, and the result set is **non-empty**.
+- Paging with `limit: 1` twice yields two different rows in a stable order.
+- A non-`active` entity is absent by default and present with `include_inactive: true`.
 
 **Acceptance:** `pnpm test` green, all earlier tests still passing.
 
@@ -252,38 +311,41 @@ export function connect(): Promise<{ client: Client; close(): Promise<void> }>;
 **Contract:** `export function registerFindCreatures(server: McpServer, handle: TibiaDb): void;`
 
 **Behavior:**
-- Input: `weak_to[]`, `resistant_to[]` (both `elementSchema`), `experience_min/max`, `hitpoints_min/max`, `bestiary_class`, `is_boss`, `location_contains`, `sort` (`experience|hitpoints|name`, default `experience`), `limit` (1–100, default 25), `cursor`.
-- Output: `results` with name, hitpoints, experience, bestiaryClass and the full `modifiers` map; plus `totalMatches`, optional `nextCursor`, `indexGeneratedAt`.
-- Element filters go through `WEAK_TO`/`RESISTANT_TO` composed with `modifierColumn`. **Every other filter binds parameters** — no string interpolation of user values.
-- Sort is `experience`/`hitpoints` descending, `name` ascending, always with nulls last and `name` as a tiebreak so pagination is stable.
-- The tool description must state the modifier convention explicitly (100 is neutral; weak means more than 100) so the model does not have to infer it.
+- Input: `weak_to[]`, `resistant_to[]`, `experience_min/max`, `hitpoints_min/max`, `bestiary_class`, `is_boss`, `location_contains`, `include_inactive` (default false), `sort` (`experience|hitpoints|title`, default `experience`), `limit` (1–100, default 25), `cursor`.
+- Output: `results` with `title`, hitpoints, experience, bestiaryClass and the full `modifiers` map; plus `totalMatches`, optional `nextCursor`, `indexGeneratedAt`.
+- Element filters compose `WEAK_TO`/`RESISTANT_TO` with `modifierColumn`; ordering comes from `creatureSort()`. **Every other filter binds parameters.**
+- Sorting is nulls-last with `title` as tiebreak so pagination is stable.
+- The tool description states the modifier convention explicitly (100 neutral; weak is above 100).
 
 **Tests to write:**
-- `weak_to: ['fire'], experience_min: 100` returns only creatures whose `modifiers.fire > 100` and `experience >= 100`.
-- `weak_to: ['fire']` **excludes** `Dragon` — it is fire-immune at `modifier_fire = 0`. This is the regression guard for inverting the comparison.
-- `limit: 1` returns a `nextCursor`, and following it yields a different creature.
+- `weak_to: ['fire'], experience_min: 100` returns a **non-empty** set (the fixture guarantees `Tarantula` and `Scarab`), and every row has `modifiers.fire > 100` and `experience >= 100`. **Assert non-emptiness first** — a universal assertion over an empty array passes vacuously, which is exactly how this test was broken before.
+- `weak_to: ['fire']` **excludes** `Dragon` (`modifier_fire = 0`) — the inversion guard.
+- `limit: 1` on a query known to match ≥2 rows returns a `nextCursor`; following it yields a different creature; the final page has no `nextCursor`.
+- A non-`active` creature is excluded by default.
 
-**Acceptance:** `pnpm test` green, including the Dragon exclusion case.
+**Acceptance:** `pnpm test` green, with the non-empty assertion present.
 
 ---
 
 ### Task 7: `tibia_find_items`
 
-**Why:** The item equivalent of Task 6. A separate task because item stats are stored as EAV and the SQL is genuinely different work.
+**Why:** The item equivalent of Task 6. Separate because item stats are EAV and the SQL is genuinely different work.
 
 **Files:** Create `src/tools/find-items.ts`, `test/find-items.test.ts`; modify `src/server.ts`
 
 **Contract:** `export function registerFindItems(server: McpServer, handle: TibiaDb): void;`
 
 **Behavior:**
-- Input: `item_class`, `item_type` (real columns); `weapon_type`, `vocation`, `attack_min/max`, `defense_min`, `armor_min`, `required_level_max` (EAV attributes); `sort` (`name|weight|value`), `limit`, `cursor`.
-- Output: `results` with name, itemClass, itemType, weight, valueBuy and an `attributes` bag limited to the reported set (`attack`, `defense`, `armor`, `required_level`, `imbuement_slots`, `required_vocation`, `weapon_type`, `hands`); plus `totalMatches`, optional `nextCursor`, `indexGeneratedAt`.
-- EAV filters compile to a correlated `exists (select 1 from item_attribute a where a.item_id = item.article_id and a.name = ? and cast(a.value as integer) <op> ?)`. Numeric attributes are cast; text attributes match case-insensitively. Attribute names and values are **bound parameters**.
-- Numeric attributes are returned as numbers, text attributes as strings.
+- Input: `item_class`, `item_type` (real columns); `weapon_type`, `vocation`, `attack_min/max`, `defense_min`, `armor_min`, `required_level_max` (EAV); `include_inactive`; `sort` (`title|weight|value`, default `title`, via `itemSort()`); `limit` (1–100, default 25); `cursor`.
+- Output: `results` with `title`, itemClass, itemType, weight, valueBuy and an `attributes` bag limited to the reported set; plus `totalMatches`, optional `nextCursor`, `indexGeneratedAt`.
+- EAV filters compile to a correlated `exists (select 1 from item_attribute a where a.item_id = item.article_id and a.name = ? and cast(a.value as integer) <op> ?)` where `<op>` comes from `eavOperator()`. The EAV shape and the cast are the load-bearing spec here — the column is TEXT, so an uncast comparison silently string-sorts.
+- Attribute names and values are **bound parameters**. Numeric attributes return as numbers, text as strings.
+- `value` sort is on `value_buy` descending, nulls last.
 
 **Tests to write:**
-- `attack_min: 50` returns only items whose reported `attributes.attack >= 50`.
-- `attack_min: 55, attack_max: 55, required_level_max: 140` finds `Magic Longsword` (its verified attributes are attack 55, defense 40, required_level 140).
+- `attack_min: 50` returns a **non-empty** set and every row has `attributes.attack >= 50`.
+- `attack_min: 55, attack_max: 55, required_level_max: 140` finds `Magic Longsword`.
+- A string-vs-numeric guard: a filter that would behave differently under TEXT comparison (e.g. `attack_min: 9` must include attack `55`, which a string compare would exclude) returns the numerically correct set.
 
 **Acceptance:** `pnpm test` green.
 
@@ -291,24 +353,25 @@ export function connect(): Promise<{ client: Client; close(): Promise<void> }>;
 
 ### Task 8: `tibia_how_to_obtain`
 
-**Why:** "Where do I get X?" is one user question spanning three tables. Consolidating means one model call instead of three, and no chance of mis-joining them.
+**Why:** "Where do I get X?" is one user question spanning three tables. Consolidating means one model call and no chance of mis-joining them.
 
 **Files:** Create `src/tools/how-to-obtain.ts`, `test/how-to-obtain.test.ts`; modify `src/server.ts`
 
 **Contract:** `export function registerHowToObtain(server: McpServer, handle: TibiaDb): void;`
 
 **Behavior:**
-- Input: `item_name`. Output: `item`, `droppedBy: {creature, chance, min, max}[]`, `soldByNpcs: {npc, city, price, currency}[]`, `questRewards: string[]`, a `note`, and `source`.
-- Vendors come from **`npc_offer_sell`** — the NPC selling to the player. Using `npc_offer_buy` here is the defect this task exists to avoid. `currency_id` left-joins back to `item` for the currency name, defaulting to `Gold Coin`.
-- Drops are ordered by chance descending, nulls last.
-- An item with no drop, vendor or quest source returns **empty arrays and a populated `note`**, not an error — some items are genuinely unobtainable. An item that does not exist at all returns `isError: true` pointing at `tibia_search`.
+- Input: `item_name`. Output: `item` (canonical `title`), `droppedBy: {creature, chance, min, max}[]`, `soldByNpcs: {npc, city, price, currency}[]`, `questRewards: string[]`, `note`, `source`.
+- Vendors come from **`npc_offer_sell`** — the NPC selling to the player. Using `npc_offer_buy` is the defect this task exists to prevent. `currency_id` left-joins to `item`, defaulting to `Gold Coin`.
+- Drops ordered by chance descending, **nulls last** — verified that Steel Helmet's first three droppers all have `chance = null`, so incidental ordering is not safe.
+- No source at all → empty arrays plus a populated `note`, **not** an error. A name that matches no item → `isError: true` pointing at `tibia_search`.
 
 **Tests to write:**
-- `Dragon Shield` lists `Dragon` among `droppedBy`.
-- `Steel Helmet` vendors all quote `price >= 580`, proving `npc_offer_sell` was used rather than the 293-gold buy-side.
+- `Dragon Shield` lists `Dragon` among `droppedBy` using canonical `title` casing.
+- `Steel Helmet` vendors all quote `price >= 580` — proving `npc_offer_sell`, not the 293-gold buy side — and the set is non-empty.
+- A drop list containing null chances places them last.
 - `Magic Longsword` returns `isError` unset, `droppedBy: []`, and a non-empty `note`.
 
-**Acceptance:** `pnpm test` green, all three cases.
+**Acceptance:** `pnpm test` green, all four cases.
 
 ---
 
@@ -316,7 +379,7 @@ export function connect(): Promise<{ client: Client; close(): Promise<void> }>;
 
 **Why:** Without this the server is unusable by anyone who does not already have a database file.
 
-**Files:** Create `src/indexer/build-index.ts`, `test/build-index.test.ts`
+**Files:** Create `src/indexer/build-index.ts`, `test/build-index.test.ts`; modify `src/index.ts` (add the `build-index` branch — this is where it first becomes type-resolvable)
 
 **Contract:**
 
@@ -326,19 +389,22 @@ export function buildIndex(opts?: { targetPath?: string; run?: Runner }): Promis
 ```
 
 **Behavior:**
-- Invokes `uvx --from tibiawikisql==9.0.0 tibiawikisql generate --skip-images -o <temp>`. Only the `uvx` path is implemented: the Docker image `galarzaa90/tibiawiki-sql:9.0.0` exists but **its entrypoint was not verified**, so encoding a guessed `docker run` line would be a placeholder in disguise. Docker support is deferred.
-- Builds to a temp path beside the target and `rename`s on success, so a failed run never replaces a good index and never leaves a partial file.
-- Non-zero exit removes the temp file and throws an error quoting stderr and mentioning that `uv` must be installed.
-- Success with no output file is also an error.
-- The `run` dependency is injected so tests prove the command line and the atomic install without a 3-minute crawl.
+- Invokes `uvx --from tibiawikisql==9.0.0 tibiawikisql generate --skip-images -o <temp>`. Only `uvx` is implemented; the Docker image `galarzaa90/tibiawiki-sql:9.0.0` exists but **its entrypoint was not verified**, so a guessed `docker run` line would be a placeholder in disguise.
+- **Creates the parent directory** (`mkdir` recursive) — on a clean machine `~/.cache/tibiawiki-mcp/` does not exist.
+- Builds to a temp path beside the target, then **validates before replacing**: the temp file must exist and must pass `openDb`'s schema probe. Exit-zero plus file-exists is not sufficient evidence of a usable index.
+- Only after validation does it `rename` into place.
+- Any failure — generator exit, missing file, failed validation, failed rename — removes the temp file and throws, quoting stderr and noting that `uv` must be installed.
+- `run` is injected so tests prove the command line and the atomic install without a 3-minute crawl.
+- Finally, add the `build-index` branch to `src/index.ts` (see Task 4).
 
 **Tests to write:**
-- With a stub runner: the command is `uvx`, the args include `--skip-images` and the pinned `tibiawikisql==9.0.0`, the last arg is **not** the target path, and the file ends up at the target.
-- With a failing stub runner: the promise rejects quoting stderr, and no file exists at the target.
+- Stub runner: command is `uvx`; args include `--skip-images` and the pinned `tibiawikisql==9.0.0`; the last arg is **not** the target; a valid DB ends up at the target.
+- **Failure preserves an existing good index**: start with a valid database already at the target, run with a failing stub, assert the promise rejects **and the original file is byte-identical afterwards** and no temp file remains. (The previous version only checked that no file appeared, which a destructive implementation would also pass.)
+- Generator "succeeds" but writes a schema-invalid file → rejects, target untouched.
 
 **Acceptance:**
 - `pnpm test` green.
-- Manual, once: `node dist/index.js build-index` completes in roughly 3 minutes, exits 0, writes ~14 MB; then `node dist/index.js serve < /dev/null` starts without the `index not found` error.
+- Manual, once: `node dist/index.js build-index` completes in ~3 minutes, exits 0, writes ~14 MB; then a real tool call against it succeeds (see Completion Criteria) — starting the process with closed stdin does not prove serving works.
 
 ---
 
@@ -346,19 +412,20 @@ export function buildIndex(opts?: { targetPath?: string; run?: Runner }): Promis
 
 **Why:** Attribution is a licence condition, not a nicety, and an MCP server nobody can install is not finished.
 
-**Files:** Create `README.md`, `LICENSE`, `.github/workflows/ci.yml`, `server.json`
+**Files:** Create `README.md`, `LICENSE`, `test/fixtures/README.md`, `.github/workflows/ci.yml`, `server.json`
 
 **Behavior / literal content:**
-- `README.md` states that the server makes no network calls, gives the install and `build-index` steps, the `claude mcp add --transport stdio tibiawiki -- npx -y tibiawiki-mcp` line, a table of the five tools, how to refresh, and — verbatim — the attribution string, plus credit to `tibiawiki-sql` (Apache-2.0).
-- `LICENSE`: MIT, covering **this repo's code only**. The data is CC BY-SA and not ours to relicense; the README's attribution section covers it.
-- `.github/workflows/ci.yml`: `permissions: contents: read`; checkout, pnpm setup, Node 24; `pnpm install --frozen-lockfile`; `pnpm test`; then an MCP smoke step running `npx @modelcontextprotocol/inspector --cli node dist/index.js --method tools/list` with `TIBIAWIKI_MCP_DB` pointed at the committed fixture. Actions pinned to full commit SHAs (resolved 2026-09-10):
+- `README.md`: no network calls at runtime; install and `build-index` steps; `claude mcp add --transport stdio tibiawiki -- npx -y tibiawiki-mcp`; a table of the five tools; how to refresh; the attribution string **verbatim**; credit to `tibiawiki-sql` (Apache-2.0); and the TypeScript-fallback tsconfig delta if Task 1 took that branch.
+- `test/fixtures/README.md`: CC-BY-SA attribution for the committed fixture, which is redistributed wiki content, plus the `make-fixture.mjs` command that reproduces it.
+- `LICENSE`: MIT, **this repo's code only**. The data is CC BY-SA and not ours to relicense.
+- `.github/workflows/ci.yml`: `permissions: contents: read`; checkout with `persist-credentials: false`; pnpm setup; Node 24; `pnpm install --frozen-lockfile`; `pnpm test`; `pnpm build`; then the MCP smoke step running the **pinned** `@modelcontextprotocol/inspector@2.6.0` (a dev dependency, not an unpinned `npx` fetch — an unpinned download contradicts the `minimumReleaseAge` posture this repo adopts) against `dist/index.js` with `TIBIAWIKI_MCP_DB` pointing at the committed fixture. Actions pinned to full commit SHAs (resolved 2026-09-10):
   - `actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8` # v5.0.0
   - `pnpm/action-setup@a7487c7e89a18df4991f7f222e4898a00d66ddda` # v4.1.0
   - `actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444` # v5.0.0
-- `server.json` for the MCP registry: `$schema` `https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json`, `name` **exactly equal to** `package.json`'s `mcpName`, a `packages[]` entry with `registryType: "npm"` and `transport: {type: "stdio"}`.
+- `server.json`: `$schema` `https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json`, `name` **exactly equal to** `package.json`'s `mcpName`, `packages[]` with `registryType: "npm"` and `transport: {type: "stdio"}`.
 
 **Acceptance:**
-- `TIBIAWIKI_MCP_DB=$PWD/test/fixtures/tibiawiki-fixture.db npx @modelcontextprotocol/inspector --cli node dist/index.js --method tools/list` lists exactly the five tools.
+- The pinned inspector lists exactly the five tools against `dist/index.js` and the fixture.
 - CI passes on a pushed branch.
 
 ---
@@ -366,12 +433,13 @@ export function buildIndex(opts?: { targetPath?: string; run?: Runner }): Promis
 ## Completion Criteria
 
 - [ ] `pnpm test` green, no skipped tests.
-- [ ] `pnpm build` produces `dist/` with no TypeScript errors.
-- [ ] `npx @modelcontextprotocol/inspector --cli node dist/index.js --method tools/list` lists exactly five tools.
-- [ ] A real `tibiawiki-mcp build-index` run completes and the server serves against it.
-- [ ] `grep -rE "fetch\(|https?://" src/ --include=*.ts` shows no network calls outside `src/indexer/`.
-- [ ] The attribution string appears in `README.md` and in the server `instructions`.
-
+- [ ] `pnpm build` emits a **flat** `dist/index.js` (not `dist/src/index.js`).
+- [ ] Pinned inspector lists exactly five tools:
+      `TIBIAWIKI_MCP_DB=$PWD/test/fixtures/tibiawiki-fixture.db pnpm exec mcp-inspector --cli node dist/index.js --method tools/list`
+- [ ] A real `build-index` run completes **and a real tool call against the generated database returns data** — e.g. `tools/call tibia_find_creatures --tool-arg weak_to=fire` returns a non-empty result set. Process start alone is not evidence.
+- [ ] No runtime network access, gated on imports and calls rather than URL text (the attribution string and `sourceBlock` both legitimately contain `https://`):
+      `grep -rnE "\bfetch\(|node:http|node:https|undici|axios" src/ --include=*.ts | grep -v '^src/indexer/'` returns empty.
+- [ ] The attribution string appears in `README.md`, `test/fixtures/README.md`, and the server `instructions`.
 ---
 
 ## Review (2026-09-10)

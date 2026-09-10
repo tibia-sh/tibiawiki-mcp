@@ -18,7 +18,7 @@
   "scripts": {
     "typecheck": "tsc --noEmit",
     "build": "tsc -p tsconfig.build.json",
-    "test": "pnpm typecheck && node --test test/*.test.ts"
+    "test": "pnpm typecheck && pnpm build && node --test test/*.test.ts"
   },
   "dependencies": {
     "@modelcontextprotocol/server": "2.0.0",

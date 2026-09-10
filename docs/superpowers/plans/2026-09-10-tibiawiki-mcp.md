@@ -543,3 +543,11 @@ Self-check while applying these caught two further errors before they landed: a 
 ### Gate status
 
 `workflow-skills:plan-final-review` caps gating at **two invocations per plan**: *"If the second still ends `Needs revision`, stop and hand the plan and both stamps to the user instead of gating a third time."* That cap is now reached. Every finding from both rounds has been applied and independently verified, but **this plan carries no `Ready` stamp**, and per CLAUDE.md only a `Ready` stamp authorises execution. Proceeding is the user's call.
+
+### Execution authorisation (2026-09-10)
+
+The user was shown the gate status — cap reached, no `Ready` stamp — and explicitly chose to proceed
+to implementation anyway, knowingly overriding the stamp requirement. Execution proceeds at the
+declared tier (**single** → `reviewer`) via `superpowers:executing-plans`. Recorded here rather than
+left in chat so a later session can see that the missing `Ready` stamp was a deliberate decision and
+not an oversight.

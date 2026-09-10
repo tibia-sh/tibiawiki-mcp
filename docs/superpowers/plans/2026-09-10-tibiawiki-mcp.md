@@ -371,3 +371,43 @@ export function buildIndex(opts?: { targetPath?: string; run?: Runner }): Promis
 - [ ] A real `tibiawiki-mcp build-index` run completes and the server serves against it.
 - [ ] `grep -rE "fetch\(|https?://" src/ --include=*.ts` shows no network calls outside `src/indexer/`.
 - [ ] The attribution string appears in `README.md` and in the server `instructions`.
+
+---
+
+## Review (2026-09-10)
+
+- **Verdict: Needs revision before implementation**
+- Reviewers: `plan-final-reviewer` (opus; the fable dispatch died on a rate limit and was re-dispatched); `codex-consult` (high, 32,452 tokens); `grok-consult` — on request only, not run.
+- Adopted: none. A `Needs revision` stamp changes nothing in the plan body; the plan returns to `superpowers:writing-plans`.
+
+### Blockers to resolve in the revision
+
+Independently reproduced by this session against `data/tibiawiki.db`, the npm registry, live `tsc` 7.0.2 and Node's published API metadata — not taken on a reviewer's word.
+
+1. **Node floor is wrong.** `node:sqlite`/`DatabaseSync` were added in **v22.5.0**; the plan and spec both say `>=20`. Raise to `>=22.13.0` (both docs) — the floor came from the MCP SDK and was never checked against the stdlib module the design rests on.
+2. **`pnpm install` hard-fails on the pins.** `minimumReleaseAge: 10080` (7 days) versus `zod@4.6.1` and `@types/node@24.13.4`, both published 2026-09-09 → `ERR_PNPM_NO_MATURE_MATCHING_VERSION`. Exact pins leave no fallback. Newest eligible: `zod@4.5.4`, `@types/node@24.13.3`.
+3. **tsconfig is invalid.** `moduleResolution: "node20"` does not exist in TS 7 (`node16 | nodenext | bundler`). `.ts` import specifiers additionally need `allowImportingTsExtensions` **plus** `rewriteRelativeImportExtensions`; that pair is verified to emit `./db.js` and run.
+4. **Binary path is wrong.** `rootDir: "."` emits `dist/src/index.js`, not `dist/index.js` — breaking `bin`, Task 9's acceptance, the CI smoke step and two completion criteria. Use a build tsconfig with `rootDir: "src"`.
+5. **Task 4's dynamic import does not defer type-checking.** `import()` is module-resolved like a static import → `TS2307` at Task 4. Task 4 dispatches only `serve`; Task 9 adds the `build-index` branch. The stated rationale is false and must be deleted.
+6. **`PROSE_FIELDS` names five columns that do not exist.** `history`, `notes`, `bestiary_text`, `behaviour`, `strategy` are *wikitext infobox* fields, not `creature` columns — the error originated in spec §4.1. Either redefine `detailed` over real columns (`location`, `spawn_type`, `mitigation`, `bestiary_occurrence`, `item.flavor_text`) or drop `verbosity` from v1.
+7. **`ttlMs`/`cacheScope` do not apply to `tools/call`.** `CACHEABLE_RESULT_METHODS` covers only the list/read/discover methods. The Global Constraint is unimplementable as written — move the hint to `tools/list` via `ServerOptions`, or drop it.
+8. **`tibia_get` is creature-only but `tibia_search` returns five types**, and `outputSchema` is SDK-enforced, so search → get on an item dead-ends. Either define per-type output shapes or narrow search's default types and say so.
+9. **The fixture cannot satisfy its own tests.** No fixture creature has `modifier_fire > 100` (Dragon/Dragon Lord/Demon 0, Rotworm/Cyclops 100), so Task 6's headline assertion passes vacuously on an empty array. Add a genuinely fire-weak creature, and enumerate per-table retention including the Steel Helmet vendor closure and Gold Coin (`article_id 2119`).
+10. **`name` vs `title` is undefined and they differ** for 126 of 2,193 creatures (`Dragon` → `name='dragon'`, `title='Dragon'`). The plan's own Verified Facts table contradicts itself. Declare `title` canonical for identity, display and URL construction in Global Constraints.
+11. **A completion criterion that can never pass.** `grep -rE "fetch\(|https?://" src/` always matches `ATTRIBUTION` and `sourceBlock`. Gate on imports/calls instead, excluding `src/indexer/`.
+12. **`database_info` is key/value rows**, not columns — the Task 2 schema probe must check *keys* for that table or it fails on a valid database.
+
+### Adopt as improvements in the revision
+
+- Replace the `createMcpHandler` + `StreamableHTTPClientTransport`-with-injected-`fetch` harness with the SDK's **`InMemoryTransport.createLinkedPair()`** — verified working end to end. The current design is an HTTP-shaped glue layer around an in-process call, which CLAUDE.md forbids.
+- **Decide a `status` filter policy in `src/domain.ts` before any SQL.** Non-active rows are numerous (creature: 39 deprecated, 138 event, 45 unavailable; item: 186 unavailable). Without it, `Giant Spider (Nostalgia)` is returned as a live answer. Retrofitting into five tools later is worse.
+- **Restate the SQL-injection claim.** `modifierColumn` is *not* the only uninterpolated fragment — `sort`→`ORDER BY`, the EAV comparison operator, and the search table name all are. All are enum-gated so none is exploitable, but the false "one place" framing invites a reviewer to skip the other three. Restate as: every SQL fragment comes from a closed literal map keyed by an already-validated enum; add negative tests for the sort and table maps.
+- One exported helper for fixture path resolution; `mkdir -p` the cache dir in `build-index`; pin `@modelcontextprotocol/inspector` in CI; add `persist-credentials: false` to checkout; assert nulls-last drop ordering explicitly (≈11% of `chance` values are null).
+
+### Rejected
+
+- *codex: replace Task 7's EAV `exists (... cast(a.value as integer) <op> ?)` with behavioural prose.* Reviewers disagreed; decided in favour of `plan-final-reviewer` — the EAV shape and the cast **are** the load-bearing spec, not an implementation body. Keeping it.
+
+### Not worth changing
+
+`**Review tier:** single` is correct (no auth, secrets, concurrency or data-loss surface; DB opened read-only). No over-specification — the remaining code blocks are export signatures and literal-is-spec config. The offline-snapshot architecture, pinned generator, stdlib SQLite/testing choices, five-tool split, and deferred Docker/hosted scope all stand. Synchronous `Runner` blocking ~3 min in a one-shot CLI is fine.

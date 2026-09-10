@@ -2,7 +2,7 @@ import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/server';
 import type { Provenance, TibiaDb } from '../db.ts';
 import {
-  ELEMENTS, ENTITY_TYPES, entityTypeSchema, statusClause, verbositySchema,
+  ELEMENTS, ENTITY_TYPES, entityTypeSchema, searchTable, statusClause, verbositySchema,
   DETAILED_CREATURE_FIELDS, DETAILED_ITEM_FIELDS, type EntityType,
 } from '../domain.ts';
 
@@ -105,10 +105,12 @@ export function registerGet(server: McpServer, handle: TibiaDb): void {
 
   // spell.title is the one identity column without COLLATE NOCASE, so every lookup
   // states the collation explicitly rather than relying on the column's default.
-  const lookup = (table: string, includeInactive: boolean) => {
+  const lookup = (type: EntityType, includeInactive: boolean) => {
     const status = statusClause('t', includeInactive);
+    // Table name goes through the closed map in domain.ts, so the type system -
+    // not just the call site - guarantees nothing else can reach the query.
     return db.prepare(
-      `select * from "${table}" t where t.title = ? collate nocase` +
+      `select * from "${searchTable(type)}" t where t.title = ? collate nocase` +
         (status ? ` and ${status}` : ''),
     );
   };

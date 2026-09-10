@@ -1,0 +1,9 @@
+savePrefix: ''
+minimumReleaseAge: 10080
+trustPolicy: no-downgrade
+blockExoticSubdeps: true
+strictDepBuilds: true
+allowBuilds: {}
+verifyDepsBeforeRun: error
+packageManagerStrictVersion: true
+managePackageManagerVersions: true

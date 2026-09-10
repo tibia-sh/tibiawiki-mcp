@@ -1,0 +1,32 @@
+{
+  "name": "tibiawiki-mcp",
+  "version": "0.1.0",
+  "description": "Offline MCP server for TibiaWiki: attribute queries over creatures, items, NPCs, quests and spells",
+  "type": "module",
+  "license": "MIT",
+  "mcpName": "io.github.jakubmucha/tibiawiki-mcp",
+  "engines": {
+    "node": ">=22.13.0"
+  },
+  "packageManager": "pnpm@10.33.0",
+  "bin": {
+    "tibiawiki-mcp": "dist/index.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "build": "tsc -p tsconfig.build.json",
+    "test": "pnpm typecheck && node --test test/*.test.ts"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/server": "2.0.0",
+    "zod": "4.5.4"
+  },
+  "devDependencies": {
+    "@modelcontextprotocol/client": "2.0.0",
+    "@types/node": "24.13.3",
+    "typescript": "7.0.2"
+  }
+}

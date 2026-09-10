@@ -3,6 +3,7 @@ import type { TibiaDb } from './db.ts';
 import { registerGet } from './tools/get.ts';
 import { registerSearch } from './tools/search.ts';
 import { registerFindCreatures } from './tools/find-creatures.ts';
+import { registerFindItems } from './tools/find-items.ts';
 
 /**
  * Licence obligations are met in the server's own metadata rather than a README
@@ -32,6 +33,7 @@ export function createServer(handle: TibiaDb): McpServer {
   registerGet(server, handle);
   registerSearch(server, handle);
   registerFindCreatures(server, handle);
+  registerFindItems(server, handle);
 
   return server;
 }

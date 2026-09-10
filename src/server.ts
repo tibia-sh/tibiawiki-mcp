@@ -2,6 +2,7 @@ import { McpServer } from '@modelcontextprotocol/server';
 import type { TibiaDb } from './db.ts';
 import { registerGet } from './tools/get.ts';
 import { registerSearch } from './tools/search.ts';
+import { registerFindCreatures } from './tools/find-creatures.ts';
 
 /**
  * Licence obligations are met in the server's own metadata rather than a README
@@ -30,6 +31,7 @@ export function createServer(handle: TibiaDb): McpServer {
   // may be invoked per request.
   registerGet(server, handle);
   registerSearch(server, handle);
+  registerFindCreatures(server, handle);
 
   return server;
 }

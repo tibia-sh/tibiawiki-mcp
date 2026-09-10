@@ -1,6 +1,7 @@
 import { McpServer } from '@modelcontextprotocol/server';
 import type { TibiaDb } from './db.ts';
 import { registerGet } from './tools/get.ts';
+import { registerSearch } from './tools/search.ts';
 
 /**
  * Licence obligations are met in the server's own metadata rather than a README
@@ -28,6 +29,7 @@ export function createServer(handle: TibiaDb): McpServer {
   // Registered inside the factory, never on a shared outer instance: the factory
   // may be invoked per request.
   registerGet(server, handle);
+  registerSearch(server, handle);
 
   return server;
 }

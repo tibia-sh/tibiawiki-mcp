@@ -51,7 +51,7 @@ Three components with one direction of data flow, and no shared state.
 
 A thin command, `tibiawiki-mcp build-index`, that runs the pinned upstream generator and places the result in a cache directory.
 
-- Prefers Docker (`galarzaa90/tibiawiki-sql:9.0.0`), falls back to `uvx --from tibiawikisql==9.0.0`. Errors clearly if neither is present.
+- Runs `uvx --from tibiawikisql==9.0.0` — the invocation verified end-to-end on 2026-09-10 (3m13s, 14 MB, exit 0). The published Docker image `galarzaa90/tibiawiki-sql:9.0.0` exists but its entrypoint was not verified, so Docker support is deferred rather than guessed at.
 - Always `--skip-images`. Images are CipSoft IP and buy nothing for text queries; excluding them removes the highest-risk artifact entirely.
 - Output path resolution, in order — one rule, used identically by the indexer and the server:
   1. `$TIBIAWIKI_MCP_DB` if set (used for development against a full local DB).
@@ -125,7 +125,7 @@ Known-answer cases drawn from verified data, so a silent regression in the pipel
 
 ## 7. Decisions and rationale
 
-**Adopt tibiawiki-sql's schema instead of writing a parser.** It is Apache-2.0, actively maintained (v9.0.0, 2026-07-22), and its output is better than a first-pass parser would be: typed columns (`hitpoints INTEGER`, `mitigation REAL`), relational join tables, and — decisively — **numeric drop chances** from Loot Statistics (`Dragonbone Staff` 0.0557%), where tibiawiki.dev exposes only the coarse string `"very rare"`. Writing our own parser now would be strictly worse work. If the schema ever constrains us, our own crawler remains the fallback; the measured cost of a full crawl (~5 min) is what keeps that option cheap.
+**Adopt tibiawiki-sql's schema instead of writing a parser.** It is Apache-2.0, actively maintained (v9.0.0, 2026-07-22), and its output is better than a first-pass parser would be: typed columns on `creature` (`hitpoints INTEGER`, `mitigation REAL`) — though item stats are key/value TEXT rows in `item_attribute`, so numeric item filters need casts — relational join tables, and — decisively — **numeric drop chances** from Loot Statistics (`Dragonbone Staff` 0.0557%), where tibiawiki.dev exposes only the coarse string `"very rare"`. Writing our own parser now would be strictly worse work. If the schema ever constrains us, our own crawler remains the fallback; the measured cost of a full crawl (~5 min) is what keeps that option cheap.
 
 **Snapshot, not live.** Chosen by the user. Game content changes on patch cycles, so hours-to-days staleness is immaterial, and it buys a runtime with no network, no rate limits, and millisecond queries.
 

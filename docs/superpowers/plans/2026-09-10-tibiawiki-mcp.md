@@ -26,7 +26,7 @@ Every task's requirements implicitly include this section.
 - **Exact dependency pins** (pnpm `savePrefix: ''`), all older than the 7-day `minimumReleaseAge` gate: `@modelcontextprotocol/server@2.0.0`, `@modelcontextprotocol/client@2.0.0` (dev), `zod@4.5.4`, `typescript@7.0.2`, `@types/node@24.13.3`, `@modelcontextprotocol/inspector@2.4.0` (dev). **Do not bump to `zod@4.6.1`, `@types/node@24.13.4`, or `@modelcontextprotocol/inspector@2.6.0`** — all published 2026-09-09; with exact pins and `minimumReleaseAge: 10080` there is no fallback and `pnpm install` hard-fails with `ERR_PNPM_NO_MATURE_MATCHING_VERSION`. When choosing any pin, take one with **margin** rather than one sitting exactly on the 7-day line: the gate is computed in hours, so `inspector@2.5.0` (published 2026-09-02, exactly 7 days) is a coin flip — hence `2.4.0`. Verified ages on 2026-09-10: zod 4.5.4 = 11d, @types/node 24.13.3 = 63d, typescript 7.0.2 = 63d, both `@modelcontextprotocol/*@2.0.0` = 44d, inspector 2.4.0 = 14d.
 - **No test-framework dependency** — `node:test` + `node:assert/strict`. **No SQLite driver dependency** — `node:sqlite` `DatabaseSync`, `{ readOnly: true }`.
 - **Generator pinned** to `tibiawikisql==9.0.0`, always `--skip-images`.
-- **`title` is the canonical identity.** `creature.name` is lowercase for **126 of 2,193** rows (`Dragon` → `name='dragon'`, `title='Dragon'`). Every tool uses `title` for identity, display, cross-tool round-tripping and URL construction. Lookup accepts either (both columns are `COLLATE NOCASE`); output always echoes `title`.
+- **`title` is the canonical identity.** `creature.name` is lowercase for **126 of 2,193** rows (`Dragon` → `name='dragon'`, `title='Dragon'`). Every tool uses `title` for identity, display, cross-tool round-tripping and URL construction. Lookup accepts either (`creature`, `item`, `npc` and `quest` declare `title TEXT ... COLLATE NOCASE`); output always echoes `title`. **Exception: `spell.title` is `TEXT UNIQUE` with no `COLLATE NOCASE`** — only `spell.name` is case-insensitive. Spell lookups must therefore add an explicit `collate nocase` to the predicate; a test covers a lowercase spell lookup.
 - **Default to `status = 'active'`.** Non-active rows are numerous (creature: 138 event, 45 unavailable, 39 deprecated, 13 ts-only, 1 raid; item: 186 unavailable, 67 event, 40 deprecated). Every query filters to active unless `include_inactive: true` is passed. This rule lives in `src/domain.ts` only.
 - **SQL construction rule:** every SQL fragment comes from a **closed literal map keyed by an already-validated enum value**; no raw input is ever interpolated. This covers four places — the element→`modifier_*` map, the `sort`→`ORDER BY` map, the EAV comparison-operator map, and the search table map — not one. Each map gets a negative test.
 - **Every tool** sets `annotations: { readOnlyHint: true, openWorldHint: false }` and declares an `outputSchema`. **Do not put `ttlMs`/`cacheScope` on tool results** — `CACHEABLE_RESULT_METHODS` in SDK 2.0.0 covers only `tools/list`, `prompts/list`, `resources/list`, `resources/templates/list`, `resources/read` and `server/discover`; `tools/call` is absent and `registerTool` has no `cacheHint` field.
@@ -113,9 +113,12 @@ managePackageManagerVersions: true
     "noUncheckedIndexedAccess": true,
     "allowImportingTsExtensions": true,
     "rewriteRelativeImportExtensions": true,
+    "allowJs": true,
+    "checkJs": true,
     "noEmit": true
   },
-  "include": ["src/**/*.ts", "test/**/*.ts", "scripts/**/*.mjs"]
+  "include": ["src/**/*.ts", "test/**/*.ts", "scripts/**/*.mjs"],
+  "//": "allowJs+checkJs are required or the scripts/ pattern is silently a no-op"
 }
 ```
 
@@ -124,7 +127,7 @@ managePackageManagerVersions: true
 ```json
 {
   "extends": "./tsconfig.json",
-  "compilerOptions": { "noEmit": false, "outDir": "dist", "rootDir": "src", "sourceMap": true },
+  "compilerOptions": { "noEmit": false, "allowJs": false, "checkJs": false, "outDir": "dist", "rootDir": "src", "sourceMap": true },
   "include": ["src/**/*.ts"]
 }
 ```
@@ -170,6 +173,9 @@ export function openDb(path?: string): TibiaDb;
 **`scripts/make-fixture.mjs` — bounded retention contract.** Not "everything reachable". Retain exactly:
 - **creature:** `Dragon`, `Dragon Lord`, `Rotworm`, `Demon`, `Cyclops` (the fire-immune / neutral cases) **plus `Tarantula` (`modifier_fire` 115) and `Scarab` (`modifier_fire` 118)** so fire-weakness tests have a non-empty result and pagination has ≥2 rows. Also retain one non-`active` creature so the status filter has something to exclude.
 - **item:** every item referenced by a retained `creature_drop`, plus `Magic Longsword` (the zero-source case), `Steel Helmet` (`article_id` 2305, the vendor case) and **`Gold Coin` (`article_id` 2119, the currency join target)**.
+- **creature_drop:** every row for a retained creature, **plus every row for a retained *item*, plus the creatures those rows reference.** This second closure is required, not decorative: the seven named creatures yield 111 drop rows with **zero null chances**, so nulls-last ordering — which Task 4 and Task 8 both make load-bearing — would have nothing to assert against. Steel Helmet's 22 droppers include **3 with `chance IS NULL`**, which is what makes the test real.
+- **database_info:** retain the table and its rows. Task 2 asserts `provenance.version === '9.0.0'` against the fixture and the schema probe requires the table.
+- **Mud:** retain both the NPC and the item named `Mud` — across the whole 14 MB corpus this is the *only* cross-type title collision, so it is the only way to exercise `tibia_get`'s ambiguous-name branch. Without it that error path ships untested.
 - **npc / npc_offer_sell / npc_offer_buy:** every offer for a retained item, and every NPC referenced by a retained offer.
 - **quest / quest_reward:** every reward row for a retained item, and its quest.
 - **item_attribute:** every row for a retained item. **spell:** a handful, for the search-type test.
@@ -187,6 +193,8 @@ Then `vacuum`. It exists so the fixture is reproducible, not an opaque committed
 - `pnpm test` passes with 6 tests in `db.test.ts`.
 - `git check-ignore test/fixtures/tibiawiki-fixture.db` exits non-zero (the fixture is committed).
 - A sanity query on the fixture returns **≥ 2** creatures with `modifier_fire > 100`.
+- A sanity query on the fixture returns **≥ 1** `creature_drop` row with `chance IS NULL` (guards the ordering tests above).
+- The fixture contains both a `Mud` npc and a `Mud` item (verified: the only cross-type title collision in the entire corpus).
 
 ---
 
@@ -212,7 +220,7 @@ export function searchTable(type: EntityType): string;         // closed map; th
 export function creatureSort(key: 'experience'|'hitpoints'|'title'): string;  // closed ORDER BY map
 export function itemSort(key: 'title'|'weight'|'value'): string;              // closed ORDER BY map
 export function eavOperator(op: 'gte'|'lte'): string;          // closed map -> '>=' | '<='
-export function statusClause(includeInactive: boolean): string; // '' | "status = 'active'"
+export function statusClause(alias: string, includeInactive: boolean): string; // '' | "<alias>.status = 'active'"
 
 export function encodeCursor(offset: number): string;
 export function decodeCursor(cursor: string | undefined): number;
@@ -220,7 +228,8 @@ export function decodeCursor(cursor: string | undefined): number;
 
 **Behavior:**
 - Each of the five map functions is **whitelist-only** and throws on an unknown key. Their return values are the only strings interpolated into SQL anywhere in the codebase.
-- `statusClause(false)` yields the active-only filter; `statusClause(true)` yields an empty string that callers must handle without producing a dangling `and`.
+- `statusClause(alias, false)` yields `<alias>.status = 'active'`; `statusClause(alias, true)` yields an empty string that callers must handle without producing a dangling `and`.
+- **The alias parameter is not optional.** Every query in this plan joins at least two tables that both carry a `status` column (`creature`+`item` for loot, `npc_offer_sell`+`npc`+`item` for vendors), and an unqualified predicate fails at runtime — reproduced against the real database as `SQLITE_ERROR: ambiguous column name: status`. A test must assert the emitted fragment is alias-qualified.
 - `decodeCursor(undefined) === 0`; malformed cursors throw.
 - **`PROSE_FIELDS` is deleted.** The columns it named do not exist. `verbosity: 'detailed'` instead adds real columns — creature: `location`, `spawn_type`, `mitigation`, `bestiary_occurrence`, `walks_through`, `walks_around`; item: `flavor_text`. Export this as `DETAILED_CREATURE_FIELDS` / `DETAILED_ITEM_FIELDS`.
 
@@ -267,6 +276,7 @@ export function connect(): Promise<{ client: Client; close(): Promise<void> }>;
   - **quest**: `title, location, level_required, level_recommended, is_premium, quest_log, legend, status`
   - **spell**: `title, words, spell_type, element, mana, level, soul, is_premium, cooldown, status` (no `price` column — verified against the fixture schema)
   Every scalar is nullable unless the fixture proves otherwise; the Zod members must say so. All five carry `source`.
+- **Expected, not a bug:** a Zod discriminated union serialises to an `anyOf` root rather than `type: 'object'`. SDK 2.0.0 therefore rewrites the advertised schema through `wrapOutputSchemaForLegacy` and projects `structuredContent` as `{ result: <value> }` for 2025-era clients. Server-side validation runs *before* that projection, so in-memory tests with the 2.0.0 client see the unwrapped shape while the CI inspector run may see the wrapped one. Do not "fix" this.
 - Input also takes `include_inactive` (default false), applied to the requested entity itself: a non-active entity is reported as not found unless the flag is set. Every tool that accepts this flag documents which rows it governs, because the answer differs per tool (see `tibia_how_to_obtain`).
 - When `type` is omitted and the name is ambiguous across types, return `isError: true` listing the matching types and asking the caller to disambiguate. Unknown name → `isError: true` pointing at `tibia_search`.
 - `verbosity: 'detailed'` adds `DETAILED_CREATURE_FIELDS` / `DETAILED_ITEM_FIELDS` (Task 3), not the deleted prose fields.
@@ -356,7 +366,7 @@ export function connect(): Promise<{ client: Client; close(): Promise<void> }>;
 - `value` sort is on `value_buy` descending, nulls last.
 
 **Tests to write:**
-- `attack_min: 50` returns a **non-empty** set and every row has `attributes.attack >= 50`.
+- `attack_min: 50` returns a **non-empty** set and every row has `attributes.attack >= 50`. Assert the **exact expected count** as well: only two retained items clear that bar, so a regression narrowing the result to one row would otherwise still pass.
 - `attack_min: 55, attack_max: 55, required_level_max: 140` finds `Magic Longsword`.
 - A string-vs-numeric guard: a filter that would behave differently under TEXT comparison (e.g. `attack_min: 9` must include attack `55`, which a string compare would exclude) returns the numerically correct set.
 
@@ -434,7 +444,7 @@ export function buildIndex(opts?: { targetPath?: string; run?: Runner }): Promis
 
 **Behavior / literal content:**
 - `README.md`: no network calls at runtime; install and `build-index` steps; `claude mcp add --transport stdio tibiawiki -- npx -y tibiawiki-mcp`; a table of the five tools; how to refresh; the attribution string **verbatim**; credit to `tibiawiki-sql` (Apache-2.0); and the TypeScript-fallback tsconfig delta if Task 1 took that branch.
-- `test/fixtures/README.md`: CC-BY-SA attribution for the committed fixture, which is redistributed wiki content, plus the `make-fixture.mjs` command that reproduces it.
+- `test/fixtures/README.md`: CC-BY-SA attribution for the committed fixture, which is redistributed wiki content, plus the `make-fixture.mjs` command that reproduces it — **and a note that reproducing it first requires `tibiawiki-mcp build-index` (~3 min), because `data/tibiawiki.db` is gitignored and a fresh contributor will not have it.**
 - `LICENSE`: MIT, **this repo's code only**. The data is CC BY-SA and not ours to relicense.
 - `.github/workflows/ci.yml`: `permissions: contents: read`; checkout with `persist-credentials: false`; pnpm setup; Node 24; `pnpm install --frozen-lockfile`; `pnpm test`; `pnpm build`; then the MCP smoke step running the **pinned** `@modelcontextprotocol/inspector@2.4.0` (a dev dependency, not an unpinned `npx` fetch — an unpinned download contradicts the `minimumReleaseAge` posture this repo adopts) against `dist/index.js` with `TIBIAWIKI_MCP_DB` pointing at the committed fixture. Note the inspector needs Node ≥ 22.19 to run, above this package's own ≥22.13 floor; that is fine because it is a dev dependency and CI runs Node 24. Actions pinned to full commit SHAs (resolved 2026-09-10):
   - `actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8` # v5.0.0
@@ -498,3 +508,38 @@ Independently reproduced by this session against `data/tibiawiki.db`, the npm re
 ### Not worth changing
 
 `**Review tier:** single` is correct (no auth, secrets, concurrency or data-loss surface; DB opened read-only). No over-specification — the remaining code blocks are export signatures and literal-is-spec config. The offline-snapshot architecture, pinned generator, stdlib SQLite/testing choices, five-tool split, and deferred Docker/hosted scope all stand. Synchronous `Runner` blocking ~3 min in a one-shot CLI is fine.
+
+---
+
+## Review (2026-09-10, round 2 — gate cap reached)
+
+- **Verdict as returned: Needs revision before implementation.**
+- Reviewers: `plan-final-reviewer` (opus, 43 tool calls — re-verified all twelve round-1 blockers against reality, not against the plan's claims); `codex-consult` (high, 31,059 tokens); `grok-consult` — on request only, not run.
+- **All twelve round-1 blockers confirmed genuinely resolved** by independent reproduction: Node floor, pin eligibility, tsconfig, flat `dist`, import sequencing, `DETAILED_CREATURE_FIELDS`, no `ttlMs` on `tools/call`, the `tibia_get` union, `title` canonicality, the network gate, and `database_info` keys.
+
+### Round-2 findings, all applied after the reviewers reported
+
+| # | Finding | Resolution |
+|---|---|---|
+| 1 | Spec still carried Node ≥20, `ttlMs`, prose fields, old harness | Already reconciled mid-round in `9579577`; re-verified clean |
+| 2 | Retained fixture creatures have **111 drops, 0 null chances** — nulls-last untestable | Retention extended to every drop row for a retained *item* and its creatures; Steel Helmet contributes **3 null-chance** droppers. Acceptance now asserts ≥1 null |
+| 3 | `statusClause` emitted unqualified `status` — reproduced as `ambiguous column name: status` | Signature changed to `statusClause(alias, includeInactive)`; alias is mandatory and tested |
+| 4 | Dev floor is 22.18, not 22.13 (type-stripping default) | Two explicit floors: runtime `>=22.13.0`, dev/CI `>=22.18.0` |
+| 5 | `scripts/**/*.mjs` in `include` is a no-op without `allowJs` | `allowJs`/`checkJs` added to the typecheck config, explicitly disabled in the build config |
+| 6 | `spell.title` lacks `COLLATE NOCASE` (verified: the only one of five) | Exception recorded; spell lookups must add explicit `collate nocase`, with a test |
+| 7 | Discriminated union → `anyOf` root gets `wrapOutputSchemaForLegacy` for 2025-era clients | Documented in Task 4 as expected behaviour, not a bug |
+| 8 | Ambiguous-name branch unreachable in the fixture | `Mud` retained — verified the **only** cross-type title collision in the corpus |
+| 9 | `attack_min: 50` test passes on a narrowed result | Now asserts the exact count (verified: 2 — Assassin Star 65, Magic Longsword 55) |
+| 10 | Fixture regeneration needs a gitignored 14 MB artifact | `test/fixtures/README.md` must state the `build-index` prerequisite |
+
+Self-check while applying these caught two further errors before they landed: a nonexistent `spell.price` column, and `MUD` vs the actual `Mud` casing.
+
+### Rejected
+
+- *codex: revisit `**Review tier:** single`.* Both `plan-final-reviewer` rounds argued `single` specifically — no auth, secrets, concurrency or data-loss surface; the database is opened read-only; the index is a derived cache rebuildable in ~3 minutes; and the CI workflow already carries the `github-actions-security-hardening` posture, which is a skill trigger rather than a tier bump. Keeping `single`.
+- *codex: replace Task 7's EAV cast with behavioural prose.* Adjudicated in round 1 and re-affirmed: the TEXT column means an uncast comparison silently string-sorts, so the cast **is** the spec.
+- *codex: replace exact test counts and the crawl duration/size with behavioural gates.* The exact counts are the point — round 2 showed a universal assertion over a narrowed result set still passes. Keeping them.
+
+### Gate status
+
+`workflow-skills:plan-final-review` caps gating at **two invocations per plan**: *"If the second still ends `Needs revision`, stop and hand the plan and both stamps to the user instead of gating a third time."* That cap is now reached. Every finding from both rounds has been applied and independently verified, but **this plan carries no `Ready` stamp**, and per CLAUDE.md only a `Ready` stamp authorises execution. Proceeding is the user's call.

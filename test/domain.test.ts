@@ -1,0 +1,79 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { DatabaseSync } from 'node:sqlite';
+import {
+  ELEMENTS, modifierColumn, WEAK_TO, RESISTANT_TO, searchTable,
+  creatureSort, itemSort, eavOperator, statusClause,
+  DETAILED_CREATURE_FIELDS, DETAILED_ITEM_FIELDS,
+} from '../src/domain.ts';
+import { encodeCursor, decodeCursor } from '../src/cursor.ts';
+
+const FIXTURE = new URL('./fixtures/tibiawiki-fixture.db', import.meta.url).pathname;
+
+test('every element maps to its modifier column', () => {
+  assert.equal(ELEMENTS.length, 10);
+  assert.equal(modifierColumn('fire'), 'modifier_fire');
+  assert.equal(modifierColumn('lifedrain'), 'modifier_lifedrain');
+});
+
+test('the modifier convention is encoded once: >100 is weak, <100 is resistant', () => {
+  assert.equal(WEAK_TO('modifier_fire'), 'modifier_fire > 100');
+  assert.equal(RESISTANT_TO('modifier_fire'), 'modifier_fire < 100');
+});
+
+// Every string this module returns is interpolated into SQL. Each map must reject
+// an out-of-enum key rather than pass it through - one negative test per map.
+test('all five SQL-fragment maps reject unknown keys', () => {
+  assert.throws(() => modifierColumn('lava' as never), /unknown element/i);
+  assert.throws(() => searchTable('dragon' as never), /unknown entity type/i);
+  assert.throws(() => creatureSort('rowid' as never), /unknown sort/i);
+  assert.throws(() => itemSort('rowid' as never), /unknown sort/i);
+  assert.throws(() => eavOperator('drop' as never), /unknown operator/i);
+});
+
+test('searchTable maps entity types to real table names', () => {
+  assert.equal(searchTable('creature'), 'creature');
+  assert.equal(searchTable('npc'), 'npc');
+});
+
+test('statusClause is alias-qualified, because every query joins two status columns', () => {
+  assert.equal(statusClause('c', false), "c.status = 'active'");
+  assert.equal(statusClause('i', false), "i.status = 'active'");
+  assert.equal(statusClause('c', true), '');
+});
+
+test('an unqualified status predicate really is ambiguous in our joins', () => {
+  // Guards the contract above: this is the exact failure statusClause prevents.
+  const db = new DatabaseSync(FIXTURE, { readOnly: true });
+  assert.throws(
+    () => db.prepare(`select n.title from npc_offer_sell o
+      join npc n on n.article_id = o.npc_id
+      join item i on i.article_id = o.item_id
+      where status = 'active'`).all(),
+    /ambiguous column name/,
+  );
+  db.close();
+});
+
+test('cursor round-trips, defaults to 0, and rejects garbage', () => {
+  assert.equal(decodeCursor(encodeCursor(120)), 120);
+  assert.equal(decodeCursor(encodeCursor(0)), 0);
+  assert.equal(decodeCursor(undefined), 0);
+  assert.throws(() => decodeCursor('not-a-cursor'), /cursor/i);
+});
+
+test('every detailed field names a column that actually exists', () => {
+  // The round-1 gate caught five invented column names. This is the regression guard.
+  const db = new DatabaseSync(FIXTURE, { readOnly: true });
+  const cols = (t: string) =>
+    new Set(db.prepare(`pragma table_info("${t}")`).all().map((r) => String(r.name)));
+  const creature = cols('creature');
+  for (const f of DETAILED_CREATURE_FIELDS) {
+    assert.ok(creature.has(f), `creature.${f} does not exist`);
+  }
+  const item = cols('item');
+  for (const f of DETAILED_ITEM_FIELDS) {
+    assert.ok(item.has(f), `item.${f} does not exist`);
+  }
+  db.close();
+});

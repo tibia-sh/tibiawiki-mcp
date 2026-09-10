@@ -62,7 +62,7 @@ We adopt Galarzaa90's schema rather than writing a parser. Rationale in §7.
 
 ### 3.2 Server (runtime)
 
-- `@modelcontextprotocol/server@2.0.0` + Zod 4, ESM, Node ≥20.
+- `@modelcontextprotocol/server@2.0.0` + Zod 4, ESM. Runtime floor **Node ≥22.13.0** — `node:sqlite` was added in v22.5.0 and is unflagged from v22.13.0. Contributors additionally need **≥22.18.0**, where TypeScript type-stripping stops requiring `--experimental-strip-types`; consumers do not, because the published package ships compiled JavaScript.
 - SQLite via **`node:sqlite`** (`DatabaseSync`, `readOnly: true`) — in the Node standard library, so the only runtime dependency is the MCP SDK itself.
 - Single `createServer()` factory. Bound to `serveStdio` for local use; the same factory is what tests drive and what `createMcpHandler` would take if hosting is ever wanted. No shared mutable state, matching a protocol that no longer has sessions.
 - Statements prepared once per process and reused.
@@ -77,7 +77,7 @@ The server validates before serving, and exits with an actionable message rather
 
 ## 4. Tool contracts
 
-Five tools, shaped around questions rather than mirroring tables. All carry `annotations: { readOnlyHint: true }`, an `outputSchema` with `structuredContent`, and `ttlMs`/`cacheScope` on list results as required by spec `2026-07-28`.
+Five tools, shaped around questions rather than mirroring tables. All carry `annotations: { readOnlyHint: true, openWorldHint: false }` and an `outputSchema` with `structuredContent`. **Correction (2026-09-10):** `ttlMs`/`cacheScope` are *not* set on tool results — SDK 2.0.0's `CACHEABLE_RESULT_METHODS` covers only `tools/list`, `prompts/list`, `resources/list`, `resources/templates/list`, `resources/read` and `server/discover`; `tools/call` is absent and `registerTool` has no `cacheHint` field.
 
 | Tool | Answers | Key inputs |
 |---|---|---|
@@ -93,7 +93,7 @@ Elemental filters take names (`fire`, `ice`, `earth`, `energy`, `death`, `holy`,
 
 ### 4.1 Response discipline
 
-- `verbosity: "concise" | "detailed"`, default `concise`. Concise omits long prose (`history`, `notes`, `bestiary_text`).
+- `verbosity: "concise" | "detailed"`, default `concise`. **Correction (2026-09-10):** `history`, `notes` and `bestiary_text` are *wikitext infobox* fields that `tibiawiki-sql` does not persist — `creature` has no such columns. `detailed` instead adds real columns: creature `location`, `spawn_type`, `mitigation`, `bestiary_occurrence`, `walks_through`, `walks_around`; item `flavor_text`.
 - All list tools paginate with an opaque cursor; hard cap on `limit`.
 - Every response carries a `source` block: page title, canonical wiki URL, and the index `generate_time`.
 - Errors that the model can act on (name not found, ambiguous name) return `isError: true` with actionable text and suggestions — not JSON-RPC errors. JSON-RPC errors are reserved for malformed calls.
@@ -106,7 +106,7 @@ Wiki content is CC-BY-SA; the underlying game content is CipSoft's. Both obligat
 
 - **Fixture DB**, committed at `test/fixtures/tibiawiki-fixture.db` (outside the gitignored `data/`): a trimmed copy of the real database — a few hundred rows spanning every table the tools touch — built by a checked-in script from a full generation, so it is reproducible rather than a mystery binary. Tests are deterministic and never touch the network. Its `README` carries the CC-BY-SA attribution, since it is redistributed wiki content.
 - **Unit**: filter/SQL construction, elemental modifier mapping, cursor encode/decode, row→output shaping, verbosity trimming.
-- **Integration**: a real `Client` driven against `handler.fetch` in-process — no subprocess, no port. Covers tool listing, each tool's happy path, pagination across a boundary, and the not-found/ambiguous paths.
+- **Integration**: a real `Client` over the SDK's `InMemoryTransport.createLinkedPair()` — no subprocess, no port, and no HTTP-shaped glue around an in-process call. Protocol-era conformance is covered separately by the CI `inspector --cli` run against the real stdio binary. Covers tool listing, each tool's happy path, pagination across a boundary, and the not-found/ambiguous paths.
 - **Startup invariants**: missing DB, missing column, and unreadable file each produce the specific expected error.
 - **Smoke in CI**: `npx @modelcontextprotocol/inspector --cli node dist/index.js --method tools/list`.
 

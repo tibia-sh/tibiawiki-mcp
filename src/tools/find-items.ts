@@ -22,12 +22,14 @@ const outputSchema = z.object({
   indexGeneratedAt: z.string(),
 });
 
+export const NAME = 'tibia_find_items';
+
 export function registerFindItems(server: McpServer, handle: TibiaDb): void {
   const { db, provenance } = handle;
   const attrs = db.prepare('select name, value from item_attribute where item_id = ?');
 
   server.registerTool(
-    'tibia_find_items',
+    NAME,
     {
       description:
         'Find Tibia items matching class, type and stat filters such as attack, defense, armor ' +

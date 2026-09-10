@@ -11,6 +11,8 @@ const outputSchema = z.object({
   indexGeneratedAt: z.string(),
 });
 
+export const NAME = 'tibia_search';
+
 export function registerSearch(server: McpServer, handle: TibiaDb): void {
   const { db, provenance } = handle;
 
@@ -31,7 +33,7 @@ export function registerSearch(server: McpServer, handle: TibiaDb): void {
   }
 
   server.registerTool(
-    'tibia_search',
+    NAME,
     {
       description:
         'Find Tibia pages whose name contains a substring, across creatures, items, NPCs, ' +

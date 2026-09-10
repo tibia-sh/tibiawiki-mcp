@@ -24,6 +24,8 @@ const outputSchema = z.object({
   source: z.object({ page: z.string(), url: z.string(), indexGeneratedAt: z.string() }),
 });
 
+export const NAME = 'tibia_how_to_obtain';
+
 export function registerHowToObtain(server: McpServer, handle: TibiaDb): void {
   const { db, provenance } = handle;
 
@@ -63,7 +65,7 @@ export function registerHowToObtain(server: McpServer, handle: TibiaDb): void {
   };
 
   server.registerTool(
-    'tibia_how_to_obtain',
+    NAME,
     {
       description:
         'Every in-game source for one item in a single call: which creatures drop it and how ' +

@@ -100,6 +100,8 @@ const outputSchema = z.discriminatedUnion('type', [
   creatureOut, itemOut, npcOut, questOut, spellOut,
 ]);
 
+export const NAME = 'tibia_get';
+
 export function registerGet(server: McpServer, handle: TibiaDb): void {
   const { db, provenance } = handle;
 
@@ -186,7 +188,7 @@ export function registerGet(server: McpServer, handle: TibiaDb): void {
   };
 
   server.registerTool(
-    'tibia_get',
+    NAME,
     {
       description:
         'Full detail for one named Tibia page: a creature (with its complete loot table and ' +

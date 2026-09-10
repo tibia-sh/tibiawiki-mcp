@@ -21,11 +21,13 @@ const outputSchema = z.object({
   indexGeneratedAt: z.string(),
 });
 
+export const NAME = 'tibia_find_creatures';
+
 export function registerFindCreatures(server: McpServer, handle: TibiaDb): void {
   const { db, provenance } = handle;
 
   server.registerTool(
-    'tibia_find_creatures',
+    NAME,
     {
       description:
         'Find Tibia creatures matching stat filters. Damage modifiers are percentages where ' +

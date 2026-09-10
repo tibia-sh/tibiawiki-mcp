@@ -19,7 +19,9 @@
 Every task's requirements implicitly include this section.
 
 - **Runtime makes no network calls.** Network access exists only in `src/indexer/`.
-- **Node `>=22.13.0`.** Not 20: `node:sqlite`/`DatabaseSync` were **added in v22.5.0** (Node API metadata), and 22.13 is where it is usable without the experimental flag. This floor also covers native TypeScript type-stripping (22.6+), which the test setup relies on.
+- **Two floors, deliberately different.**
+  - **Runtime / `engines.node`: `>=22.13.0`.** `node:sqlite`/`DatabaseSync` were added in **v22.5.0** and stopped requiring `--experimental-sqlite` in **v22.13.0**. The published package ships compiled JavaScript, so consumers need nothing else.
+  - **Development / CI: `>=22.18.0`.** Type-stripping is only enabled *by default* from **v22.18.0** (added v22.6.0 behind `--experimental-strip-types`), and the test command runs `.ts` directly. A contributor on 22.13–22.17 passes `engines` but cannot run the tests; the README must say so. CI runs Node 24.
 - **`"type": "module"`**; ESM only.
 - **Exact dependency pins** (pnpm `savePrefix: ''`), all older than the 7-day `minimumReleaseAge` gate: `@modelcontextprotocol/server@2.0.0`, `@modelcontextprotocol/client@2.0.0` (dev), `zod@4.5.4`, `typescript@7.0.2`, `@types/node@24.13.3`, `@modelcontextprotocol/inspector@2.4.0` (dev). **Do not bump to `zod@4.6.1`, `@types/node@24.13.4`, or `@modelcontextprotocol/inspector@2.6.0`** — all published 2026-09-09; with exact pins and `minimumReleaseAge: 10080` there is no fallback and `pnpm install` hard-fails with `ERR_PNPM_NO_MATURE_MATCHING_VERSION`. When choosing any pin, take one with **margin** rather than one sitting exactly on the 7-day line: the gate is computed in hours, so `inspector@2.5.0` (published 2026-09-02, exactly 7 days) is a coin flip — hence `2.4.0`. Verified ages on 2026-09-10: zod 4.5.4 = 11d, @types/node 24.13.3 = 63d, typescript 7.0.2 = 63d, both `@modelcontextprotocol/*@2.0.0` = 44d, inspector 2.4.0 = 14d.
 - **No test-framework dependency** — `node:test` + `node:assert/strict`. **No SQLite driver dependency** — `node:sqlite` `DatabaseSync`, `{ readOnly: true }`.
@@ -134,7 +136,7 @@ managePackageManagerVersions: true
 **Acceptance:**
 - `pnpm install` succeeds and commits `pnpm-lock.yaml`. It must not fail with `ERR_PNPM_NO_MATURE_MATCHING_VERSION`; if it does, a pin is younger than 7 days — pick the newest version older than that, do not weaken `minimumReleaseAge`.
 - `pnpm test` passes.
-- `pnpm build && ls dist/index.js` succeeds — **flat, not `dist/src/index.js`**.
+- `pnpm build` succeeds. **The `dist/index.js` gate belongs to Task 4**, which is where `src/index.ts` first exists — Task 1 creates no production source, so asserting an emitted entry point here is unsatisfiable. Task 1 asserts only that the build runs clean and that `tsconfig.build.json` sets `rootDir: "src"` (the setting that later makes the path flat).
 - If TypeScript 7.0.2 proves unworkable, fall back to `5.9.3` **and record the required tsconfig delta in this plan and in the README** — `module: nodenext` and `rewriteRelativeImportExtensions` behave differently across the two majors, so the fallback is not drop-in. A commit message alone is not sufficient record.
 
 **Constraints:** pnpm only; no test framework, no SQLite driver.
@@ -258,7 +260,14 @@ export function connect(): Promise<{ client: Client; close(): Promise<void> }>;
 **Behavior:**
 - `createServer` builds `new McpServer({name, version}, {capabilities:{tools:{}}, instructions})`. The instructions state that the data is an offline snapshot, give `provenance.generatedAt` and the generator version, and end with `ATTRIBUTION`.
 - `sourceBlock` uses **`title`** (canonical identity) → `https://tibia.fandom.com/wiki/<title with spaces as underscores, URI-encoded>`.
-- **`tibia_get` covers all five entity types**, resolving blocker 8: input is `name` plus optional `type`; output is a **Zod discriminated union on `type`** so search → get round-trips for anything search can return. `outputSchema` is SDK-enforced, so the union must actually cover every returned shape. Creature carries stats, `modifiers` and `loot`; item carries `item_class`/`item_type`/EAV attributes; npc carries city and location; quest and spell carry their own columns. All five carry `source`.
+- **`tibia_get` covers all five entity types**, resolving blocker 8: input is `name` plus optional `type`; output is a **Zod discriminated union on `type`** so search → get round-trips for anything search can return. `outputSchema` is SDK-enforced, so the union must actually cover every returned shape. The five member shapes are enumerated explicitly, because Task 2's schema probe must cover exactly these columns and "their own columns" is not a contract:
+  - **creature**: `title, hitpoints, experience, armor, speed, bestiary_class, is_boss, status`, the `modifiers` map, `loot[]`
+  - **item**: `title, item_class, item_type, type_secondary, weight, value_buy, value_sell, is_marketable, flavor_text, status`, the reported EAV `attributes` bag
+  - **npc**: `title, gender, city, subarea, location, x, y, z, status`
+  - **quest**: `title, location, level_required, level_recommended, is_premium, quest_log, legend, status`
+  - **spell**: `title, words, spell_type, element, mana, level, soul, is_premium, cooldown, status` (no `price` column — verified against the fixture schema)
+  Every scalar is nullable unless the fixture proves otherwise; the Zod members must say so. All five carry `source`.
+- Input also takes `include_inactive` (default false), applied to the requested entity itself: a non-active entity is reported as not found unless the flag is set. Every tool that accepts this flag documents which rows it governs, because the answer differs per tool (see `tibia_how_to_obtain`).
 - When `type` is omitted and the name is ambiguous across types, return `isError: true` listing the matching types and asking the caller to disambiguate. Unknown name → `isError: true` pointing at `tibia_search`.
 - `verbosity: 'detailed'` adds `DETAILED_CREATURE_FIELDS` / `DETAILED_ITEM_FIELDS` (Task 3), not the deleted prose fields.
 - Loot is ordered by chance ascending **with nulls last** (~11% are null).
@@ -271,7 +280,10 @@ export function connect(): Promise<{ client: Client; close(): Promise<void> }>;
 - `tibia_get` for `Magic Longsword` returns the item shape and validates against the union `outputSchema`.
 - Unknown name → `isError: true`.
 
-**Acceptance:** `pnpm test` green, including the Dragon known-answer and the `title` casing assertion.
+**Acceptance:**
+- `pnpm test` green, including the Dragon known-answer and the `title` casing assertion.
+- `pnpm build && ls dist/index.js` succeeds — **flat, not `dist/src/index.js`**. (Moved here from Task 1: this is the first task that produces an entry point.)
+- `node dist/index.js badcommand; echo $?` prints `2`.
 
 **Constraints:** register tools **inside** the factory, never on a shared outer instance.
 
@@ -338,7 +350,8 @@ export function connect(): Promise<{ client: Client; close(): Promise<void> }>;
 **Behavior:**
 - Input: `item_class`, `item_type` (real columns); `weapon_type`, `vocation`, `attack_min/max`, `defense_min`, `armor_min`, `required_level_max` (EAV); `include_inactive`; `sort` (`title|weight|value`, default `title`, via `itemSort()`); `limit` (1–100, default 25); `cursor`.
 - Output: `results` with `title`, itemClass, itemType, weight, valueBuy and an `attributes` bag limited to the reported set; plus `totalMatches`, optional `nextCursor`, `indexGeneratedAt`.
-- EAV filters compile to a correlated `exists (select 1 from item_attribute a where a.item_id = item.article_id and a.name = ? and cast(a.value as integer) <op> ?)` where `<op>` comes from `eavOperator()`. The EAV shape and the cast are the load-bearing spec here — the column is TEXT, so an uncast comparison silently string-sorts.
+- **Numeric** EAV filters compile to `exists (select 1 from item_attribute a where a.item_id = item.article_id and a.name = ? and cast(a.value as integer) <op> ?)` where `<op>` comes from `eavOperator()`. The cast is load-bearing: the column is TEXT, so an uncast comparison string-sorts and `'9' > '55'`.
+- **Text** EAV filters (`weapon_type`, `vocation`) are a *separate* predicate with no cast: `... and a.name = ? and a.value like ? collate nocase`, bound as `%value%`. `required_vocation` holds comma-joined plurals (e.g. `knights`), so vocation matching is substring-membership, not equality — `knight` must match `knights`. Both text filters get their own tests.
 - Attribute names and values are **bound parameters**. Numeric attributes return as numbers, text as strings.
 - `value` sort is on `value_buy` descending, nulls last.
 
@@ -360,7 +373,8 @@ export function connect(): Promise<{ client: Client; close(): Promise<void> }>;
 **Contract:** `export function registerHowToObtain(server: McpServer, handle: TibiaDb): void;`
 
 **Behavior:**
-- Input: `item_name`. Output: `item` (canonical `title`), `droppedBy: {creature, chance, min, max}[]`, `soldByNpcs: {npc, city, price, currency}[]`, `questRewards: string[]`, `note`, `source`.
+- Input: `item_name`, plus `include_inactive` (default false). Output: `item` (canonical `title`), `droppedBy: {creature, chance, min, max}[]`, `soldByNpcs: {npc, city, price, currency}[]`, `questRewards: string[]`, `note`, `source`.
+- **`include_inactive` semantics here apply to the *related* rows, not the requested item**: by default, non-active creatures, NPCs and quests are excluded as sources, so a deprecated creature never appears as a live way to obtain something. The requested item is always returned if it exists, whatever its status; its status is echoed in the response.
 - Vendors come from **`npc_offer_sell`** — the NPC selling to the player. Using `npc_offer_buy` is the defect this task exists to prevent. `currency_id` left-joins to `item`, defaulting to `Gold Coin`.
 - Drops ordered by chance descending, **nulls last** — verified that Steel Helmet's first three droppers all have `chance = null`, so incidental ordering is not safe.
 - No source at all → empty arrays plus a populated `note`, **not** an error. A name that matches no item → `isError: true` pointing at `tibia_search`.
@@ -393,6 +407,8 @@ export function buildIndex(opts?: { targetPath?: string; run?: Runner }): Promis
 - **Creates the parent directory** (`mkdir` recursive) — on a clean machine `~/.cache/tibiawiki-mcp/` does not exist.
 - Builds to a temp path beside the target, then **validates before replacing**: the temp file must exist and must pass `openDb`'s schema probe. Exit-zero plus file-exists is not sufficient evidence of a usable index.
 - Only after validation does it `rename` into place.
+- The temp filename is **unique per invocation** (pid plus a random suffix), so two concurrent runs cannot corrupt each other.
+- The validating `openDb` handle is **closed before** the rename or the cleanup — an open handle blocks replacement on some platforms and leaks otherwise.
 - Any failure — generator exit, missing file, failed validation, failed rename — removes the temp file and throws, quoting stderr and noting that `uv` must be installed.
 - `run` is injected so tests prove the command line and the atomic install without a 3-minute crawl.
 - Finally, add the `build-index` branch to `src/index.ts` (see Task 4).
@@ -400,7 +416,9 @@ export function buildIndex(opts?: { targetPath?: string; run?: Runner }): Promis
 **Tests to write:**
 - Stub runner: command is `uvx`; args include `--skip-images` and the pinned `tibiawikisql==9.0.0`; the last arg is **not** the target; a valid DB ends up at the target.
 - **Failure preserves an existing good index**: start with a valid database already at the target, run with a failing stub, assert the promise rejects **and the original file is byte-identical afterwards** and no temp file remains. (The previous version only checked that no file appeared, which a destructive implementation would also pass.)
-- Generator "succeeds" but writes a schema-invalid file → rejects, target untouched.
+- Generator "succeeds" but writes a schema-invalid file → rejects, target untouched byte-for-byte.
+- Generator "succeeds" but writes **no** file → rejects naming the missing path.
+- Rename fails (target directory made read-only) → rejects, temp file cleaned up, original intact.
 
 **Acceptance:**
 - `pnpm test` green.
@@ -439,6 +457,7 @@ export function buildIndex(opts?: { targetPath?: string; run?: Runner }): Promis
 - [ ] A real `build-index` run completes **and a real tool call against the generated database returns data** — e.g. `tools/call tibia_find_creatures --tool-arg weak_to=fire` returns a non-empty result set. Process start alone is not evidence.
 - [ ] No runtime network access, gated on imports and calls rather than URL text (the attribution string and `sourceBlock` both legitimately contain `https://`):
       `grep -rnE "\bfetch\(|node:http|node:https|undici|axios" src/ --include=*.ts | grep -v '^src/indexer/'` returns empty.
+- [ ] The **packed package** installs and its bin runs: `pnpm pack`, install the tarball into a scratch directory, and run the installed `tibiawiki-mcp` executable. Invoking `node dist/index.js` proves the file works, not that the package is installable.
 - [ ] The attribution string appears in `README.md`, `test/fixtures/README.md`, and the server `instructions`.
 ---
 

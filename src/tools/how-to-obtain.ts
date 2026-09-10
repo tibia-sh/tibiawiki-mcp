@@ -6,6 +6,7 @@ import { sourceBlock } from './get.ts';
 
 const outputSchema = z.object({
   item: z.string(),
+  status: z.string().nullable(),
   droppedBy: z.array(z.object({
     creature: z.string(),
     chance: z.number().nullable(),
@@ -26,7 +27,9 @@ const outputSchema = z.object({
 export function registerHowToObtain(server: McpServer, handle: TibiaDb): void {
   const { db, provenance } = handle;
 
-  const findItem = db.prepare('select article_id, title from item where title = ? collate nocase');
+  const findItem = db.prepare(
+    'select article_id, title, status from item where title = ? collate nocase',
+  );
 
   const dropped = (includeInactive: boolean) => {
     const status = statusClause('c', includeInactive);
@@ -75,7 +78,9 @@ export function registerHowToObtain(server: McpServer, handle: TibiaDb): void {
       annotations: { readOnlyHint: true, openWorldHint: false },
     },
     async ({ item_name, include_inactive }) => {
-      const item = findItem.get(item_name) as { article_id: number; title: string } | undefined;
+      const item = findItem.get(item_name) as
+        | { article_id: number; title: string; status: string | null }
+        | undefined;
       if (!item) {
         return {
           isError: true,
@@ -104,16 +109,27 @@ export function registerHowToObtain(server: McpServer, handle: TibiaDb): void {
 
       const none =
         droppedBy.length === 0 && soldByNpcs.length === 0 && questRewards.length === 0;
+      const status = item.status ?? null;
+      const inactive = status !== null && status !== 'active';
       const output = {
         item: item.title,
+        status,
         droppedBy,
         soldByNpcs,
         questRewards,
-        note: none
-          ? 'No creature drop, NPC vendor or quest reward is recorded for this item. Some items ' +
-            'are unobtainable, event-only, or were removed from the game. Try include_inactive: ' +
-            'true if it may have come from a past event.'
-          : '',
+        note: [
+          // The subject item is returned whatever its status, so the status has to be
+          // stated in the payload - otherwise a non-active item reads as obtainable.
+          inactive
+            ? `This item's status is "${status}", so it is not obtainable on a live server ` +
+              'even though sources may be listed below.'
+            : '',
+          none
+            ? 'No creature drop, NPC vendor or quest reward is recorded for this item. Some ' +
+              'items are unobtainable, event-only, or were removed from the game. Try ' +
+              'include_inactive: true if it may have come from a past event.'
+            : '',
+        ].filter(Boolean).join(' '),
         source: sourceBlock(item.title, provenance),
       };
       return {

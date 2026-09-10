@@ -1,14 +1,12 @@
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/server';
 import type { TibiaDb } from '../db.ts';
-import { ITEM_SORTS, itemSort, eavOperator, statusClause, type EavOperator } from '../domain.ts';
+import {
+  ITEM_SORTS, itemSort, eavOperator, statusClause, coerceAttribute, REPORTED_ATTRS,
+  type EavOperator,
+} from '../domain.ts';
 import { encodeCursor, decodeCursor } from '../cursor.ts';
 
-/** Numeric attributes are stored as TEXT and must be cast before comparison. */
-const NUMERIC_ATTRS = ['attack', 'defense', 'armor', 'required_level', 'imbuement_slots'] as const;
-const REPORTED_ATTRS = new Set<string>([
-  ...NUMERIC_ATTRS, 'required_vocation', 'weapon_type', 'hands',
-]);
 
 const outputSchema = z.object({
   results: z.array(z.object({
@@ -113,9 +111,7 @@ export function registerFindItems(server: McpServer, handle: TibiaDb): void {
           for (const a of attrs.all(row.article_id as number)) {
             const key = String(a.name);
             if (!REPORTED_ATTRS.has(key)) continue;
-            bag[key] = (NUMERIC_ATTRS as readonly string[]).includes(key)
-              ? Number(a.value)
-              : String(a.value);
+            bag[key] = coerceAttribute(key, a.value);
           }
           return {
             title: String(row.title),

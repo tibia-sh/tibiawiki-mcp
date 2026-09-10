@@ -24,7 +24,14 @@ const NAMED_CREATURES = ['Dragon', 'Dragon Lord', 'Rotworm', 'Demon', 'Cyclops',
 // Magic Longsword: the zero-source case. Steel Helmet: the vendor case, and its
 // droppers carry the only null-chance rows. Gold Coin: the currency join target.
 // Mud: the corpus's only cross-type title collision, for the ambiguous-name branch.
-const NAMED_ITEMS = ['Magic Longsword', 'Steel Helmet', 'Gold Coin', 'Mud'];
+// Moonsilver Axe carries defense "33 +3": the five "numeric" attributes are not
+// always integers, and Number() on that yields NaN, which the tools' outputSchema
+// rejects. Arrow (Weak) is status 'ts-only', so how_to_obtain has a non-active
+// subject with active vendors to warn about. Both are regression anchors.
+const NAMED_ITEMS = [
+  'Magic Longsword', 'Steel Helmet', 'Gold Coin', 'Mud',
+  'Moonsilver Axe', 'Arrow (Weak)',
+];
 
 let keepCreature = ids(
   `select article_id from creature where title in (${NAMED_CREATURES.map(() => '?').join(',')})`,

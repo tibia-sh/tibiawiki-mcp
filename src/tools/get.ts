@@ -3,7 +3,7 @@ import type { McpServer } from '@modelcontextprotocol/server';
 import type { Provenance, TibiaDb } from '../db.ts';
 import {
   ELEMENTS, ENTITY_TYPES, entityTypeSchema, searchTable, statusClause, verbositySchema,
-  DETAILED_CREATURE_FIELDS, DETAILED_ITEM_FIELDS, type EntityType,
+  DETAILED_CREATURE_FIELDS, DETAILED_ITEM_FIELDS, coerceAttribute, type EntityType,
 } from '../domain.ts';
 
 type Row = Record<string, unknown>;
@@ -121,9 +121,6 @@ export function registerGet(server: McpServer, handle: TibiaDb): void {
      order by (d.chance is null), d.chance asc, i.title asc`,
   );
   const attrs = db.prepare('select name, value from item_attribute where item_id = ?');
-  const NUMERIC_ATTRS = new Set([
-    'attack', 'defense', 'armor', 'required_level', 'imbuement_slots',
-  ]);
 
   const shape = (type: EntityType, row: Row, verbosity: 'concise' | 'detailed') => {
     const title = String(row.title);
@@ -151,7 +148,7 @@ export function registerGet(server: McpServer, handle: TibiaDb): void {
         const bag: Record<string, string | number> = {};
         for (const a of attrs.all(row.article_id as number)) {
           const key = String(a.name);
-          bag[key] = NUMERIC_ATTRS.has(key) ? Number(a.value) : String(a.value);
+          bag[key] = coerceAttribute(key, a.value);
         }
         return withDetail({
           type: 'item' as const, title,

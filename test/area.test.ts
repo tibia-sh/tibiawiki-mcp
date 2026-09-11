@@ -73,11 +73,11 @@ test('effectOnCaster is passed through, never inferred from the grid', () => {
   assert.equal(on.ascii, off.ascii);
 });
 
-test('the legend describes target and extra-sprite cells', () => {
-  assert.match(AREA_LEGEND, /target/i);
-  assert.match(AREA_LEGEND, /sprite/i);
-  assert.match(AREA_LEGEND, /caster/i);
-  assert.equal(renderArea(byKey('8sqmwave')!, { effectOnCaster: false }).legend, AREA_LEGEND);
+test('the legend describes every glyph it can render', () => {
+  // Shipped once in the tool description, so it must explain all of them.
+  for (const word of [/unaffected/i, /effect/i, /caster/i, /target/i, /sprite/i]) {
+    assert.match(AREA_LEGEND, word);
+  }
 });
 
 test('a grid whose cells do not fill its width is rejected with a reason', () => {

@@ -21,12 +21,15 @@ export type Area = {
   ascii: string;
   effectTiles: number;
   effectOnCaster: boolean;
-  legend: string;
 };
 
 const GLYPHS: Record<number, string> = { 0: '.', 1: '#', 2: '@', 3: '*' };
 
-/** Committed verbatim: a model must never have to infer what a glyph means. */
+/**
+ * Committed verbatim: a model must never have to infer what a glyph means. Carried
+ * once in `tibia_get`'s description rather than on every Area - a creature with six
+ * abilities would otherwise repeat this string six times in one response.
+ */
 export const AREA_LEGEND =
   'Grid of map tiles, row-major, as the caster faces. ' +
   "'.' unaffected tile, '#' effect tile, '@' the caster, '*' the target tile, " +
@@ -60,6 +63,5 @@ export function renderArea(pattern: AreaPattern, opts: { effectOnCaster: boolean
     ascii: rows.join('\n'),
     effectTiles: cells.filter((c) => c === 1).length,
     effectOnCaster: opts.effectOnCaster,
-    legend: AREA_LEGEND,
   };
 }

@@ -111,7 +111,7 @@ const questOut = z.object({
   levelRequired: z.number().nullable(),
   levelRecommended: z.number().nullable(),
   isPremium: z.boolean().nullable(),
-  questLog: z.string().nullable(),
+  questLog: z.boolean().nullable(),
   legend: z.string().nullable(),
   status: z.string().nullable(),
   // quest_danger stores creature_id; these are joined to names to be usable.
@@ -426,7 +426,7 @@ export function registerGet(server: McpServer, handle: TibiaDb): void {
           type: 'quest' as const, title, location: str(row.location),
           levelRequired: num(row.level_required), levelRecommended: num(row.level_recommended),
           isPremium: row.is_premium === null ? null : Boolean(row.is_premium),
-          questLog: str(row.quest_log), legend: str(row.legend),
+          questLog: bool(row.quest_log), legend: str(row.legend),
           status: str(row.status),
           dangers: dangers.all(row.article_id as number).map((r) => String(r.title)),
           rewards: questRewards.all(row.article_id as number).map((r) => String(r.title)),

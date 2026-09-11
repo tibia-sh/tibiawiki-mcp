@@ -147,3 +147,35 @@ test('book text is gated behind detailed verbosity', async () => {
   assert.ok(typeof (await get(h, 'Goldfinger (Book)', 'book', 'detailed')).text === 'string');
   await h.close();
 });
+
+/**
+ * Durable guard for a class this project has hit three times: a BOOLEAN column
+ * mapped with str() returns "0"/"1", which passes a string schema and is truthy,
+ * so a client checking the flag gets the wrong answer. world.battleye and
+ * quest.questLog both shipped that way. This sweeps every boolean-ish output field
+ * rather than naming them one at a time.
+ */
+test('no boolean field is returned as a string', async () => {
+  const h = await connect();
+  const samples: ReadonlyArray<readonly [string, string]> = [
+    ['Dragon', 'creature'], ['Magic Longsword', 'item'], ['Rashid', 'npc'],
+    ['Forgotten Knowledge Quest', 'quest'], ['Light Healing', 'spell'],
+    ['Backpack Tourist', 'achievement'], ["Warriors' Guildhall", 'house'],
+    ['Powerful Reap', 'imbuement'], ['Adrenaline Burst', 'charm'],
+    ['Donkey', 'mount'], ['Assassin Outfits', 'outfit'],
+    ['Goldfinger (Book)', 'book'], ['Antica', 'world'], ['Updates/7.9', 'update'],
+  ];
+  const offenders: string[] = [];
+  for (const [name, type] of samples) {
+    const data = await get(h, name, type);
+    for (const [key, value] of Object.entries(data)) {
+      // A yes/no field must never arrive as the string "0" or "1".
+      if (value === '0' || value === '1') offenders.push(`${type}.${key} = ${JSON.stringify(value)}`);
+      if (/^(is|has)[A-Z]/.test(key) && typeof value === 'string') {
+        offenders.push(`${type}.${key} is a string`);
+      }
+    }
+  }
+  await h.close();
+  assert.deepEqual(offenders, [], 'these look like booleans returned as strings');
+});

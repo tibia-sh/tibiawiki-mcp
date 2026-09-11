@@ -34,9 +34,13 @@ const SEARCH_TABLES: Record<EntityType, string> = {
   creature: 'creature', item: 'item', npc: 'npc', quest: 'quest', spell: 'spell',
 };
 export function searchTable(type: EntityType): string {
-  const t = SEARCH_TABLES[type];
-  if (!t) throw new Error(`Unknown entity type: ${String(type)}`);
-  return t;
+  // Object.hasOwn, not a truthiness check: a plain-object lookup resolves inherited
+  // names, so SEARCH_TABLES['toString'] would return Object.prototype.toString and
+  // sail past `if (!t)` straight into an interpolated SQL fragment.
+  if (!Object.hasOwn(SEARCH_TABLES, type)) {
+    throw new Error(`Unknown entity type: ${String(type)}`);
+  }
+  return SEARCH_TABLES[type];
 }
 
 export const CREATURE_SORTS = ['experience', 'hitpoints', 'title'] as const;
@@ -48,9 +52,10 @@ const CREATURE_ORDER: Record<CreatureSort, string> = {
   title: 'title asc',
 };
 export function creatureSort(key: CreatureSort): string {
-  const s = CREATURE_ORDER[key];
-  if (!s) throw new Error(`Unknown sort key: ${String(key)}`);
-  return s;
+  if (!Object.hasOwn(CREATURE_ORDER, key)) {
+    throw new Error(`Unknown sort key: ${String(key)}`);
+  }
+  return CREATURE_ORDER[key];
 }
 
 export const ITEM_SORTS = ['title', 'weight', 'value'] as const;
@@ -61,17 +66,19 @@ const ITEM_ORDER: Record<ItemSort, string> = {
   value: '(value_buy is null), value_buy desc, title asc',
 };
 export function itemSort(key: ItemSort): string {
-  const s = ITEM_ORDER[key];
-  if (!s) throw new Error(`Unknown sort key: ${String(key)}`);
-  return s;
+  if (!Object.hasOwn(ITEM_ORDER, key)) {
+    throw new Error(`Unknown sort key: ${String(key)}`);
+  }
+  return ITEM_ORDER[key];
 }
 
 const EAV_OPERATORS = { gte: '>=', lte: '<=' } as const;
 export type EavOperator = keyof typeof EAV_OPERATORS;
 export function eavOperator(op: EavOperator): string {
-  const s = EAV_OPERATORS[op];
-  if (!s) throw new Error(`Unknown operator: ${String(op)}`);
-  return s;
+  if (!Object.hasOwn(EAV_OPERATORS, op)) {
+    throw new Error(`Unknown operator: ${String(op)}`);
+  }
+  return EAV_OPERATORS[op];
 }
 
 /**

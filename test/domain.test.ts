@@ -31,6 +31,19 @@ test('all five SQL-fragment maps reject unknown keys', () => {
   assert.throws(() => eavOperator('drop' as never), /unknown operator/i);
 });
 
+test('the maps also reject inherited prototype names', () => {
+  // A plain-object lookup resolves these to Object.prototype members, which are
+  // truthy and would sail past a `if (!value)` guard into an SQL fragment. The
+  // original negative test used 'dragon'/'rowid' and passed while this was broken.
+  for (const evil of ['toString', 'constructor', 'valueOf', '__proto__'] as const) {
+    assert.throws(() => searchTable(evil as never), /unknown entity type/i, `searchTable(${evil})`);
+    assert.throws(() => creatureSort(evil as never), /unknown sort/i, `creatureSort(${evil})`);
+    assert.throws(() => itemSort(evil as never), /unknown sort/i, `itemSort(${evil})`);
+    assert.throws(() => eavOperator(evil as never), /unknown operator/i, `eavOperator(${evil})`);
+    assert.throws(() => modifierColumn(evil as never), /unknown element/i, `modifierColumn(${evil})`);
+  }
+});
+
 test('searchTable maps entity types to real table names', () => {
   assert.equal(searchTable('creature'), 'creature');
   assert.equal(searchTable('npc'), 'npc');

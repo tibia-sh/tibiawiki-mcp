@@ -11,7 +11,7 @@
 **Spec:** extends `docs/superpowers/specs/2026-09-10-tibiawiki-mcp-design.md`.
 **Spike:** `docs/superpowers/spikes/2026-09-11-ability-scene-join.md` — **read it including the addendum.** The addendum is the authority: it re-measures over the full corpus and corrects two facts the original spike got wrong.
 
-**Revision:** this is the second draft. The first was stamped `Needs revision` on 2026-09-11 (stamp retained at the foot of this file) over nine blocking issues, two of which were wrong facts in a table marked *"do not re-derive"*. Every fact below now carries its provenance.
+**Revision:** this is the **third** draft. The first was stamped `Needs revision` on 2026-09-11 (stamp retained at the foot of this file) over nine blocking issues, two of which were wrong facts in a table marked *"do not re-derive"*. Draft 2 was stamped `Needs revision` over six more, the worst a 39.7% identity drift that every one of its own tests would have passed. Both stamps are retained at the foot of this file. Every fact below carries its provenance.
 
 **Review tier:** single (`reviewer`). No auth, secrets, concurrency or data-loss surface; the runtime database stays read-only and every write goes to a per-invocation temp file behind the existing atomic rename. `scripts/review-tier.py` cannot compute a tier — the change set does not exist yet — so this is declared on merits; both gate reviewers upheld it. Tell `reviewer` explicitly to re-check the Lua parser against the live module: both first-draft blockers lived there.
 
@@ -40,11 +40,14 @@ Provenance is stated per row. **Facts marked `measured` were derived directly fr
 | `rootkraken1` | 117 cells, width 9, 13 rows, values 0–4; single-quoted key | measured |
 | Reference shape | nested: `scene={{Scene\|spell=<key>\|…}}` inside the member template | measured, page `Dragon` |
 | Join key | `(creature_id, name, effect, element)` — unique across all 5,854 rows; `(creature_id, name)` collapses to 5,835 | measured |
-| Nullability | `creature_ability.effect` is **NULL on 126 rows and `''` on 137** — same meaning, unequal comparison. `element` is never NULL but `''` on 286 | measured |
+| Nullability | `effect` is NULL on 126 rows — **every one has `element` in (`plain_text` 120, `no_template` 6)**, i.e. prose entries that never carry a scene. Template-derived rows use `''` (137). `element` is never NULL but `''` on 286 | measured |
+| Absent-argument default | an absent damage/range argument maps to **`'?'`** — 987 rows, 219 of them `Melee`; an empty one maps to `''` | measured |
+| Argument whitespace | ~**32%** of `\|element=` occurrences carry surrounding whitespace or a newline (`element=fire\n  \|scene=…`) | measured |
+| Tier distribution | tier 1 = 1,055 joins (**0** identity drift); tier 2 = 553, tier 3 = 141 — **all 694 drift (39.7%)** | measured |
 | Full-corpus join | 1,856 scenes: **1,749 joined (94.2%)**, **0 ambiguous**, 21 no-row, 79 dropped-kind, 6 no-`spell=`, 1 `rotate90` | measured |
 | Eligible-scene rate | 1,749 / (1,856 − 86 discarded) = **98.8%** | derived |
 | `effect_on_caster=yes` | on **463 scenes (24.8%)** — the real caster signal | measured |
-| Per-kind mapping | `Melee` → name `Melee`, element default `physical`; `Healing` → element always `healing`, effect from `range=`, name defaults `Self-Healing` but varies; `Summon` → name is the summoned creature, effect the amount, element `summon` | measured |
+| Per-kind mapping | `Melee` → name `Melee`, element default `physical`; `Healing` → element always `healing`, effect from `range=`, name defaults `Self-Healing` but varies; `Summon` → name is the summoned creature, effect the amount, element `summon`; an absent damage/range argument defaults to `'?'` for every kind | measured |
 | Batch limit | anonymous `titles` limit **50**, `highlimit` 500 | measured, `action=paraminfo` |
 | Corpus size | 2,209 creature pages; 559 carry ≥ 1 scene; 101 of 114 keys referenced | measured |
 
@@ -104,7 +107,7 @@ export function parseSceneData(lua: string): { patterns: AreaPattern[]; rejected
 - `effectTiles` counts only `1`s — asserted on a pattern containing `2`, `3` and `4`
 - `renderArea(p, { effectOnCaster: true })` and `false` differ only in that field
 
-**Acceptance:** `pnpm test` green, no network — the Lua fixture is committed.
+**Acceptance:** `pnpm test` green, no network. `test/fixtures/scene-data.lua` is the live module **committed verbatim** (~16.8 KB); malformed, duplicate-key and out-of-range cases are passed to `parseSceneData` as inline strings, so they do not contradict the 114-pattern assertion on the same file.
 
 ---
 
@@ -134,7 +137,7 @@ export function createWikiApi(opts?: { fetcher?: Fetcher; clock?: Clock; userAge
 - `Retry-After: 2` means **2 seconds — `sleep(2000)`**. A per-request timeout via `AbortSignal`.
 - `fetcher` and `clock` are injected so every test runs offline and backoff is tested without real waiting.
 
-**Tests to write:** 120 titles split into exactly 3 requests **and** the third request's titles are asserted by name; `continue` followed until absent; `Retry-After: 2` sleeps exactly `2000` on the injected clock then retries; a 200 carrying an `error` object throws with its code and records exactly **one** fetch call; a 500 is not retried while a 503 is; a persistent transport failure throws naming URL and status; the User-Agent header is asserted present on **every** recorded request.
+**Tests to write:** 120 titles split into exactly 3 requests **and** the third request's titles are asserted by name; `continue` followed until absent; `Retry-After: 2` sleeps exactly `2000` on the injected clock then retries; a 200 carrying an `error` object throws with its code and records exactly **one** fetch call; a 500 is not retried while a 503 is; a persistent transport failure throws naming the URL (a rejected `fetch` has no status); the User-Agent on **every** recorded request is asserted to contain the product and contact token — presence alone is the weak-assertion pattern this repo bans.
 
 **Acceptance:** `pnpm test` green with zero real network — assert the injected fetcher is the only call path.
 
@@ -149,6 +152,7 @@ export function createWikiApi(opts?: { fetcher?: Fetcher; clock?: Clock; userAge
 **Interfaces — Consumes:** `AreaPattern` (Task 1). **Produces:**
 ```ts
 export type SceneRef = {
+  // The MATCHED ROW's normalised identity — never the extracted text. See Behavior.
   abilityName: string; abilityEffect: string; abilityElement: string;
   patternKey: string; effectOnCaster: boolean;
 };
@@ -171,7 +175,10 @@ export function extractSceneRefs(
 - **Collapse wiki links to display text** and decode HTML entities (`&amp;`, `&#45;`, `&nbsp;`).
 - **Capture the whole `element=` value including spaces** — the wikitext itself says `element=fire field`.
 - **Honour named arguments** (`name=`, `damage=`, `range=`, `amount=`) alongside positional ones.
-- **Normalise NULL and `''` to the same thing** when matching: `effect` is NULL on 126 rows and `''` on 137 with identical meaning.
+- **`SceneRef` carries the matched row's identity, not the extracted text.** A fallback tier matches *precisely when* the dropped component differs, so every tier-2 and tier-3 join drifts: 694 of 1,749 (39.7%) measured. Storing the extracted form writes rows that count toward the build gate and are unretrievable by Task 5's join. Highest-risk rule in the plan, and a tier-1 test anchor cannot detect a violation.
+- **Trim each argument's surrounding whitespace; preserve interior spaces.** Real wikitext is `element=fire\n  |scene=…`, and ~32% of `element=` occurrences carry whitespace. Interior spaces still matter (`element=fire field`), so trim the ends only.
+- **An absent damage/range argument maps to `'?'`; an empty one maps to `''`.** 987 rows carry `'?'`. A *supplied-but-empty* argument counts as supplied and is therefore not droppable by a fallback tier — The Rootkraken supplies `element=` with an empty value.
+- **Normalise NULL to `''` defensively when matching.** NULL occurs only on `plain_text`/`no_template` rows, which never carry a scene, so this guards rather than carries the join.
 - Match in tiers, accepting only a tier yielding exactly one row: `(name, effect, element)` → `(name, effect)` → `(name)`. **A tier may only drop a component the wikitext did not supply** — falling back past an explicit `element=` can uniquely select a row that contradicts it.
 - Count and discard, never attach: a scene on `Haste`/`Debuff`/`Outfit` (79 measured), a Scene with no `spell=` (6, inline `input_array`), a Scene with `rotate90=yes` (1 — the stored grid would render transposed and silently wrong).
 - Capture `effect_on_caster` (463 scenes) onto the ref.
@@ -184,7 +191,10 @@ export function extractSceneRefs(
 - a `{{Summon|Fire Elemental|1|scene=…}}` joins with element `summon`
 - a wiki-linked name joins (`Throws [[Distance Fighting|Knives]]` → `Throws Knives`)
 - an `element=fire field` member joins, proving the value is not truncated at the space
-- a row whose `effect` is **NULL** joins against a member supplying no damage argument
+- a **verbatim** `element=fire\n  |scene=…` fixture joins — the newline regression; the flattened examples above are illustrative only, and every committed fixture must be a raw page dump
+- The Rootkraken's `Death and Holy AoE` (row carries `effect ''` **and** `element ''`) joins — the real empty-string anchor
+- an `{{Ability|Root|element=rooted}}` with no damage argument joins to a row whose `effect` is `'?'`
+- **a tier-2 join returns the matched row's `(effect, element)`, not the extracted ones** — wikitext omitting `element=` against a row whose element is `physical` must yield `abilityElement === 'physical'`. Without this, 39.7% of stored rows are unretrievable
 - a member supplying `element=fire` does **not** fall back to a lone `(name)` row whose element is `ice`
 - a `{{Haste}}` member increments `discardedKind` and yields no ref, even when an `element='haste'` row exists
 - a `rotate90=yes` Scene increments `discardedRotate`; a Scene with no `spell=` increments `discardedNoSpell`
@@ -192,7 +202,7 @@ export function extractSceneRefs(
 - a name matching two rows increments `ambiguous` and yields no ref
 - counters sum to `scenes` in every case
 
-**Acceptance:** `pnpm test` green. Counter arithmetic asserted, since the 0% run proved summing counters are not evidence of correctness.
+**Acceptance:** `pnpm test` green. Counter arithmetic asserted, since the 0% run proved summing counters are not evidence of correctness. **`abilityRows` in every test must be copied verbatim from the real index**, not hand-written — otherwise both sides of the join are author-invented and will agree with a wrong parser.
 
 ---
 
@@ -200,7 +210,7 @@ export function extractSceneRefs(
 
 **Why:** The patterns and refs must reach the runtime without the runtime ever going online.
 
-**Files:** Create `src/indexer/enrich.ts`, `test/enrich.test.ts`; modify `src/indexer/build-index.ts`, `test/build-index.test.ts`, `src/db.ts`, `scripts/make-fixture.mjs`, `test/fixtures/tibiawiki-fixture.db`, `test/fixtures/README.md`
+**Files:** Create `src/indexer/enrich.ts`, `test/enrich.test.ts`; modify `src/indexer/build-index.ts`, `test/build-index.test.ts`, `src/db.ts`, `test/db.test.ts`, `test/fixture-shape.test.ts`, `scripts/make-fixture.mjs`, `test/fixtures/tibiawiki-fixture.db`, `test/fixtures/README.md`
 
 **Interfaces — Consumes:** `WikiApi` (Task 2), `parseSceneData` (Task 1), `extractSceneRefs` (Task 3). **Produces:**
 ```ts
@@ -229,11 +239,17 @@ export async function buildIndex(
 - **`enrich` is given the temp path, never the live target**, preserving the guarantee that a failure leaves a pre-existing index byte-identical.
 - A `pattern_key` absent from `mcp_area_pattern` is counted in `danglingKey` and never stored; the FK makes this enforced rather than merely intended.
 - Idempotent, proved by mutating the source and asserting stale rows do not survive — re-running identical input proves nothing.
+- **Fail explicitly when the eligible denominator is zero** — an empty or fully-discarded corpus makes the ratio `NaN`, and `NaN < 0.95` is false, so a naive comparison passes on no data.
+- `stored` = `joined − danglingKey`; the `EnrichStats` fields are therefore **not** all mutually exclusive outcomes and must not be summed as if they were. Print `danglingKey` prominently on the first real run — its corpus-wide value is unmeasured.
 - `build-index` **prints** `EnrichStats` and **fails if `stored / (scenes − discardedKind − discardedNoSpell − discardedRotate)` falls below 95%.** Measured: 1,749 / 1,770 = **98.8%**. The denominator excludes scenes that *should* be dropped, so the gate measures what was actually lost; the first draft's numerator would have let every pattern be rejected while still reporting a passing rate.
 - The probe additionally rejects a `mcp_schema_version` that is absent, unparseable, holds ≠ 1 row, or is newer than the supported version. Its `SchemaError` must name `tibiawiki-mcp build-index`, as existing probe errors do — requiring `mcp_*` makes every already-installed index fail to open, and the message is the entire remedy.
-- `make-fixture.mjs`: `mcp_area_pattern` joins `KEEP_WHOLE` (114 rows, negligible); `mcp_ability_area` is pruned by retained creature id. Its final loop empties any table not in those sets, and the `pragma foreign_key_check` sweep cannot prune `mcp_ability_area` by creature because the FK points at the pattern table.
+- **Resolve page title → `creature.article_id` in enrichment**, since `extractSceneRefs` receives only ability rows. `Category:Creatures` holds 2,209 members against 2,193 creature rows and includes non-creature pages (`Bestiary/Classes`, list pages); those are skipped and **not charged against the gate**, with their own counter.
+- The probe must check **columns before row counts**: `test/db.test.ts` builds seven synthetic schema-only databases and asserts the error names the dropped column. A row-count check ordered first makes all seven report the wrong message.
+- **Order inside this task: enrich a real index → regenerate the fixture → only then tighten the probe.** `make-fixture.mjs` copies a generated database, so the `mcp_*` tables exist only if the source was already enriched; tightening first turns the whole suite red for an unrelated reason.
+- `make-fixture.mjs`: `mcp_area_pattern` **and `mcp_schema_version`** join `KEEP_WHOLE` — every table outside `USED`/`keepByType`/`KEEP_WHOLE` is emptied wholesale, and an emptied version row makes the new probe reject the fixture. `mcp_ability_area` needs its **own branch** pruning by `creature_id`; it cannot ride on `keepByType`, which prunes by an `article_id` it does not have.
+- `test/fixture-shape.test.ts`: both new tables join `REQUIRED_NON_EMPTY`, and the 1.5 MB fixture budget gets its assertion here. Its final loop empties any table not in those sets, and the `pragma foreign_key_check` sweep cannot prune `mcp_ability_area` by creature because the FK points at the pattern table.
 
-**Tests to write:** enrichment against a fixture DB with an injected fetcher creates all three tables, and `mcp_area_pattern` contains `rootkraken1` by name; re-running after a source mutation leaves no stale rows; a dangling pattern key is rejected by the FK and counted; a below-threshold rate fails the build; an enrichment failure inside `build-index` leaves a pre-existing index **byte-identical** (sha256 compared); **all five existing `build-index.test.ts` cases pass with an injected no-op enricher and make zero fetches**; the probe rejects a DB whose `mcp_schema_version` is absent, duplicated, or newer, and the error text names `build-index`; inserting the same `(creature_id, ability_name, '', '')` twice is rejected by the primary key.
+**Tests to write:** enrichment against a fixture DB with an injected fetcher creates all three tables, and `mcp_area_pattern` contains `rootkraken1` by name; re-running after a source mutation leaves no stale rows; a dangling pattern key is rejected by the FK and counted; a below-threshold rate fails the build; **a zero eligible denominator fails the build rather than passing on `NaN`**; `mcp_schema_version` survives fixture regeneration; an enrichment failure inside `build-index` leaves a pre-existing index **byte-identical** (sha256 compared); **all five existing `build-index.test.ts` cases pass with an injected no-op enricher and make zero fetches**; the probe rejects a DB whose `mcp_schema_version` is absent, duplicated, or newer, and the error text names `build-index`; inserting the same `(creature_id, ability_name, '', '')` twice is rejected by the primary key.
 
 **Acceptance:** `pnpm test` green including all 103 existing tests. One manual `build-index` completes and prints the counters; record the observed wall-clock in the commit message as a measurement, not a budget.
 
@@ -249,13 +265,13 @@ export async function buildIndex(
 
 **Behavior:**
 - Each `creature.abilities[]` entry gains `area: Area | null`.
-- **The join must normalise the upstream side, not the stored side**: match `mcp_ability_area.ability_effect` against `coalesce(creature_ability.effect, '')`, and likewise for `element`. The stored columns are already `NOT NULL` (Task 4); `creature_ability.effect` is NULL on 126 rows and `''` on 137 with identical meaning. A plain `=` against the raw column never matches NULL and would silently return `null` for exactly those 126 abilities — and `is` would fail too, since `'' is NULL` is false. Only `coalesce` on the upstream side is correct for both.
+- **The join matches the stored identity against `coalesce(creature_ability.effect, '')`**, and likewise for `element`. Stored columns are `NOT NULL` (Task 4) and hold the **matched row's** values (Task 3), so both sides agree by construction. `coalesce` is defensive: NULL occurs only on `plain_text`/`no_template` rows, which never carry a scene. Note `is` would be wrong here — `'' is NULL` is false.
 - `null` is the honest answer for an ability with no matched scene — most abilities have none, and the 5.8% non-join rate describes scene-carrying members only, not abilities at large. It must never be an empty grid.
 - `legend` accompanies every non-null area, so a model never has to infer the glyphs.
 - One prepared statement joined per creature — no query per ability.
 - `tibia_get`'s description gains one sentence about areas; the tool count stays five.
 
-**Tests to write:** Dragon's `Fire Wave` returns `key === '8sqmwave'` and an `ascii` matching the expected 5×9 cone exactly; Dragon's `Self-Healing` returns `effectOnCaster === true`; The Rootkraken's death AoE returns the 13-row `rootkraken1` grid containing a `4`; an ability whose `creature_ability.effect` is **NULL** and which has a stored area returns it non-null — the regression that both a plain `=` and an `is` would break; an ability with no matched scene returns `area: null`, not an empty grid; `legend` is present on every non-null area; `tools/list` stays under 30,000 bytes; a creature whose abilities all lack scenes still returns successfully.
+**Tests to write:** Dragon's `Fire Wave` returns `key === '8sqmwave'` and an `ascii` matching the expected 5×9 cone exactly; Dragon's `Self-Healing` returns `effectOnCaster === true`; The Rootkraken's death AoE returns the 13-row `rootkraken1` grid containing a `4`; **a tier-2-joined ability returns a non-null area** — the 39.7% identity-drift regression, which a tier-1 anchor such as `Fire Wave` cannot detect; The Rootkraken's `Death and Holy AoE` (`effect ''`, `element ''`) returns its area, exercising normalisation with real data; an ability with no matched scene returns `area: null`, not an empty grid; `legend` is present on every non-null area; `tools/list` stays under 30,000 bytes; a creature whose abilities all lack scenes still returns successfully.
 
 **Acceptance:** `pnpm test` green; `tools/list` recorded and under budget; a real `tibia_get` against the full index shows Dragon's Fire Wave cone.
 
@@ -267,12 +283,14 @@ export async function buildIndex(
 - [ ] Exactly five tools; `tools/list` under **30,000 bytes** (recorded in the commit).
 - [ ] No runtime network: `grep -rnE "\bfetch\(|node:http|node:https|undici|axios" src/ '--include=*.ts' | grep -v '^src/indexer/'` returns empty.
 - [ ] `mcp_area_pattern` holds **114** rows and contains `rootkraken1` by name.
-- [ ] A real `build-index` reports stored/eligible **≥ 95%** with counters summing to the scene total.
+- [ ] A real `build-index` reports stored/eligible **≥ 95%**, prints `danglingKey`, and fails rather than passing when the eligible denominator is zero.
+- [ ] A tier-2 or tier-3 ability returns a non-null area at runtime — the 39.7% identity-drift regression.
 - [ ] Dragon's `Fire Wave` returns the `8sqmwave` grid; `Self-Healing` reports `effectOnCaster: true`; an unmatched ability returns `area: null`.
 - [ ] A `{{Haste}}` scene and a `rotate90=yes` scene are each discarded and counted — asserted by test.
 - [ ] Enrichment failure leaves a pre-existing index byte-identical (sha256).
 - [ ] The five existing `build-index` tests make zero network calls.
-- [ ] Fixture stays under 1.5 MB, **asserted by a test** — an ungated criterion will not be checked. Currently 1.0 MB.
+- [ ] Fixture stays under 1.5 MB, **asserted in `test/fixture-shape.test.ts`** — an ungated criterion will not be checked. Currently 1.0 MB.
+- [ ] `mcp_area_pattern` and `mcp_ability_area` are in `REQUIRED_NON_EMPTY` and survive fixture regeneration.
 
 ## Review 1 — first draft (2026-09-11)
 

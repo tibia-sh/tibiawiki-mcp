@@ -245,3 +245,19 @@ Every key column is `NOT NULL`: SQLite permits NULLs in primary-key columns of a
 
 - ~~**codex: "the path prefix is derivable from the canonical filename."**~~ **This rejection was wrong and is withdrawn.** The prefix *is* `md5(filename)`-derivable; my refutation compared `md5("Dragon.gif")` against a `/f/fb/` path belonging to **Blood_Hand.gif**, the first row of an unrelated sample. Re-measured: Dragon `e/e0`, Demon `7/75`, Steel_Helmet `c/cd`, Blood_Hand `f/fb` — each matches its own hash. codex was right; I rejected a correct finding on my own measurement error, and draft 2 carried the false claim into a constraint about how to weigh codex findings.
 - **codex: "multiple subjects requesting the same file" as a live risk.** Measured: **0** titles appear in more than one of the seven tables. Kept as a defensive contract, labelled as such, not as a corpus fact.
+
+## Execution authorization (2026-09-12)
+
+Execution began on **draft 3 without a `Ready` stamp**, by explicit user decision:
+*"Execute draft 3 now, accepting that its latest fixes are unreviewed."*
+
+The gate cap (two invocations, both `Needs revision`) is what made a third pass the
+user's call rather than mine. Draft 3's corrections were each verified against the
+repo or the live wiki as they were written, but no reviewer has seen them as a whole.
+
+**Unreviewed at start of execution:** the separate-prepared-statement decision
+replacing the join, the explicit `found: true | false` outcome contract, the
+all-seven-types-present gate, `descriptionUrl` validation, the `subjects` counter
+rename, the image-less-creature regression anchor, the 311-bytes-per-type projection
+with its 80-character description cap, and the withdrawal of draft 1's incorrect
+rejection of a correct codex finding.

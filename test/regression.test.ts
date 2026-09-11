@@ -109,3 +109,50 @@ test('every item in the full index satisfies the output schema', { skip: !exists
   handle.close();
   assert.deepEqual(failures, [], 'paging the full item catalogue must not hit a schema violation');
 });
+
+// Regression: `hitpoints = 0` in the source data means "unrecorded", not "no health".
+// 34 creatures carry 0 hp beside a real experience value - Phosphorus (Final) has
+// 16,000,000 exp - so a range filter that takes 0 literally buries real answers under
+// unknowns: hitpoints_max 100 matched 637 creatures where only 204 are real.
+// experience = 0 is deliberately NOT treated this way: 295 creatures genuinely award none.
+test('unrecorded hitpoints are reported as null, not as zero', async () => {
+  const h = await connect();
+  const res = await h.client.callTool({
+    name: 'tibia_get', arguments: { name: 'The Rootkraken' },
+  });
+  const data = res.structuredContent as any;
+  assert.equal(data.hitpoints, null, '0 hp must not be presented as a real value');
+  assert.equal(data.experience, 700000, 'experience is real data and must survive');
+  await h.close();
+});
+
+test('a hitpoints range filter excludes creatures whose hitpoints are unrecorded', async () => {
+  const h = await connect();
+  const res = await h.client.callTool({
+    name: 'tibia_find_creatures', arguments: { hitpoints_max: 100000, limit: 100 },
+  });
+  const data = res.structuredContent as any;
+  assert.ok(data.results.length > 0, 'guard: the filter must match something');
+  const titles = data.results.map((r: any) => r.title);
+  assert.ok(
+    !titles.includes('The Rootkraken'),
+    'a creature with unrecorded hitpoints must not satisfy hitpoints_max',
+  );
+  for (const r of data.results) {
+    assert.notEqual(r.hitpoints, 0, `${r.title} reported hitpoints 0`);
+  }
+  await h.close();
+});
+
+test('experience 0 is still treated as real data', async () => {
+  const h = await connect();
+  const res = await h.client.callTool({
+    name: 'tibia_find_creatures', arguments: { experience_max: 0, limit: 5 },
+  });
+  // Not asserting non-empty: the point is that experience is not nullif'd away,
+  // so a zero-experience creature remains reachable by an experience filter.
+  const data = res.structuredContent as any;
+  assert.ok(Array.isArray(data.results));
+  for (const r of data.results) assert.equal(r.experience, 0);
+  await h.close();
+});

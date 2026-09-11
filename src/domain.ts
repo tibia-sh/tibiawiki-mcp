@@ -44,7 +44,7 @@ export type CreatureSort = (typeof CREATURE_SORTS)[number];
 const CREATURE_ORDER: Record<CreatureSort, string> = {
   // Nulls last, with title as a tiebreak so pagination is stable.
   experience: '(experience is null), experience desc, title asc',
-  hitpoints: '(hitpoints is null), hitpoints desc, title asc',
+  hitpoints: '(nullif(hitpoints, 0) is null), nullif(hitpoints, 0) desc, title asc',
   title: 'title asc',
 };
 export function creatureSort(key: CreatureSort): string {
@@ -116,4 +116,18 @@ export function coerceAttribute(name: string, value: unknown): string | number {
   if (!(NUMERIC_ATTRS as readonly string[]).includes(name)) return raw;
   const n = Number(raw);
   return Number.isFinite(n) ? n : raw;
+}
+
+/**
+ * `hitpoints = 0` means "the wiki does not record it", not "this creature has no
+ * health" - 34 creatures carry 0 hp alongside a real experience value, including
+ * Phosphorus (Final) at 16,000,000 exp. Left as-is, `hitpoints_max: 100` matches
+ * 637 creatures of which most are unknowns; through nullif it matches 204 real ones.
+ *
+ * `experience = 0` is deliberately NOT treated this way: 295 creatures have real
+ * hitpoints and genuinely award no experience (Morshabaal and friends), so a zero
+ * there is data, not a gap.
+ */
+export function hitpointsExpr(alias: string): string {
+  return `nullif(${alias}.hitpoints, 0)`;
 }

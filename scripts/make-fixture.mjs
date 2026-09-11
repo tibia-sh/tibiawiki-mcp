@@ -20,7 +20,13 @@ const list = (xs) => (xs.length ? xs.join(',') : '-1');
 // Named creatures: fire-immune (Dragon 0), neutral (Rotworm 100) and fire-weak
 // (Tarantula 115, Scarab 118) so weakness tests have both sides, plus one
 // non-active row so the status filter has something to exclude.
-const NAMED_CREATURES = ['Dragon', 'Dragon Lord', 'Rotworm', 'Demon', 'Cyclops', 'Tarantula', 'Scarab'];
+// The Rootkraken has hitpoints 0 alongside 700,000 experience: the wiki does not
+// record its health, and 0 must not read as a real value. Without it in the fixture
+// the unrecorded-hitpoints tests pass vacuously.
+const NAMED_CREATURES = [
+  'Dragon', 'Dragon Lord', 'Rotworm', 'Demon', 'Cyclops', 'Tarantula', 'Scarab',
+  'The Rootkraken',
+];
 // Magic Longsword: the zero-source case. Steel Helmet: the vendor case, and its
 // droppers carry the only null-chance rows. Gold Coin: the currency join target.
 // Mud: the corpus's only cross-type title collision, for the ambiguous-name branch.

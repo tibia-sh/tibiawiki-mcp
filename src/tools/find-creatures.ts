@@ -3,7 +3,7 @@ import type { McpServer } from '@modelcontextprotocol/server';
 import type { TibiaDb } from '../db.ts';
 import {
   ELEMENTS, elementSchema, modifierColumn, WEAK_TO, RESISTANT_TO,
-  CREATURE_SORTS, creatureSort, statusClause,
+  CREATURE_SORTS, creatureSort, statusClause, hitpointsExpr,
 } from '../domain.ts';
 import { encodeCursor, decodeCursor } from '../cursor.ts';
 
@@ -40,8 +40,10 @@ export function registerFindCreatures(server: McpServer, handle: TibiaDb): void 
         resistant_to: z.array(elementSchema).optional(),
         experience_min: z.number().int().optional(),
         experience_max: z.number().int().optional(),
-        hitpoints_min: z.number().int().optional(),
-        hitpoints_max: z.number().int().optional(),
+        hitpoints_min: z.number().int().optional()
+          .describe('Creatures whose hitpoints are unrecorded are excluded from this filter.'),
+        hitpoints_max: z.number().int().optional()
+          .describe('Creatures whose hitpoints are unrecorded are excluded from this filter.'),
         bestiary_class: z.string().optional().describe('e.g. "Dragon", "Human".'),
         is_boss: z.boolean().optional(),
         location_contains: z.string().optional().describe('Substring of the location text.'),
@@ -77,8 +79,8 @@ export function registerFindCreatures(server: McpServer, handle: TibiaDb): void 
       };
       if (args.experience_min !== undefined) bind('c.experience >= ?', args.experience_min);
       if (args.experience_max !== undefined) bind('c.experience <= ?', args.experience_max);
-      if (args.hitpoints_min !== undefined) bind('c.hitpoints >= ?', args.hitpoints_min);
-      if (args.hitpoints_max !== undefined) bind('c.hitpoints <= ?', args.hitpoints_max);
+      if (args.hitpoints_min !== undefined) bind(`${hitpointsExpr('c')} >= ?`, args.hitpoints_min);
+      if (args.hitpoints_max !== undefined) bind(`${hitpointsExpr('c')} <= ?`, args.hitpoints_max);
       if (args.bestiary_class !== undefined) bind('c.bestiary_class = ? collate nocase', args.bestiary_class);
       if (args.is_boss !== undefined) bind('c.is_boss = ?', args.is_boss ? 1 : 0);
       if (args.location_contains !== undefined) {
@@ -99,7 +101,8 @@ export function registerFindCreatures(server: McpServer, handle: TibiaDb): void 
       const output = {
         results: rows.map((row) => ({
           title: String(row.title),
-          hitpoints: row.hitpoints === null ? null : Number(row.hitpoints),
+          // 0 means unrecorded; report it as null rather than as a real value.
+          hitpoints: !row.hitpoints ? null : Number(row.hitpoints),
           experience: row.experience === null ? null : Number(row.experience),
           bestiaryClass: row.bestiary_class === null ? null : String(row.bestiary_class),
           isBoss: Boolean(row.is_boss),

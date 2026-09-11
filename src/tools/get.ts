@@ -136,7 +136,9 @@ export function registerGet(server: McpServer, handle: TibiaDb): void {
       case 'creature':
         return withDetail({
           type: 'creature' as const, title,
-          hitpoints: num(row.hitpoints), experience: num(row.experience),
+          // 0 means unrecorded (see hitpointsExpr in domain.ts), so report null.
+          hitpoints: row.hitpoints ? num(row.hitpoints) : null,
+          experience: num(row.experience),
           armor: num(row.armor), speed: num(row.speed),
           bestiaryClass: str(row.bestiary_class), isBoss: Boolean(row.is_boss),
           status: str(row.status),

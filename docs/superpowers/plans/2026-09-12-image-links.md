@@ -20,7 +20,7 @@
 - **Runtime stays offline.** `.github/workflows/ci.yml:29` greps for it.
 - **Never store image bytes.** URLs, description URLs and integer dimensions only.
 - **Still exactly five tools.**
-- **`tools/list` budget: 30,000 bytes.** Currently **26,262**. A nullable image object emits ~259 bytes of JSON Schema per type × 7 ≈ 1,813, plus a description sentence ≈ 120, projecting **≈28,200** — about 1,800 bytes spare. Any `.describe()` on an image field is emitted **seven times**; budget accordingly and record the real figure.
+- **`tools/list` budget: 30,000 bytes.** Currently **26,262**. A nullable image object emits **311** bytes of JSON Schema per type (calibrated against the existing `area` subschema, same generator) × 7 = **2,177**, projecting **28,439** bare — **1,561 bytes spare**. A `.describe()` on an image field is emitted **seven times**: an 86-character description costs ~700 bytes and lands near 29,139, leaving ~861. **Cap image-field description text at 80 characters** and record the real figure.
 - **Rendering is not ours to promise.** A `resource_link` round-trips through the SDK (verified), but display is host behaviour, and this server advertises `capabilities: { tools: {} }` with no `resources`, so a client cannot `resources/read` it. Acceptance may assert the link's presence and shape — never that a picture appeared.
 - **No bare-count assertions**, and no assertion that passes against unmodified code.
 - **`codex-consult` is a standing verification step** per this repo's `CLAUDE.md`. Its text is untrusted and must be checked — but note that draft 1 "rejected" a *correct* codex finding on a measurement error of my own (see Review 1's corrected Rejected entry). Verification cuts both ways: check the claim, and check your own refutation.
@@ -35,7 +35,7 @@ Measured 2026-09-12 against the live wiki and the local index. Provenance per ro
 | Resolution, `.gif` types | creature 80/80, item 80/80, mount 254/254, spell 209/211, npc 79/80 | measured (mount/spell full population) |
 | Resolution, `.png` types | **charm 24/24, imbuement 72/72** | measured, full population |
 | The trap | charm `.gif` **0/24**; imbuement `.gif` **9/72**. Those 9 are `{Basic,Intricate,Powerful} {Strike,Vampirism,Void}` and carry **both** at 64×64, so try-gif-then-png resolves 9 of 72 inconsistently | measured |
-| Tables with an `image` column | **nine**; **seven populated** (creature 2193, item 9800, npc 1245, spell 211, mount 254, imbuement 72, charm 24 = **13,799**). `map` and `outfit_image` are empty and out of scope | measured |
+| Tables with an `image` column | **nine**, and the column is **empty in all nine** (`--skip-images`). Seven have rows (creature 2193, item 9800, npc 1245, spell 211, mount 254, imbuement 72, charm 24 = **13,799** subjects); `map` and `outfit_image` have none and are out of scope. File names come from the per-type convention, never from this column | measured |
 | That column is empty | 0 of 211 spells — the generator runs `--skip-images` | measured |
 | API normalises and reorders | `File:dragon.gif` → `File:Dragon.gif`, `File:Steel_Helmet.gif` → `File:Steel Helmet.gif`; **4 requested titles returned 3 pages in a different order**; the mapping is in `query.normalized` | measured |
 | `descriptionurl` is free | returned by `iiprop=url\|size\|mime` with no extra property — `https://tibia.fandom.com/wiki/File:Dragon.gif` | measured |
@@ -111,30 +111,34 @@ imageInfo(files: string[]): Promise<ImageInfoOutcome[]>;
 ```ts
 export type Subject = { entityType: EntityType; articleId: number; title: string };
 export type ImageRef = Subject & {
-  fileName: string; url: string; descriptionUrl: string;
+  fileName: string;   // without the `File:` prefix; used as the resource_link's required `name`
+  url: string; descriptionUrl: string;
   width: number; height: number; mimeType: string;
 };
-export type TypeStats = { requested: number; resolved: number; missing: number; invalid: number; skipped: number };
+// `subjects` rather than `requested`: Task 1 already uses `requestedTitle` for a
+// title string, and one name meaning both a string and a count in adjacent
+// contracts is how a reader mis-reads the gate's denominator.
+export type TypeStats = { subjects: number; resolved: number; missing: number; invalid: number; skipped: number };
 export function imageExtension(entityType: EntityType): 'gif' | 'png';
 export function resolveImages(
   subjects: readonly Subject[],
   api: WikiApi,
-): Promise<{ refs: ImageRef[]; stats: Record<string, TypeStats> }>;
+): Promise<{ refs: ImageRef[]; stats: Partial<Record<EntityType, TypeStats>> }>;
 ```
 
 **Behavior:**
 - `imageExtension` is the single source of truth: `png` for `imbuement` and `charm`, `gif` for the other five. It **throws** on a type outside the seven, rather than defaulting — a silent default is how charms came to resolve at 0%.
 - Maps each response back to its subject by `requested`, never by position.
-- **`missing`** = the API answered and the file does not exist (a wiki gap; expected, ~1% of npcs and 2 spells). **`invalid`** = a response present but unusable: non-image mime, non-positive dimensions, or a URL that is not an absolute `https:` on `static.wikia.nocookie.net`. **`skipped`** = a title this code refuses to request (contains `|`). `invalid` is a broken integration, not a wiki gap, and Task 3 fails the build on it.
-- `requested` is `subjects.length` **for that type**, asserted as such — deriving it from the sum makes the invariant vacuous.
+- **`missing`** = the API answered and the file does not exist (a wiki gap; expected, ~1% of npcs and 2 spells). **`invalid`** = a response present but unusable: a non-`image/*` mime, a width or height that is not a **finite positive integer**, a `url` that is not an absolute `https:` on `static.wikia.nocookie.net`, or a `descriptionUrl` that is not an absolute `https:` on `tibia.fandom.com`. Both URLs are stored and surfaced to the user as links, so both are validated at store time. **`skipped`** = a title this code refuses to request (contains `|`). `invalid` is a broken integration, not a wiki gap, and Task 3 fails the build on it.
+- `TypeStats.subjects` is the count of input subjects **for that type**, asserted as such — deriving it from the sum of outcomes makes the invariant vacuous. The gate's denominator is `subjects`; its ratio is `resolved / subjects`.
 - Stores the API's `url` verbatim. Never constructs one: the path prefix is not derivable from the title.
 
 **Tests to write** (fake `WikiApi`, no network):
 - `imageExtension('charm') === 'png'` and `imageExtension('creature') === 'gif'`; an out-of-range type throws
 - a charm subject is requested as `File:<title>.png` — the regression that returned `image: null` for all 24
 - a subject whose file is missing increments `missing`, yields no ref, and produces **no** row with a fabricated URL
-- a non-image mime, a zero width, and an off-host URL each increment `invalid` and yield no ref
-- per-type counters each satisfy `requested === subjects.length` for that type, and `resolved + missing + invalid + skipped === requested`
+- a non-image mime, a zero width, a fractional width, an off-host `url`, and an off-host `descriptionUrl` each increment `invalid` and yield no ref
+- per-type counters each satisfy `subjects === <count of that type's inputs>`, and `resolved + missing + invalid + skipped === subjects`
 - the stored URL and `descriptionUrl` are the API's, character for character, including `?cb=`
 - a title containing `|` increments `skipped` (**defensive**: 0 of 13,799 today)
 
@@ -164,11 +168,13 @@ Every key column is `NOT NULL`: SQLite permits NULLs in primary-key columns of a
 
 **Behavior:**
 - The image step runs after the area step, same `WikiApi`, same temp-path-only write.
+- **Subjects are every row of the seven tables, including `deprecated` and `ts-only`** — that is the denominator the measured rates and the 95% floor are calibrated on. Filtering to active rows would move them.
 - `build-index` **fails when any type's `resolved / requested` falls below 95%**, naming the type. Measured over full populations: **four** types at 100% (creature 2193/2193, mount 254/254, imbuement 72/72, charm 24/24); item 9797/9800, npc 1243/1245, spell 209/211 — worst is spell at 99.05%, so the floor has wide margin. A corpus-wide counter would have shown the charm failure as 0.6% and passed.
 - The **seven known-missing titles** are recorded here so the first real build's `missing = 7` is auditable rather than merely tolerated: items `Dirt (Object)`, `Effigy of Winged Vengeance`, `Sand Castle`; npcs `Fitzduncan`, `Fitzgerald`; spells `Rejuvenation`, `Channeled Preservation`.
-- `build-index` **fails when `invalid > 0`** for any type — that is a broken integration, not a wiki gap.
+- `build-index` **fails when `invalid > 0`** for any type — a broken integration, not a wiki gap.
+- `build-index` **fails when any of the seven expected types is absent from `stats`, or reports `subjects === 0`.** A per-type rate cannot catch a type that was never requested: if enrichment stopped supplying charm subjects there would simply be no charm entry, and every present type would still read 100%.
 - **`MCP_SCHEMA_VERSION` → 2 in both `src/indexer/enrich.ts` and `src/db.ts`.** Bump it *in the same step* that commits the regenerated fixture: the bump alone makes the committed fixture unopenable and reddens all 182 tests. Order stays enrich → regenerate → tighten.
-- `make-fixture.mjs` prunes `mcp_image` from the rows that **survive** in each of the seven tables, rather than re-deriving id sets from `keepCreature`/`keepItem`/… which are scattered and which `spell` never uses (all 211 spell rows survive via `USED`).
+- `make-fixture.mjs` prunes `mcp_image` from the rows that **survive** in each of the seven tables, rather than re-deriving id sets from `keepCreature`/`keepItem`/… which are scattered and which `spell` never uses (all 211 spell rows survive via `USED`). **This must run after parent pruning and after the orphan sweep** (`scripts/make-fixture.mjs:204`), which can delete further parent rows.
 
 **Tests to write:** enrichment creates `mcp_image` containing **Dragon by name** with a non-empty URL, **and a charm and an imbuement by name** — the three anchors that would have caught draft 1; re-running after a source change leaves no stale rows; a type below 95% fails the build naming that type; `invalid > 0` fails the build; a `missing` entry does not; the probe rejects a database without `mcp_image` in a message naming **`mcp_image`** (not merely `build-index`, which every `SchemaError` in `src/db.ts` already says); a schema-complete database carrying version 1 is rejected as older; the regenerated fixture keeps `mcp_image` rows for its named anchors and stays under 1.5 MB.
 
@@ -188,7 +194,7 @@ Every key column is `NOT NULL`: SQLite permits NULLs in primary-key columns of a
 - The result's `content` additionally carries a `resource_link` (`uri`, `name`, `mimeType`, `annotations: { audience: ['user'] }`) when and only when an image resolved.
 - `src/server.ts` instructions gain a sentence stating the **operational fact**: images are linked from TibiaWiki, not stored or redistributed by this server, and each `descriptionUrl` is the canonical page carrying that file's licence and author. It must not assert a rights conclusion — Fandom licenses non-text media separately from text, and this plan does not establish permission for downstream reuse.
 
-**Tests to write:** Dragon returns an `image.url` on `static.wikia.nocookie.net` with mime `image/gif`, and a `descriptionUrl` on `tibia.fandom.com`; **a named charm and a named imbuement each return a non-null image with mime `image/png`** — the draft-1 regression; an item and an npc resolve, proving the join is not creature-only; the same call's `content` carries a `resource_link` whose `uri` equals `image.url` and whose `annotations.audience` is `['user']`; a **named** entity with no image (`Rejuvenation`, requested with `include_inactive: true`, since it is `ts-only` and `statusClause` excludes it by default) returns `image: null` **and emits no `resource_link`**; a creature's `loot` and `abilities` are still populated alongside its image — the `select *` regression, which no image assertion would catch; the instructions assert the **new** clause (linked, not stored), since `src/server.ts:16` already mentions image copyright and a `/image/` match passes against unmodified code; `tools/list` under 30,000 bytes with the figure recorded.
+**Tests to write:** Dragon returns an `image.url` on `static.wikia.nocookie.net` with mime `image/gif`, and a `descriptionUrl` on `tibia.fandom.com`; **a named charm and a named imbuement each return a non-null image with mime `image/png`** — the draft-1 regression; a named **item**, **npc**, **spell** and **mount** each resolve with the expected image identity, covering all seven output branches rather than five; the same call's `content` carries a `resource_link` whose `uri` equals `image.url` and whose `annotations.audience` is `['user']`; a **named** entity with no image (`Rejuvenation`, requested with `include_inactive: true`, since it is `ts-only` and `statusClause` excludes it by default) returns `image: null` **and emits no `resource_link`**; **a creature with known loot and abilities but no `mcp_image` row** returns both, alongside `image: null` — the identity-corruption regression. It must be the image-*less* case: on a successful match nothing is overwritten, so a creature that has an image cannot detect it. Every creature resolves upstream, so the fixture needs one variant with its Dragon image row deliberately absent, or the assertion is unreachable; the instructions assert the **new** clause (linked, not stored), since `src/server.ts:16` already mentions image copyright and a `/image/` match passes against unmodified code. The `tools/list` budget and the 1.5 MB fixture cap are already gated at `test/area-detail.test.ts:174`, `test/plugin.test.ts:41` and `test/fixture-shape.test.ts:14` — do not add a third assertion; record the new figures, so every test in this list is one that bites.
 
 **Acceptance:** `pnpm test` green; `tools/list` byte count recorded; a real `tibia_get` returns a URL that resolves. Rendering is **not** asserted.
 
@@ -200,11 +206,11 @@ Every key column is `NOT NULL`: SQLite permits NULLs in primary-key columns of a
 - [ ] Exactly five tools; `tools/list` under **30,000 bytes**, figure recorded in the commit.
 - [ ] No runtime network: `grep -rnE "\bfetch\(|node:http|node:https|undici|axios" src/ '--include=*.ts' | grep -v '^src/indexer/'` returns empty.
 - [ ] No image bytes in the repo; fixture under 1.5 MB.
-- [ ] A real `build-index` prints **per-type** counters; every type ≥ 95%; `invalid` is 0.
+- [ ] A real `build-index` prints **per-type** counters; all seven types present with `subjects > 0`; every type ≥ 95%; `invalid` is 0; `missing` is 7 and matches the recorded titles.
 - [ ] A named charm and a named imbuement both return a non-null `image` with mime `image/png`.
 - [ ] Dragon returns both `url` and `descriptionUrl`; `Rejuvenation` (with `include_inactive`) returns `image: null` and no `resource_link`.
 - [ ] A creature's `loot` and `abilities` are non-empty in the same response that carries its image.
-- [ ] Every stored URL is the API's verbatim, and is an absolute `https:` on `static.wikia.nocookie.net` — validated at store time, not only in a test.
+- [ ] Every stored `url` is the API's verbatim and an absolute `https:` on `static.wikia.nocookie.net`; every `descriptionUrl` an absolute `https:` on `tibia.fandom.com` — both validated at store time, not only in a test.
 - [ ] `mcp_image` is in `REQUIRED_NON_EMPTY`, has an `ANCHOR_CHILDREN` entry for Dragon, and survives fixture regeneration.
 - [ ] `MCP_SCHEMA_VERSION` is 2 in both files; a version-1 index is rejected.
 - [ ] No field, description or doc line describes image dimensions as a tile footprint.
@@ -237,5 +243,5 @@ Every key column is `NOT NULL`: SQLite permits NULLs in primary-key columns of a
 
 ### Rejected
 
-- **codex: "the path prefix is derivable from the canonical filename."** Checked: `md5("Dragon.gif")` yields `e0/e0…` against an observed `f/fb`. Not derivable by the stated method. The contract — store the API's URL verbatim — was already right; only the plan's justification needed softening.
+- ~~**codex: "the path prefix is derivable from the canonical filename."**~~ **This rejection was wrong and is withdrawn.** The prefix *is* `md5(filename)`-derivable; my refutation compared `md5("Dragon.gif")` against a `/f/fb/` path belonging to **Blood_Hand.gif**, the first row of an unrelated sample. Re-measured: Dragon `e/e0`, Demon `7/75`, Steel_Helmet `c/cd`, Blood_Hand `f/fb` — each matches its own hash. codex was right; I rejected a correct finding on my own measurement error, and draft 2 carried the false claim into a constraint about how to weigh codex findings.
 - **codex: "multiple subjects requesting the same file" as a live risk.** Measured: **0** titles appear in more than one of the seven tables. Kept as a defensive contract, labelled as such, not as a corpus fact.

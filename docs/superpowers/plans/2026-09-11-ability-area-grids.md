@@ -274,12 +274,12 @@ export async function buildIndex(
 - [ ] The five existing `build-index` tests make zero network calls.
 - [ ] Fixture stays under 1.5 MB, **asserted by a test** — an ungated criterion will not be checked. Currently 1.0 MB.
 
-## Review (2026-09-11)
+## Review 1 — first draft (2026-09-11)
 
 - **Verdict: Needs revision before implementation**
 - Reviewers: plan-final-reviewer; codex-consult (high, 40s, 27049 tokens); grok-consult — on request only, not run
 - Tier: **single**, upheld by both reviewers. `scripts/review-tier.py` cannot compute it — the change set does not exist yet — so the declaration is judged on merits: no auth, secrets, or concurrency surface, writes confined to a temp file behind the existing atomic rename.
-- Adopted: none — a `Needs revision` verdict leaves the body untouched. The findings below are the revision brief.
+- Adopted: none — a `Needs revision` verdict leaves the body untouched. The findings below were the brief for draft 2, and all nine are addressed there; this stamp records the state of **draft 1**, not the current body.
 
 ### Blocking — confirmed against the primary source, not taken on trust
 
@@ -304,3 +304,32 @@ The spike backs the 92.7% join rate and its buckets, the four-column key, the me
 ### Rejected
 
 - None. Every finding was verified against the repo or the live module before adoption.
+
+## Review 2 — second draft (2026-09-11)
+
+- **Verdict: Needs revision before implementation**
+- Reviewers: plan-final-reviewer; codex-consult (high, 36s, 38925 tokens); grok-consult — on request only, not run
+- Tier: **single**, upheld again by both reviewers.
+- Adopted: none in this stamp — `Needs revision` leaves the body untouched. Findings below are the brief for draft 3.
+- **Closure on draft 1's nine:** seven fully closed and independently re-verified against the live module; #7 closed with a wrinkle (supplied-but-empty `element=`); #8 closed for non-empty input only.
+
+### New blocking findings — all verified before adoption
+
+1. **Identity drift — the most serious defect found in either round.** After a fallback tier matches, the *extracted* `(effect, element)` need not equal the *matched row's*, and draft 2 stores the extracted form. Measured full-corpus: tier 1 = 1,055 joins with 0 drift; **tier 2 = 553, all drifted; tier 3 = 141, all drifted — 694 of 1,749 (39.7%)**. Those rows would be written, counted toward a passing 98.8% gate, and return `null` at runtime. Both planned runtime anchors are tier-1, the only tier that cannot drift, so **every test in draft 2 would have passed**. Tenth instance of this repo's signature failure, caught in acceptance criteria rather than code. `SceneRef` must carry the matched row's normalised identity, and a runtime test must anchor on tier 2 or 3.
+2. **The "NULL and `''` mean the same thing" row is false, and two tests depend on it.** Confirmed: `effect is null` occurs only with `element` in (`plain_text` 120, `no_template` 6) — prose entries that never carry a scene. Draft 2's NULL tests describe rows that cannot exist, and the Task 5 one would need a hand-inserted fixture row that `make-fixture.mjs` erases on regeneration. Real anchor: The Rootkraken's `Death and Holy AoE`, whose row carries `effect ''` **and** `element ''` and is already in `NAMED_CREATURES`.
+3. **Argument trimming unspecified, and the plan's own example hides it.** Real wikitext is `element=fire\n  |scene=…`; ~32% of `|element=` occurrences carry surrounding whitespace. Draft 2's Task 3 test quotes a *flattened* example, so a test written from the plan passes while every real page fails.
+4. **The `'?'` default was dropped.** Recorded in the spike addendum but missing from draft 2's per-kind row: an absent damage/range argument maps to `'?'` — 987 rows carry it, 219 of them `Melee`.
+5. **`mcp_schema_version` not retained by the fixture builder.** Any table outside `USED`/`keepByType`/`KEEP_WHOLE` is fully emptied; `mcp_ability_area` additionally cannot ride on `keepByType`, which prunes by `article_id` it does not have.
+6. **Zero eligible scenes yields `NaN`, and `NaN < 0.95` is false** — the build gate passes on an empty corpus.
+
+### Also to fix
+
+`test/db.test.ts` (seven synthetic schema-only DBs) breaks unless the probe checks columns before row counts; `test/fixture-shape.test.ts`'s `REQUIRED_NON_EMPTY` must gain both tables and host the ungated 1.5 MB budget; fixture regeneration must be ordered enrich → regenerate → tighten probe; page→`creature_id` resolution is unspecified and `Category:Creatures` holds non-creature pages (2,209 members vs 2,193 rows); a rejected `fetch` has no status; assert the User-Agent's contact token, not mere presence; say the Lua fixture is the module verbatim with malformed cases passed inline.
+
+### Corrected overclaim
+
+Addendum 1 said the tiered match "never mis-assigned once across the whole corpus." 0 ambiguous means no *detected* ambiguity — a tier matching exactly one row can still match the wrong one. Corrected in Addendum 2.
+
+### Gate cap reached
+
+This is the second of at most two gate invocations. A third requires the user's say-so.

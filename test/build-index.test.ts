@@ -22,11 +22,17 @@ const api = { pageWikitext: async () => { fetches += 1; return []; },
               categoryMembers: async () => { fetches += 1; return []; },
               imageInfo: async () => { fetches += 1; return []; } };
 
+/** Per-type image stats that satisfy the build gate: all seven present, all resolved. */
+const allTypesResolved = () => Object.fromEntries(
+  (['creature', 'item', 'npc', 'spell', 'mount', 'imbuement', 'charm'] as const).map((t) =>
+    [t, { subjects: 1, resolved: 1, missing: 0, invalid: 0, skipped: 0 }]),
+);
+
 const stats = (over: Partial<EnrichStats> = {}): EnrichStats => ({
   scenes: 10, joined: 10, ambiguous: 0, noRow: 0,
   discardedKind: 0, discardedNoSpell: 0, discardedRotate: 0, unparsedMember: 0,
   patterns: 114, rejectedPatterns: [], stored: 10, danglingKey: 0, pagesNotInIndex: 0,
-  missingPages: 0, conflictingKey: 0,
+  missingPages: 0, conflictingKey: 0, images: allTypesResolved(),
   ...over,
 });
 const noopEnrich = async () => stats();
@@ -130,7 +136,7 @@ test('enrichment runs before validation, not after', async () => {
   const bare = join(dir, 'bare.db');
   copyFileSync(FIXTURE, bare);
   const strip = new DatabaseSync(bare);
-  strip.exec('drop table mcp_ability_area; drop table mcp_area_pattern; drop table mcp_schema_version');
+  strip.exec('drop table mcp_ability_area; drop table mcp_area_pattern; drop table mcp_schema_version; drop table mcp_image');
   strip.close();
 
   await buildIndex({
@@ -145,8 +151,12 @@ test('enrichment runs before validation, not after', async () => {
                  pattern_key text not null references mcp_area_pattern(key), effect_on_caster integer not null,
                  primary key (creature_id, ability_name, ability_effect, ability_element));
                create table mcp_schema_version (version integer not null);
+               create table mcp_image (entity_type text not null, article_id integer not null,
+                 file_name text not null, url text not null, description_url text not null,
+                 width integer not null, height integer not null, mime_type text not null,
+                 primary key (entity_type, article_id));
                insert into mcp_area_pattern values ('8sqmwave', 9, '[0]');
-               insert into mcp_schema_version values (1);`);
+               insert into mcp_schema_version values (2);`);
       db.close();
       return stats();
     },
@@ -190,6 +200,72 @@ test('a surge of unrecognised member openers fails the build', async () => {
     /unrecognised member opener/i,
   );
   assert.equal(existsSync(target), false);
+});
+
+const imageStats = (over: Record<string, unknown> = {}) => ({
+  ...allTypesResolved(), ...over,
+});
+
+test('a type that resolves no images fails the build, naming it', async () => {
+  const dir = scratch();
+  const target = join(dir, 'tibiawiki.db');
+  await assert.rejects(
+    buildIndex({
+      targetPath: target, api,
+      enrich: async () => stats({ images: imageStats({
+        charm: { subjects: 24, resolved: 0, missing: 24, invalid: 0, skipped: 0 },
+      }) }),
+      run: (_cmd, args) => { copyFileSync(FIXTURE, args[args.length - 1]!); return { status: 0, stderr: '' }; },
+    }),
+    /charm.*0\.0%.*below the 95% floor/s,
+  );
+  assert.equal(existsSync(target), false);
+});
+
+test('a type that was never requested fails the build', async () => {
+  const dir = scratch();
+  const target = join(dir, 'tibiawiki.db');
+  // The corpus-wide rate cannot see this: with no charm entry, every present type
+  // still reads 100%.
+  const withoutCharm = imageStats();
+  delete (withoutCharm as Record<string, unknown>)['charm'];
+  await assert.rejects(
+    buildIndex({
+      targetPath: target, api,
+      enrich: async () => stats({ images: withoutCharm }),
+      run: (_cmd, args) => { copyFileSync(FIXTURE, args[args.length - 1]!); return { status: 0, stderr: '' }; },
+    }),
+    /no subjects for "charm"/,
+  );
+});
+
+test('an unusable image response fails the build even at full coverage', async () => {
+  const dir = scratch();
+  const target = join(dir, 'tibiawiki.db');
+  await assert.rejects(
+    buildIndex({
+      targetPath: target, api,
+      enrich: async () => stats({ images: imageStats({
+        item: { subjects: 100, resolved: 100, missing: 0, invalid: 4, skipped: 0 },
+      }) }),
+      run: (_cmd, args) => { copyFileSync(FIXTURE, args[args.length - 1]!); return { status: 0, stderr: '' }; },
+    }),
+    /item.*4 unusable/s,
+  );
+});
+
+test('missing images alone do not fail the build', async () => {
+  const dir = scratch();
+  const target = join(dir, 'tibiawiki.db');
+  // 209/211 is the real spell rate; a wiki gap must not block a release.
+  await buildIndex({
+    targetPath: target, api,
+    enrich: async () => stats({ images: imageStats({
+      spell: { subjects: 211, resolved: 209, missing: 2, invalid: 0, skipped: 0 },
+    }) }),
+    run: (_cmd, args) => { copyFileSync(FIXTURE, args[args.length - 1]!); return { status: 0, stderr: '' }; },
+  });
+  assert.ok(existsSync(target));
 });
 
 test('no build-index case reaches the network', () => {

@@ -46,6 +46,12 @@ function fakeApi(pages: Record<string, string>, lua = LUA): WikiApi & { fetches:
   return api;
 }
 
+/** Per-type image stats that satisfy the build gate: all seven present, all resolved. */
+const allTypesResolved = () => Object.fromEntries(
+  (['creature', 'item', 'npc', 'spell', 'mount', 'imbuement', 'charm'] as const).map((t) =>
+    [t, { subjects: 1, resolved: 1, missing: 0, invalid: 0, skipped: 0 }]),
+);
+
 const open = (p: string) => new DatabaseSync(p, { readOnly: true });
 const count = (db: DatabaseSync, table: string) =>
   (db.prepare(`select count(*) c from "${table}"`).get() as { c: number }).c;
@@ -165,7 +171,7 @@ test('eligibleScenes excludes intentional discards only', () => {
     scenes: 100, joined: 80, ambiguous: 1, noRow: 4,
     discardedKind: 10, discardedNoSpell: 2, discardedRotate: 1, unparsedMember: 2,
     patterns: 114, rejectedPatterns: [], stored: 80, danglingKey: 0, pagesNotInIndex: 0,
-    missingPages: 0, conflictingKey: 0,
+    missingPages: 0, conflictingKey: 0, images: allTypesResolved(),
   };
   // 100 - (10 + 2 + 1 + 2) = 85. ambiguous and noRow are failures, not discards,
   // so they stay in the denominator.

@@ -4,7 +4,7 @@ import { randomBytes } from 'node:crypto';
 import { dirname, join } from 'node:path';
 import { openDb, resolveDbPath } from '../db.ts';
 import { createWikiApi, type WikiApi } from './wiki-api.ts';
-import { enrich, eligibleScenes, formatStats, type Enricher } from './enrich.ts';
+import { enrich, eligibleScenes, formatStats, IMAGE_TYPES, type Enricher } from './enrich.ts';
 
 /** Pinned: the schema this server probes for is this generator's output. */
 const GENERATOR = 'tibiawikisql==9.0.0';
@@ -24,6 +24,13 @@ const MIN_COVERAGE = 0.95;
  * Measured at 18 of 1,874 (1.0%); 2% is room to grow without hiding a regression.
  */
 const MAX_UNPARSED_SHARE = 0.02;
+
+/**
+ * Per-type floor for image resolution. Measured over full populations: four types at
+ * 100%, worst is spell at 209/211 = 99.05%. Per type rather than corpus-wide because
+ * a corpus-wide rate hides a whole type: every charm failing is 0.6% of 13,799.
+ */
+const MIN_IMAGE_COVERAGE = 0.95;
 
 export type Runner = (
   cmd: string,
@@ -98,6 +105,32 @@ export async function buildIndex(
           'sides of the coverage ratio, so coverage cannot be trusted here; member parsing has ' +
           'likely regressed.',
       );
+    }
+
+    for (const { entityType } of IMAGE_TYPES) {
+      const s = stats.images[entityType];
+      // A per-type rate cannot catch a type that was never requested at all: there
+      // would simply be no entry, and every present type would still read 100%.
+      if (!s || s.subjects === 0) {
+        throw new Error(
+          `Image resolution reported no subjects for "${entityType}". Every image-bearing ` +
+            'type must be requested; refusing to install.',
+        );
+      }
+      if (s.invalid > 0) {
+        throw new Error(
+          `Image resolution for "${entityType}" returned ${s.invalid} unusable response(s). ` +
+            'That is a broken integration rather than a wiki gap; refusing to install.',
+        );
+      }
+      const rate = s.resolved / s.subjects;
+      if (rate < MIN_IMAGE_COVERAGE) {
+        throw new Error(
+          `Image resolution for "${entityType}" is ${(100 * rate).toFixed(1)}%, below the ` +
+            `${(100 * MIN_IMAGE_COVERAGE).toFixed(0)}% floor (${s.resolved} of ${s.subjects}). ` +
+            'The naming convention has likely changed.',
+        );
+      }
     }
 
     const eligible = eligibleScenes(stats);

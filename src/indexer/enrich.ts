@@ -1,6 +1,8 @@
 import { DatabaseSync } from 'node:sqlite';
 import { parseSceneData } from './scene-data.ts';
 import { extractSceneRefs, type AbilityRow, type ExtractStats } from './ability-scenes.ts';
+import { resolveImages, type Subject, type TypeStats } from './images.ts';
+import type { EntityType } from '../domain.ts';
 import type { WikiApi } from './wiki-api.ts';
 
 /**
@@ -16,12 +18,28 @@ const SCENE_DATA_PAGE = 'Module:SceneBuilder/data';
 const CREATURE_CATEGORY = 'Category:Creatures';
 
 /** Bumped only when the shape below changes, so a stale index fails loudly. */
-export const MCP_SCHEMA_VERSION = 1;
+export const MCP_SCHEMA_VERSION = 2;
+
+/**
+ * The tables carrying an entity image. Every row is a subject, including
+ * `deprecated` and `ts-only` ones: that is the denominator the measured per-type
+ * resolution rates and the build's floor are calibrated on.
+ */
+export const IMAGE_TYPES: ReadonlyArray<{ entityType: EntityType; table: string }> = [
+  { entityType: 'creature', table: 'creature' },
+  { entityType: 'item', table: 'item' },
+  { entityType: 'npc', table: 'npc' },
+  { entityType: 'spell', table: 'spell' },
+  { entityType: 'mount', table: 'mount' },
+  { entityType: 'imbuement', table: 'imbuement' },
+  { entityType: 'charm', table: 'charm' },
+];
 
 export type EnrichStats = ExtractStats & {
   patterns: number;
   rejectedPatterns: Array<{ key: string; reason: string }>;
   stored: number;
+  images: Partial<Record<EntityType, TypeStats>>;
   danglingKey: number;
   pagesNotInIndex: number;
   /** Indexed creature pages the API listed but returned no content for. */
@@ -36,6 +54,7 @@ const DDL = `
 drop table if exists mcp_ability_area;
 drop table if exists mcp_area_pattern;
 drop table if exists mcp_schema_version;
+drop table if exists mcp_image;
 
 create table mcp_area_pattern (
   key   text    primary key,
@@ -54,6 +73,18 @@ create table mcp_ability_area (
 );
 
 create table mcp_schema_version (version integer not null);
+
+create table mcp_image (
+  entity_type     text    not null,
+  article_id      integer not null,
+  file_name       text    not null,
+  url             text    not null,
+  description_url text    not null,
+  width           integer not null,
+  height          integer not null,
+  mime_type       text    not null,
+  primary key (entity_type, article_id)
+);
 `;
 
 export async function enrich(dbPath: string, api: WikiApi): Promise<EnrichStats> {
@@ -91,7 +122,7 @@ export async function enrich(dbPath: string, api: WikiApi): Promise<EnrichStats>
       scenes: 0, joined: 0, ambiguous: 0, noRow: 0,
       discardedKind: 0, discardedNoSpell: 0, discardedRotate: 0, unparsedMember: 0,
       patterns: patterns.length, rejectedPatterns: rejected,
-      stored: 0, danglingKey: 0, pagesNotInIndex: 0, missingPages: 0, conflictingKey: 0,
+      stored: 0, images: {}, danglingKey: 0, pagesNotInIndex: 0, missingPages: 0, conflictingKey: 0,
     };
 
     const insertArea = db.prepare(
@@ -154,6 +185,28 @@ export async function enrich(dbPath: string, api: WikiApi): Promise<EnrichStats>
       }
     }
 
+    // Images: a URL and its pixel size, never the bytes.
+    const subjects: Subject[] = [];
+    for (const { entityType, table } of IMAGE_TYPES) {
+      for (const r of db.prepare(`select article_id, title from "${table}"`).all()) {
+        subjects.push({ entityType, articleId: Number(r['article_id']), title: String(r['title']) });
+      }
+    }
+    const { refs, stats: imageStats } = await resolveImages(subjects, api);
+    stats.images = imageStats;
+
+    const insertImage = db.prepare(
+      `insert into mcp_image
+         (entity_type, article_id, file_name, url, description_url, width, height, mime_type)
+       values (?, ?, ?, ?, ?, ?, ?, ?)`,
+    );
+    for (const ref of refs) {
+      insertImage.run(
+        ref.entityType, ref.articleId, ref.fileName,
+        ref.url, ref.descriptionUrl, ref.width, ref.height, ref.mimeType,
+      );
+    }
+
     db.prepare('insert into mcp_schema_version (version) values (?)').run(MCP_SCHEMA_VERSION);
     return stats;
   } finally {
@@ -188,5 +241,13 @@ export function formatStats(stats: EnrichStats): string {
     `  pages not in index ${stats.pagesNotInIndex}`,
     `  MISSING pages      ${stats.missingPages}`,
     `  stored/eligible ${stats.stored}/${eligible} = ${pct}%`,
+    '  images:',
+    ...IMAGE_TYPES.map(({ entityType }) => {
+      const s = stats.images[entityType];
+      if (!s) return `    ${entityType.padEnd(10)} NO SUBJECTS`;
+      const rate = s.subjects > 0 ? ((100 * s.resolved) / s.subjects).toFixed(1) : 'n/a';
+      return `    ${entityType.padEnd(10)} ${s.resolved}/${s.subjects} = ${rate}%` +
+        `  (missing ${s.missing}, invalid ${s.invalid}, skipped ${s.skipped})`;
+    }),
   ].join('\n');
 }

@@ -12,6 +12,23 @@ import { FIXTURE } from './harness.ts';
  */
 const MAX_FIXTURE_BYTES = 1_500_000;
 
+test('every fixture image row has a surviving parent', () => {
+  // mcp_image rides on neither keepByType nor the FK sweep, so it is pruned
+  // explicitly after the sweep. An orphan here means that pruning regressed.
+  const db = new DatabaseSync(FIXTURE, { readOnly: true });
+  const orphans: string[] = [];
+  for (const type of ['creature', 'item', 'npc', 'spell', 'mount', 'imbuement', 'charm']) {
+    const { c } = db.prepare(
+      `select count(*) c from mcp_image m
+         where m.entity_type = ?
+           and m.article_id not in (select article_id from "${type}")`,
+    ).get(type) as { c: number };
+    if (c > 0) orphans.push(`${type}: ${c}`);
+  }
+  db.close();
+  assert.deepEqual(orphans, [], 'image rows whose parent was pruned away');
+});
+
 test('the committed fixture stays within its size budget', () => {
   const bytes = statSync(FIXTURE).size;
   assert.ok(
@@ -41,7 +58,7 @@ const REQUIRED_NON_EMPTY = [
   'creature_ability', 'creature_max_damage', 'creature_sound',
   'item_key', 'item_sound', 'item_store_offer', 'item_proficiency_perk',
   'npc_job', 'npc_race', 'npc_destination', 'quest_danger',
-  'mcp_area_pattern', 'mcp_ability_area', 'mcp_schema_version',
+  'mcp_area_pattern', 'mcp_ability_area', 'mcp_schema_version', 'mcp_image',
 ] as const;
 
 test('every table the tools read has at least one fixture row', () => {
@@ -66,6 +83,17 @@ const ANCHOR_CHILDREN: ReadonlyArray<readonly [string, string, string]> = [
   // [description, parent title, SQL counting that parent's child rows]
   ['Dragon abilities', 'Dragon',
    `select count(*) c from creature_ability a join creature c on c.article_id = a.creature_id where c.title = ?`],
+  // Per-type, because REQUIRED_NON_EMPTY stays green on 209 spell image rows alone
+  // while every creature or charm image is pruned away - the quest_danger scar.
+  ['Dragon image', 'Dragon',
+   `select count(*) c from mcp_image m join creature e on e.article_id = m.article_id
+      where m.entity_type = 'creature' and e.title = ?`],
+  ['Adrenaline Burst image', 'Adrenaline Burst',
+   `select count(*) c from mcp_image m join charm e on e.article_id = m.article_id
+      where m.entity_type = 'charm' and e.title = ?`],
+  ['Powerful Reap image', 'Powerful Reap',
+   `select count(*) c from mcp_image m join imbuement e on e.article_id = m.article_id
+      where m.entity_type = 'imbuement' and e.title = ?`],
   ['Dragon max damage', 'Dragon',
    `select count(*) c from creature_max_damage m join creature c on c.article_id = m.creature_id where c.title = ?`],
   ['Golden Key keys', 'Golden Key',

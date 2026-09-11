@@ -135,7 +135,18 @@ function parseArgs(body: string): Args {
 function parseScene(raw: string): Record<string, string> {
   const open = raw.indexOf('{{');
   if (open === -1) return {};
-  const inner = raw.slice(open + 2).replace(/\}\}\s*$/, '');
+  // Find this template's OWN closer by depth. Stripping a trailing `}}` instead
+  // leaves anything that follows the template (an HTML comment, say) glued to the
+  // last argument, so `spell=8sqmwave}} <!--x-->` becomes the pattern key.
+  let i = open + 2;
+  let depth = 1;
+  while (i < raw.length && depth > 0) {
+    const two = raw.slice(i, i + 2);
+    if (two === '{{') { depth += 1; i += 2; continue; }
+    if (two === '}}') { depth -= 1; i += 2; continue; }
+    i += 1;
+  }
+  const inner = raw.slice(open + 2, depth === 0 ? i - 2 : raw.length);
   const args: Record<string, string> = {};
   for (const part of splitDepth0(inner)) {
     const m = /^\s*([A-Za-z_0-9]+)\s*=([\s\S]*)$/.exec(part);
@@ -232,7 +243,9 @@ export function extractSceneRefs(
 
     const args = parseArgs(body);
     const scene = parseScene(args.named['scene'] ?? '');
-    if (scene['rotate90'] === 'yes') { stats.discardedRotate += 1; continue; }
+    // Case-insensitive: a `rotate90=Yes` would otherwise store a transposed grid
+    // and serve it as authoritative.
+    if (scene['rotate90']?.toLowerCase() === 'yes') { stats.discardedRotate += 1; continue; }
     const spell = scene['spell'];
     if (!spell) { stats.discardedNoSpell += 1; continue; }
 
@@ -249,7 +262,7 @@ export function extractSceneRefs(
       abilityEffect: norm(result.row.effect),
       abilityElement: norm(result.row.element),
       patternKey: spell,
-      effectOnCaster: scene['effect_on_caster'] === 'yes',
+      effectOnCaster: scene['effect_on_caster']?.toLowerCase() === 'yes',
     });
     stats.joined += 1;
   }

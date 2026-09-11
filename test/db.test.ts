@@ -87,11 +87,14 @@ test('openDb validates database_info by KEY, not by column', () => {
  * opening a v2 index would parse `cells` under the wrong shape and serve wrong
  * grids as authoritative. Every branch is asserted, and each must name the remedy.
  */
-for (const [label, setup] of [
-  ['absent', 'delete from mcp_schema_version'],
-  ['duplicated', 'insert into mcp_schema_version (version) values (1)'],
-  ['newer than supported', 'update mcp_schema_version set version = 99'],
-  ['non-integer', "update mcp_schema_version set version = 'banana'"],
+for (const [label, setup, expected] of [
+  ['absent', 'delete from mcp_schema_version', /holds 0 rows/],
+  ['duplicated', 'insert into mcp_schema_version (version) values (1)', /holds 2 rows/],
+  ['newer than supported', 'update mcp_schema_version set version = 99', /newer than/],
+  // Anchored on this branch's own wording. A loose alternation would also match the
+  // mismatch branch's "version NaN, older than..." message, which is how a targeted
+  // check becomes deletable without any test noticing.
+  ['non-integer', "update mcp_schema_version set version = 'banana'", /non-integer/],
 ] as const) {
   test(`openDb rejects an enrichment version that is ${label}`, () => {
     const bad = join(scratch(), 'badversion.db');
@@ -101,7 +104,7 @@ for (const [label, setup] of [
     db.close();
     assert.throws(() => openDb(bad), (e: unknown) => {
       assert.ok(e instanceof SchemaError, `expected SchemaError, got ${String(e)}`);
-      assert.match((e as Error).message, /mcp_schema_version|area data/);
+      assert.match((e as Error).message, expected);
       assert.match((e as Error).message, /tibiawiki-mcp build-index/,
         'the message must name the remedy, as every other probe error does');
       return true;

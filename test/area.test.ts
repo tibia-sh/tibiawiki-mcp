@@ -85,7 +85,33 @@ test('a grid whose cells do not fill its width is rejected with a reason', () =>
   assert.equal(r.patterns.length, 0);
   assert.equal(r.rejected.length, 1);
   assert.equal(r.rejected[0]!.key, 'bad');
-  assert.match(r.rejected[0]!.reason, /width/i);
+  assert.match(r.rejected[0]!.reason, /do not fill a width/);
+});
+
+test('a malformed width is rejected, not made invisible', () => {
+  // Demanding \d+ in the entry pattern makes this fail to match the entry at all,
+  // so it produces neither a pattern nor a rejection - the one outcome the parser
+  // promises never to produce.
+  const r = parseSceneData(`["bad"] = {{0,1,0,1}, -2}`);
+  assert.equal(r.patterns.length, 0);
+  assert.equal(r.rejected.length, 1);
+  assert.match(r.rejected[0]!.reason, /positive integer/);
+});
+
+test('an interior empty cell slot is rejected, not silently repaired', () => {
+  // Filtering empty tokens turns this into a valid two-cell grid that the runtime
+  // would then serve as authoritative.
+  const r = parseSceneData(`["gap"] = {{0,,1}, 2}`);
+  assert.equal(r.patterns.length, 0);
+  assert.equal(r.rejected.length, 1);
+  assert.match(r.rejected[0]!.reason, /empty slot/);
+});
+
+test('a single trailing comma is tolerated', () => {
+  // Two entries in the real module end this way; rejecting them would drop them.
+  const r = parseSceneData(`["ok"] = {{0,1,0,1,}, 2}`);
+  assert.equal(r.rejected.length, 0);
+  assert.deepEqual(r.patterns[0]!.cells, [0, 1, 0, 1]);
 });
 
 test('a duplicate key is rejected rather than silently overwritten', () => {

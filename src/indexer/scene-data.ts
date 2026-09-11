@@ -59,10 +59,6 @@ export function parseSceneData(lua: string): SceneDataResult {
       continue;
     }
     const cells = tokens.map(Number);
-    if (cells.length === 0) {
-      rejected.push({ key, reason: 'no cells' });
-      continue;
-    }
     if (cells.length % width !== 0) {
       rejected.push({ key, reason: `${cells.length} cells do not fill a width of ${width}` });
       continue;

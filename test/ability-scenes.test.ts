@@ -135,6 +135,19 @@ test('a repeated Scene argument resolves last-wins, as MediaWiki does', () => {
   assert.equal(only(extractSceneRefs(wt, DRAGON)).effectOnCaster, false);
 });
 
+test('text after the Scene template does not leak into the pattern key', () => {
+  const wt = `|{{Ability|Fire Wave|100-170|element=fire|scene={{Scene|spell=8sqmwave}} <!--note-->}}`;
+  assert.equal(only(extractSceneRefs(wt, DRAGON)).patternKey, '8sqmwave');
+});
+
+test('rotate90 and effect_on_caster are matched case-insensitively', () => {
+  const rot = `|{{Ability|Fire Wave|100-170|element=fire|scene={{Scene|spell=8sqmwave|rotate90=Yes}}}}`;
+  assert.equal(extractSceneRefs(rot, DRAGON).stats.discardedRotate, 1,
+    'a capitalised Yes must not store a transposed grid');
+  const cast = `|{{Ability|Fire Wave|100-170|element=fire|scene={{Scene|spell=8sqmwave|effect_on_caster=YES}}}}`;
+  assert.equal(only(extractSceneRefs(cast, DRAGON)).effectOnCaster, true);
+});
+
 test('a Scene with no spell= is discarded', () => {
   const wt = `|{{Ability|Fire Wave|100-170|element=fire|scene={{Scene|input_array=0,1,0}}}}`;
   const r = extractSceneRefs(wt, DRAGON);

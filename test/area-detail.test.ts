@@ -120,6 +120,31 @@ test('an element containing a space survives to the runtime join', async () => w
   assert.equal(fields.area.key, '3sqmstrike');
 }));
 
+/**
+ * The area join must never multiply rows. A creature's ability list has to match
+ * creature_ability exactly; a join that over-matches (dropping creature_id, or the
+ * effect clause) silently duplicates abilities instead of losing them.
+ *
+ * A targeted "one creature gets another's grid" assertion is not written here on
+ * purpose: no two fixture creatures share an identical (name, effect, element)
+ * where only one has an area, so such a test could not fail for the right reason.
+ */
+test('the area join returns each ability exactly once', async () => withServer(async (h) => {
+  const counts = new Map<string, number>();
+  for (const name of ['Dragon', 'Bonelord', 'Demon', 'The Rootkraken']) {
+    const abilities = await abilitiesOf(h, name);
+    const seen = new Set<string>();
+    for (const a of abilities) {
+      const identity = `${a.name}\u0000${a.effect}\u0000${a.element}`;
+      assert.ok(!seen.has(identity), `${name} returned "${a.name}" more than once`);
+      seen.add(identity);
+    }
+    counts.set(name, abilities.length);
+  }
+  assert.equal(counts.get('Dragon'), 4, 'Dragon has exactly four ability rows');
+  assert.equal(counts.get('Bonelord'), 8, 'Bonelord has exactly eight');
+}));
+
 test('an ability with no matched scene returns null, never an empty grid', async () => withServer(async (h) => {
   const melee = find(await abilitiesOf(h, 'Dragon'), 'Melee');
   assert.equal(melee.area, null);

@@ -82,3 +82,62 @@ change that breaks the join is loud rather than silent.
 
 The spike code was throwaway and is not kept; this document holds everything needed
 to rebuild it.
+
+---
+
+## Addendum — full-corpus re-measurement (2026-09-11, post-gate)
+
+The plan gate rejected Plan C partly on this spike's residual risk: 92.7% came from
+400 of 2,193 creatures (18%). Re-run over **every** creature page instead.
+
+### Result — 1,856 scenes across 2,209 creature pages
+
+| Outcome | Count | Share |
+|---|---:|---:|
+| **joined uniquely** | **1,749** | **94.2%** |
+| ambiguous | 0 | 0.0% |
+| no matching row | 21 | 1.1% |
+| discarded — dropped kind (`Haste`/`Debuff`/`Outfit`) | 79 | 4.3% |
+| discarded — no `spell=` (inline `input_array`) | 6 | 0.3% |
+| discarded — `rotate90=yes` | 1 | 0.1% |
+| **sum** | **1,856** | 100% |
+
+Higher than the sample suggested, and **0 ambiguous**: the tiered four-column match
+never mis-assigned once across the whole corpus. Of the 21 misses, 11 are
+`{{Healing}}` members on pages whose generated row carries a different name; the
+other 10 are singletons.
+
+### Two facts this spike got wrong, corrected here
+
+1. **`Module:SceneBuilder/data` defines 114 patterns, not 94** — 94 written `["key"]`
+   plus 20 written `['key']`. A double-quote-only regex returns exactly 94, which is
+   why the wrong number looked self-consistent. All 114 satisfy `cells % width == 0`.
+2. **The cell legend was wrong.** `Module:SceneBuilder` defines
+   `[0] tile_only · [1] effect · [2] caster · [3] target · [4]–[8] extra_sprite_1..5`.
+   `3` is the **target tile**, not a direction marker — direction is the Scene's own
+   `look_direction=`. Values **0–5 are in live use**; 9 of the 114 patterns use ≥4.
+
+### Newly measured, not previously known
+
+- **Per-kind argument mapping** — the six normalisations were incomplete. Each member
+  kind produces its triple differently: `Melee` → name `Melee`, element defaults
+  `physical`, effect defaults `?`; `Healing` → element always `healing`, effect from
+  `range=`, name defaults `Self-Healing` but varies (`Frequent Self-Healing` ×18,
+  `Self Healing` ×11, `Mass Healing` ×6); `Summon` → name is the summoned creature,
+  effect the amount, element `summon`. Ignoring this scored **0%**, not a degraded rate.
+- **Depth counting must include `{{ }}`.** The reference is a *nested* template,
+  `scene={{Scene|spell=<key>|…}}`. Counting only `[[ ]]` shreds every scene-carrying member.
+- **`effect_on_caster=yes` appears on 463 scenes (24.8%)** — this, not the grid, is
+  what says whether the caster is inside the effect.
+- **`sprite_1`…`sprite_5` name what cells `4`–`8` mean** (`sprite_1` ×13, `sprite_2` ×2),
+  e.g. The Rootkraken's `sprite_1=Holy Effect`. Cell `4` is not "unknown" — it is a
+  named effect the Scene itself supplies.
+- **`creature_ability` mixes NULL and `''`** for the same meaning: `effect` is NULL on
+  126 rows and `''` on 137. Matching and storage must both be NULL-safe.
+- Anchors: `8sqmwave` = 45 cells / width 9 / 5 rows (confirmed);
+  `rootkraken1` = 117 cells / width 9 / 13 rows / values 0–4.
+- 101 of the 114 defined keys are actually referenced by creature pages.
+
+**Method:** live `action=query` over all 2,209 `Category:Creatures` pages, joined
+against the local index (5,854 ability rows; the four-column key is unique across
+all of them, `(creature_id, name)` collapses to 5,835 — both confirmed).

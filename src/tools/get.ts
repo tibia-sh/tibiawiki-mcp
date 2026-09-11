@@ -239,7 +239,7 @@ const worldOut = z.object({
   onlineSince: z.string().nullable(),
   offlineSince: z.string().nullable(),
   mergedInto: z.string().nullable(),
-  battleye: z.string().nullable(),
+  battleye: z.boolean().nullable(),
   battleyeType: z.string().nullable(),
   protectedSince: z.string().nullable(),
   worldBoard: z.number().nullable(),
@@ -328,10 +328,14 @@ export function registerGet(server: McpServer, handle: TibiaDb): void {
     `select i.title, m.amount from imbuement_material m join item i on i.article_id = m.item_id
      where m.imbuement_id = ? order by i.title asc`);
   const outfitQuests = db.prepare(
+    // Total order: Assassin Outfits has two rows for the same quest title,
+    // distinguished only by unlock_type ('outfit' and 'addons').
     `select q.title, oq.unlock_type from outfit_quest oq join quest q on q.article_id = oq.quest_id
-     where oq.outfit_id = ? order by q.title asc`);
+     where oq.outfit_id = ? order by q.title asc, oq.unlock_type asc`);
 
-  const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+  // tibiawiki-sql: "Day of the week, Monday starts at 0." Starting this array at
+  // Sunday shifted the entire schedule by one day.
+  const WEEKDAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
   const DAMAGE_KEYS = [
     ...ELEMENTS, 'manadrain', 'summons', 'total',
   ] as const;
@@ -508,7 +512,7 @@ export function registerGet(server: McpServer, handle: TibiaDb): void {
           pvpType: str(row.pvp_type), isPreview: bool(row.is_preview),
           isExperimental: bool(row.is_experimental),
           onlineSince: str(row.online_since), offlineSince: str(row.offline_since),
-          mergedInto: str(row.merged_into), battleye: str(row.battleye),
+          mergedInto: str(row.merged_into), battleye: bool(row.battleye),
           battleyeType: str(row.battleye_type), protectedSince: str(row.protected_since),
           worldBoard: num(row.world_board), tradeBoard: num(row.trade_board), source,
         };

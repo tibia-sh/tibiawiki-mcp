@@ -87,7 +87,14 @@ test('Rashid returns a seven-day schedule with weekday names', async () => {
   const rashid = await get(h, 'Rashid', 'npc');
   assert.equal(rashid.rashidSchedule.length, 7);
   const days = rashid.rashidSchedule.map((d: any) => d.day);
-  assert.ok(days.includes('Monday'), `expected weekday names, got ${JSON.stringify(days)}`);
+  // Asserting only that 'Monday' appears somewhere let a one-day shift through:
+  // tibiawiki-sql documents day 0 as MONDAY, and starting the week at Sunday moved
+  // every entry. Pin the order and a known city instead.
+  assert.deepEqual(days, [
+    'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday',
+  ]);
+  const monday = rashid.rashidSchedule.find((d: any) => d.day === 'Monday');
+  assert.equal(monday.city, 'Svargrond', 'day 0 is Monday, and Rashid is in Svargrond');
   assert.ok(rashid.rashidSchedule.every((d: any) => typeof d.city === 'string'));
   await h.close();
 });

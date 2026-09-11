@@ -165,3 +165,34 @@ Every key column is `NOT NULL`, because SQLite permits NULLs in primary-key colu
 - [ ] `mcp_image` is in `REQUIRED_NON_EMPTY` and survives fixture regeneration.
 - [ ] `MCP_SCHEMA_VERSION` is 2 in both files, and a version-1 index is rejected naming `build-index`.
 - [ ] No field, description or doc line describes image dimensions as a tile footprint.
+
+## Review 1 — first draft (2026-09-12)
+
+- **Verdict: Needs revision before implementation**
+- Reviewers: plan-final-reviewer; codex-consult (high, 53s, 56369 tokens); grok-consult — on request only, not run
+- Tier: **single**, upheld, with one addition: the review rationale must name the third-party-URL surface, not only licensing.
+- Adopted: none in this stamp — `Needs revision` leaves the body untouched. Findings below are the brief for draft 2.
+
+### Blocking — verified before adoption
+
+1. **The naming convention fails for 2 of the 7 in-scope types, and my facts table never sampled them.** Measured over full populations: **charm `.gif` 0/24, `.png` 24/24**; **imbuement `.gif` 9/72, `.png` 72/72**. As written, every charm and 63 of 72 imbuements return `image: null` and nothing fails, because all three runtime anchors are `.gif` types. The extension is per type: `.gif` for creature/item/npc/spell/mount, `.png` for imbuement/charm. Nine imbuements (`{Basic,Intricate,Powerful} {Strike,Vampirism,Void}`) carry both at 64×64, so a try-gif-then-png rule would resolve those nine inconsistently with the other 63 — the per-type rule is correct, not merely simpler.
+2. **Aggregate counters would have hidden exactly that.** 87 of 13,799 is 0.6%, invisible in a corpus-wide summary, and the plan explicitly declined any gate. Counters and floor must be per entity type.
+3. **Request→entity mapping is unspecified, and the API makes it necessary.** Confirmed live: MediaWiki **normalises** titles (`File:dragon.gif` → `File:Dragon.gif`, `File:Steel_Helmet.gif` → `File:Steel Helmet.gif`), **reorders** responses, and **collapses** distinct requests onto one page — 4 requested titles returned 3 pages in a different order. Mapping by position or one-to-one silently attaches URLs to the wrong entities.
+4. **`select * from "<table>"` joined against `mcp_image` corrupts the entity row.** Both carry `article_id`; on a LEFT JOIN miss `row.article_id` becomes NULL and every child query (loot, abilities, keys) breaks.
+5. **Three tests could not fail.** "server instructions mention image copyright" passes against unmodified code — `src/server.ts:16` already says it. "the probe names `tibiawiki-mcp build-index`" matches every `SchemaError` in `src/db.ts`; `test/db.test.ts:68` carries a comment about this exact trap. The `image: null` anchor is unnamed and unreachable: the only image-less entities are `ts-only`, which `statusClause` excludes without `include_inactive`.
+6. **"Unresolved" conflates a wiki gap with a broken integration.** A malformed or truncated response must fail the build; a confirmed-missing file must not.
+7. **The Goal overstates what is verified.** The probe proves schema round-trip, not rendering. Rendering is host behaviour, and this server advertises `capabilities: { tools: {} }` with no `resources`.
+8. **The rights stance asserts more than it establishes.** Not storing bytes is an operational fact, not a licence conclusion; Fandom licenses non-text media separately from text.
+
+### Also to fix
+
+`WikiApi` gaining a method breaks the object literals in `test/build-index.test.ts` and `test/enrich.test.ts`, and neither file nor `src/indexer/wiki-api.ts` is listed; batching tests belong at the `wiki-api` layer where the fetcher is injectable; `requested` must be pinned to `subjects.length` or the sum invariant is tautological; `entityType` should be `EntityType` from `src/domain.ts`, not a free-form string; prune `mcp_image` from surviving rows and add an `ANCHOR_CHILDREN` entry for Dragon's image (`REQUIRED_NON_EMPTY` stays green on spell rows alone — the `quest_danger` scar); validate URL scheme and host at store time; label the `|`-in-title and non-image-mime tests defensive (0 of 13,799 and 0 of ~800); nine tables carry an `image` column, seven populated — say so, and note `outfit_image` is out of scope; fold the `MCP_SCHEMA_VERSION` bump into the fixture-regeneration step, since it reddens all 182 tests until then.
+
+### Free improvement adopted into the brief
+
+`imageinfo` returns **`descriptionurl`** (`https://tibia.fandom.com/wiki/File:Dragon.gif`) in the same response with no extra `iiprop` — verified. That is the canonical licence/author page, so it belongs in the stored row and in the structured output, putting attribution in the artifact the user sees.
+
+### Rejected
+
+- **codex: "the path prefix is derivable from the canonical filename."** Checked: `md5("Dragon.gif")` yields `e0/e0…` against an observed `f/fb`. Not derivable by the stated method. The contract — store the API's URL verbatim — was already right; only the plan's justification needed softening.
+- **codex: "multiple subjects requesting the same file" as a live risk.** Measured: **0** titles appear in more than one of the seven tables. Kept as a defensive contract, labelled as such, not as a corpus fact.

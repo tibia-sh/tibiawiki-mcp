@@ -295,3 +295,42 @@ export const IMAGE_ATTRIBUTION: string;   // committed verbatim, names CipSoft
 - [ ] A real `build-index` produces ≥10,000 image URLs, 94 area patterns and ≥1,000 ability areas.
 - [ ] Dragon's `Great Fireball` ability returns an ASCII area grid.
 - [ ] `claude plugin validate` passes and a fresh `claude -p` session answers using the skill plus tools.
+
+---
+
+## Review (2026-09-11, round 2 — gate cap reached; plan SPLIT)
+
+- **Verdict: Needs revision before implementation.** Both reviewers, both rounds.
+- Reviewers: `plan-final-reviewer` (opus); `codex-consult` (high, 36,560 tokens); `grok-consult` — not run.
+- **This plan is superseded by the split below and must not be executed as written.**
+
+### The decisive finding: the round-1 fix made things worse
+
+Round 1 rejected `(creature_id, ability_name)` because it loses 19 rows. The revision keyed on `ability_ordinal` instead. Round 2 measured that against 300 live creatures: **243/300 (81%) align — 57 misalign.** The generator silently drops `{{Haste}}`, `{{Outfit}}` and `{{Debuff}}` members *mid-list*, shifting every subsequent ordinal. Name-keying lost 19 rows **loudly**; ordinal-keying attaches area grids to the **wrong ability** for ~19% of creatures, **silently** — and the plan's `skipped` safety net cannot catch it, because a shifted ordinal is still in range.
+
+Restricting to the retained family reaches only 93.7%. The residual comes from raw-text members the generator also turns into rows.
+
+**The correct key, verified here independently:** `(creature_id, name, effect, element)` is **unique across all 5,854 rows — zero loss**, versus 5,835 for `(creature_id, name)`. `{{Ability|<name>|<effect>|element=<e>}}` supplies all three verbatim, so 320 of 363 sampled scene carriers join with no name derivation at all.
+
+Also established: the template family was wrong in **both** directions — missing `Haste` (9 scenes) and `Outfit` (3), while `Melee` and `Summon` carry **zero** scenes in 300 creatures. And ~6.6% of scenes are **structurally unattachable** because the generator drops their member entirely, so both the `≥1,000` floor and the unmatched-rate ceiling were set against an unexamined denominator.
+
+### Why the plan is split rather than revised a third time
+
+All **27,263** unexposed rows are already in the database and need no enrichment, no wiki API client and no scene join. This plan bundled that low-risk, high-value work with the one genuinely unsolved problem, and the unsolved part contaminated it across four gate rounds.
+
+- **Plan A — coverage, combat detail and the skill.** Tasks 4, 5 (without the `area` field) and 7. No new infrastructure, no network, no enrichment tables, no fixture-breaking probe change. Delivers every unexposed row and the skill. → `2026-09-11-expose-everything-and-skill.md`
+- **Plan B — image links.** Tasks 1, 3 (image half) and 6. Mechanical and well understood; deferred, not abandoned.
+- **Plan C — area grids.** Task 2 plus the ability join. **Needs a spike before any plan**: confirm the retained/dropped template split against `tibiawikisql==9.0.0`'s creature parser, then key on the composite tuple above. Encoding a guess in a contract is what produced this stamp twice.
+
+### Genuinely fixed in the revision (carry forward to the split plans)
+
+Round 1 blockers 4, 5 and 6 are fixed, not reworded: the nine union members are enumerated with columns the reviewer verified exist; `world` and `game_update` genuinely lack `status`; `rashid_position` genuinely has neither `title` nor `article_id`; all 23 tables are routed. `**Review tier:** single` is correct in both rounds. The five code fences are contracts, not bodies.
+
+### Carry-forward defects for Plan A
+
+- `ENTITY_TYPES` enumerates **14**, but prose and the completion gate say 13 — fix the gate, not the prose.
+- `searchTable` in `src/domain.ts` is not retired by the new `entityTable`/`entityIdColumn`; say it is replaced so no duplicate path survives.
+- `tibia_get` applies `statusClause` unconditionally too, not just `tibia_search` — both need the conditional for `world`/`update`.
+- Every new gate was a placeholder ("state a budget"). Pick the numbers in Plan A: `tools/list` is **14,149 bytes** today (descriptions 1,296 · inputSchemas 4,158 · outputSchemas 8,016 · `tibia_get.outputSchema` 4,992).
+- The `+8 KB` projection ignored Task 5's detail arrays on the five existing members, so it is optimistic.
+- Fixture retention should name rows, as `NAMED_CREATURES` already does — the heavy columns are `book.text` (1,226) and `game_update.changes` (695).

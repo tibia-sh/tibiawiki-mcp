@@ -26,8 +26,22 @@ const sourceSchema = z.object({
 });
 const detail = z.record(z.string(), z.union([z.string(), z.number(), z.null()])).optional();
 
+/**
+ * Linked, never stored. `width`/`height` are the sprite image's pixel size - NOT a
+ * tile footprint: 80% of creature images are 64x64 while nearly every creature
+ * occupies one square. Any describe() text here is emitted once per entity type.
+ */
+const imageSchema = z.object({
+  url: z.string(),
+  descriptionUrl: z.string(),
+  width: z.number(),
+  height: z.number(),
+  mimeType: z.string(),
+}).nullable().describe('Sprite image link. Dimensions are pixels, not map squares.');
+
 const creatureOut = z.object({
   type: z.literal('creature'),
+  image: imageSchema,
   title: z.string(),
   hitpoints: z.number().nullable(),
   experience: z.number().nullable(),
@@ -63,6 +77,7 @@ const creatureOut = z.object({
 });
 const itemOut = z.object({
   type: z.literal('item'),
+  image: imageSchema,
   title: z.string(),
   itemClass: z.string().nullable(),
   itemType: z.string().nullable(),
@@ -90,6 +105,7 @@ const itemOut = z.object({
 });
 const npcOut = z.object({
   type: z.literal('npc'),
+  image: imageSchema,
   title: z.string(),
   gender: z.string().nullable(),
   city: z.string().nullable(),
@@ -131,6 +147,7 @@ const questOut = z.object({
 });
 const spellOut = z.object({
   type: z.literal('spell'),
+  image: imageSchema,
   title: z.string(),
   words: z.string().nullable(),
   spellType: z.string().nullable(),
@@ -178,6 +195,7 @@ const houseOut = z.object({
 });
 const imbuementOut = z.object({
   type: z.literal('imbuement'),
+  image: imageSchema,
   title: z.string(),
   tier: z.string().nullable(),
   category: z.string().nullable(),
@@ -192,6 +210,7 @@ const imbuementOut = z.object({
 });
 const charmOut = z.object({
   type: z.literal('charm'),
+  image: imageSchema,
   title: z.string(),
   charmType: z.string().nullable(),
   effect: z.string().nullable(),
@@ -201,6 +220,7 @@ const charmOut = z.object({
 });
 const mountOut = z.object({
   type: z.literal('mount'),
+  image: imageSchema,
   title: z.string(),
   speed: z.number().nullable(),
   tamingMethod: z.string().nullable(),
@@ -323,6 +343,14 @@ export function registerGet(server: McpServer, handle: TibiaDb): void {
        left join mcp_area_pattern p on p.key = m.pattern_key
       where a.creature_id = ?
       order by a.name asc, a.effect asc, a.element asc`);
+  // A separate statement rather than a join, matching how every other one-row child
+  // is fetched here. Joining would also collide on article_id: `select *` at the
+  // entity lookup is load-bearing (withDetail reads row[f], modifiers read
+  // row['modifier_' + e]), and on a LEFT JOIN miss the later duplicate wins, so
+  // row.article_id becomes NULL and every child query silently returns nothing.
+  const imageRow = db.prepare(
+    `select file_name, url, description_url, width, height, mime_type
+       from mcp_image where entity_type = ? and article_id = ?`);
   const maxDamage = db.prepare('select * from creature_max_damage where creature_id = ?');
   const creatureSounds = db.prepare(
     'select content from creature_sound where creature_id = ? order by content asc');
@@ -376,6 +404,15 @@ export function registerGet(server: McpServer, handle: TibiaDb): void {
 
   const shape = (type: EntityType, row: Row, verbosity: 'concise' | 'detailed') => {
     const title = String(row.title);
+    const imageFor = (entityType: string, r: Row) => {
+      const img = imageRow.get(entityType, r.article_id as number) as Row | undefined;
+      return img
+        ? {
+            url: String(img.url), descriptionUrl: String(img.description_url),
+            width: Number(img.width), height: Number(img.height), mimeType: String(img.mime_type),
+          }
+        : null;
+    };
     const source = sourceBlock(title, provenance);
     const withDetail = <T extends object>(base: T, fields: readonly string[]): T =>
       verbosity === 'detailed'
@@ -385,7 +422,7 @@ export function registerGet(server: McpServer, handle: TibiaDb): void {
     switch (type) {
       case 'creature':
         return withDetail({
-          type: 'creature' as const, title,
+          type: 'creature' as const, image: imageFor('creature', row), title,
           // 0 means unrecorded (see hitpointsExpr in domain.ts), so report null.
           hitpoints: row.hitpoints ? num(row.hitpoints) : null,
           experience: num(row.experience),
@@ -423,7 +460,7 @@ export function registerGet(server: McpServer, handle: TibiaDb): void {
           bag[key] = coerceAttribute(key, a.value);
         }
         return withDetail({
-          type: 'item' as const, title,
+          type: 'item' as const, image: imageFor('item', row), title,
           itemClass: str(row.item_class), itemType: str(row.item_type),
           typeSecondary: str(row.type_secondary), weight: num(row.weight),
           valueBuy: num(row.value_buy), valueSell: num(row.value_sell),
@@ -445,7 +482,7 @@ export function registerGet(server: McpServer, handle: TibiaDb): void {
       }
       case 'npc':
         return {
-          type: 'npc' as const, title, gender: str(row.gender), city: str(row.city),
+          type: 'npc' as const, image: imageFor('npc', row), title, gender: str(row.gender), city: str(row.city),
           subarea: str(row.subarea), location: str(row.location),
           position: { x: num(row.x), y: num(row.y), z: num(row.z) },
           status: str(row.status),
@@ -478,7 +515,7 @@ export function registerGet(server: McpServer, handle: TibiaDb): void {
         };
       case 'spell':
         return {
-          type: 'spell' as const, title, words: str(row.words),
+          type: 'spell' as const, image: imageFor('spell', row), title, words: str(row.words),
           spellType: str(row.spell_type), element: str(row.element),
           mana: num(row.mana), level: num(row.level), soul: num(row.soul),
           isPremium: row.is_premium === null ? null : Boolean(row.is_premium),
@@ -503,7 +540,7 @@ export function registerGet(server: McpServer, handle: TibiaDb): void {
         };
       case 'imbuement':
         return {
-          type: 'imbuement' as const, title, tier: str(row.tier),
+          type: 'imbuement' as const, image: imageFor('imbuement', row), title, tier: str(row.tier),
           category: str(row.category), imbuementType: str(row.type),
           effect: str(row.effect),
           slots: str(row.slots)?.split(',').map((x) => x.trim()).filter(Boolean) ?? [],
@@ -515,14 +552,14 @@ export function registerGet(server: McpServer, handle: TibiaDb): void {
         };
       case 'charm':
         return {
-          type: 'charm' as const, title, charmType: str(row.type),
+          type: 'charm' as const, image: imageFor('charm', row), title, charmType: str(row.type),
           effect: str(row.effect),
           costs: [num(row.cost_level_1), num(row.cost_level_2), num(row.cost_level_3)],
           status: str(row.status), source,
         };
       case 'mount':
         return {
-          type: 'mount' as const, title, speed: num(row.speed),
+          type: 'mount' as const, image: imageFor('mount', row), title, speed: num(row.speed),
           tamingMethod: str(row.taming_method), isBuyable: bool(row.is_buyable),
           price: num(row.price), achievement: str(row.achievement),
           lightColor: num(row.light_color), lightRadius: num(row.light_radius),
@@ -622,8 +659,25 @@ export function registerGet(server: McpServer, handle: TibiaDb): void {
 
       const hit = hits[0]!;
       const output = shape(hit.type, hit.row, verbosity);
+      const image = (output as { image?: { url: string; mimeType: string } | null }).image ?? null;
+      const fileName = image ? decodeURIComponent(new URL(image.url).pathname.split('/').at(-3) ?? '') : null;
+
       return {
-        content: [{ type: 'text', text: JSON.stringify(output) }],
+        content: [
+          { type: 'text', text: JSON.stringify(output) },
+          // Annotated for the human: an animated sprite is not readable by a model
+          // (only a first frame is ever seen), and rendering is host behaviour
+          // rather than something this server can promise.
+          ...(image
+            ? [{
+                type: 'resource_link' as const,
+                uri: image.url,
+                name: fileName ?? 'image',
+                mimeType: image.mimeType,
+                annotations: { audience: ['user' as const] },
+              }]
+            : []),
+        ],
         structuredContent: output,
       };
     },

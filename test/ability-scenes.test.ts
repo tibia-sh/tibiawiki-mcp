@@ -140,6 +140,17 @@ test('a non-canonical member opener is counted, not silently skipped', () => {
   assert.equal(r.stats.scenes, 1, 'the scene still counts toward the total');
 });
 
+test('a lowercase template name is counted, not made invisible', () => {
+  // `{{healing|` occurs once in the live corpus. Recognising kinds case-sensitively
+  // drops it before any counter sees it, so the scene leaves the denominator and a
+  // parser regression could RAISE the reported success rate.
+  const wt = `|{{healing|range=40-70|${scene('buffspell')}}}`;
+  const r = extractSceneRefs(wt, DRAGON);
+  assert.equal(r.stats.scenes, 1, 'the scene must still be counted');
+  assert.equal(r.stats.unparsedMember, 1);
+  assert.equal(r.refs.length, 0, 'the generator emits no row for it, so it cannot join');
+});
+
 test('an ambiguous name yields no ref', () => {
   const rows: Row[] = [
     { name: 'Twin', effect: '1', element: 'fire' },

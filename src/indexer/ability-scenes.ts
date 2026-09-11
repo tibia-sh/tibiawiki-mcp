@@ -15,6 +15,13 @@ const KINDS = new Set(['Ability', 'Melee', 'Healing', 'Summon']);
 const DROPPED = new Set(['Haste', 'Debuff', 'Outfit']);
 
 const MEMBER_OPENER = /\{\{(\s*)([A-Za-z][A-Za-z ]*?)(\s*)\|/g;
+/**
+ * Recognition is case-insensitive so a variant like `{{healing|` is still SEEN and
+ * counted; canonicality below then decides whether it can join. Matching case
+ * -sensitively here instead makes such a member invisible, and an invisible scene
+ * leaves the denominator entirely - the one failure mode the counters exist to stop.
+ */
+const RECOGNISED = new Set([...KINDS, ...DROPPED].map((k) => k.toLowerCase()));
 const SCENE = /scene\s*=\s*\{\{\s*Scene\b/;
 
 export type AbilityRow = { name: string; effect: string | null; element: string | null };
@@ -81,7 +88,7 @@ function* members(wikitext: string): Generator<{ kind: string; body: string; can
   for (const m of wikitext.matchAll(MEMBER_OPENER)) {
     const [, lead, rawName, trail] = m;
     const name = rawName!;
-    if (!KINDS.has(name.trim()) && !DROPPED.has(name.trim())) continue;
+    if (!RECOGNISED.has(name.trim().toLowerCase())) continue;
     // The generator matches template names exactly: it emits no row for
     // `{{Ability |` or `{{healing|`. Verified against all 10 live occurrences.
     const canonical = !lead && !trail && (KINDS.has(name) || DROPPED.has(name));

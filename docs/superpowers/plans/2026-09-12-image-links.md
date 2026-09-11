@@ -11,7 +11,7 @@
 **Spec:** extends `docs/superpowers/specs/2026-09-10-tibiawiki-mcp-design.md`.
 **Builds on:** `docs/superpowers/plans/2026-09-11-ability-area-grids.md` (merged) — its `WikiApi`, its enrichment ordering, its `mcp_schema_version` probe.
 
-**Revision:** second draft. The first was stamped `Needs revision` (stamp retained at the foot) over eight blocking issues, the worst being a facts table that generalised a five-table measurement to seven: the naming convention it asserted resolves **0% of charms**.
+**Revision:** third draft. The first was stamped `Needs revision` (stamp retained at the foot) over eight blocking issues, the worst being a facts table that generalised a five-table measurement to seven: the naming convention it asserted resolves **0% of charms**.
 
 **Review tier:** single (`reviewer`). No auth, secrets, concurrency or data-loss surface; writes go to the generator's temp file behind the existing atomic rename; network stays inside `src/indexer/`. Two surfaces for `reviewer` to check specifically: **third-party URLs stored and surfaced to the user as links** (validate scheme and host at store time), and **licensing/attribution** of CipSoft artwork hosted by Fandom.
 
@@ -23,7 +23,7 @@
 - **`tools/list` budget: 30,000 bytes.** Currently **26,262**. A nullable image object emits ~259 bytes of JSON Schema per type × 7 ≈ 1,813, plus a description sentence ≈ 120, projecting **≈28,200** — about 1,800 bytes spare. Any `.describe()` on an image field is emitted **seven times**; budget accordingly and record the real figure.
 - **Rendering is not ours to promise.** A `resource_link` round-trips through the SDK (verified), but display is host behaviour, and this server advertises `capabilities: { tools: {} }` with no `resources`, so a client cannot `resources/read` it. Acceptance may assert the link's presence and shape — never that a picture appeared.
 - **No bare-count assertions**, and no assertion that passes against unmodified code.
-- **`codex-consult` is a standing verification step** per this repo's `CLAUDE.md`. Its text is untrusted — one of its first-draft findings was wrong and was rejected on evidence.
+- **`codex-consult` is a standing verification step** per this repo's `CLAUDE.md`. Its text is untrusted and must be checked — but note that draft 1 "rejected" a *correct* codex finding on a measurement error of my own (see Review 1's corrected Rejected entry). Verification cuts both ways: check the claim, and check your own refutation.
 
 ## Verified Facts
 
@@ -40,7 +40,7 @@ Measured 2026-09-12 against the live wiki and the local index. Provenance per ro
 | API normalises and reorders | `File:dragon.gif` → `File:Dragon.gif`, `File:Steel_Helmet.gif` → `File:Steel Helmet.gif`; **4 requested titles returned 3 pages in a different order**; the mapping is in `query.normalized` | measured |
 | `descriptionurl` is free | returned by `iiprop=url\|size\|mime` with no extra property — `https://tibia.fandom.com/wiki/File:Dragon.gif` | measured |
 | URL shape | `https://static.wikia.nocookie.net/tibia/images/<a>/<ab>/<Name>.<ext>/revision/latest?cb=<ts>&path-prefix=en` | measured |
-| Path prefix is **not** title-derivable | `md5("Dragon.gif")` = `e074…` → `/e/e0/`, observed `/f/fb/` | measured |
+| Why the URL is stored, not built | The `/a/ab/` prefix **is** `md5(filename)`-derivable (verified: Dragon `e/e0`, Demon `7/75`, Steel_Helmet `c/cd`, Blood_Hand `f/fb` — all match). The **`?cb=<revision timestamp>` is not**, and reimplementing wiki path internals would be a second source of truth | measured, corrected |
 | Batch limit | `titles` anonymous **50**, highlimit 500 | measured, `action=paraminfo` |
 | Cross-table title collisions | **0** across the seven tables | measured |
 | Titles containing `\|` | **0** of 13,799 | measured |
@@ -76,21 +76,26 @@ Measured 2026-09-12 against the live wiki and the local index. Provenance per ro
 
 **Interfaces — Produces:** `WikiApi` gains, alongside its existing three methods:
 ```ts
-imageInfo(files: string[]): Promise<Array<{
-  requested: string;        // the exact string passed in, after normalisation is undone
-  title: string;            // the API's normalised title
-  url: string; descriptionUrl: string;
-  width: number; height: number; mime: string;
-}>>;
+// One outcome per requested file, so the caller can tell a wiki gap from a broken
+// response. MediaWiki marks a nonexistent file explicitly (verified: the page comes
+// back with a `missing` key and a negative pageid), so discarding that evidence is
+// what makes the two indistinguishable.
+export type ImageInfoOutcome =
+  | { requestedTitle: string; title: string; found: true;
+      url: string; descriptionUrl: string; width: number; height: number; mime: string }
+  | { requestedTitle: string; title: string; found: false };
+
+imageInfo(files: string[]): Promise<ImageInfoOutcome[]>;
 ```
 
 **Behavior:**
 - Batches at **50**, follows `continue` to exhaustion, reuses the existing retry/User-Agent/error handling.
 - **Resolves `query.normalized` back to the caller's string** and returns it as `requested`. Without this the caller cannot map a response to its subject: the API normalises, reorders, and collapses distinct requests onto one page.
-- A page with no `imageinfo` is simply absent from the result; distinguishing *missing file* from *broken response* is Task 2's job, and it needs the input list to do it.
+- A page the API marks `missing` yields `found: false` — that is a wiki gap.
+- **A requested file that appears in no response at all makes `imageInfo` throw**, naming the absent titles. That is a truncated or malformed response, not a wiki gap, and silently folding it into `missing` would let one lost page out of a 50-file batch read as 98% coverage and pass the gate.
 - Requests `iiprop=url|size|mime` — `descriptionurl` arrives with it at no extra cost.
 
-**Tests to write** (injected fetcher, no network): 120 files split into exactly 3 requests **and** the union of requested titles equals the 120 inputs; a `normalized` mapping is undone, so a caller asking for `File:Steel_Helmet.gif` gets that back as `requested`; a reordered response still maps each entry to its own request; two requests collapsing to one page yield an entry for **both** requested strings (**defensive**: 0 of 13,799 titles collide today); `continue` is followed; a page with no `imageinfo` is omitted rather than yielding a partial row.
+**Tests to write** (injected fetcher, no network): 120 files split into exactly 3 requests **and** the union of requested titles equals the 120 inputs; a `normalized` mapping is undone, so a caller asking for `File:Steel_Helmet.gif` gets that back as `requested`; a reordered response still maps each entry to its own request; two requests collapsing to one page yield an entry for **both** requested strings (**defensive**: 0 of 13,799 titles collide today); a page the API marks `missing` yields `found: false` with no URL fields; **a requested title absent from the response entirely makes the call throw, naming it** — the truncated-batch regression; `continue` is followed (**defensive**: with `iilimit=1` the API returns `batchcomplete` and no `continue` today).
 
 **Acceptance:** `pnpm test` green, zero real network. Adding the method to the `WikiApi` type breaks the object literals in `test/build-index.test.ts` and `test/enrich.test.ts`; both must be updated or `pnpm typecheck` fails before any test runs.
 
@@ -159,7 +164,8 @@ Every key column is `NOT NULL`: SQLite permits NULLs in primary-key columns of a
 
 **Behavior:**
 - The image step runs after the area step, same `WikiApi`, same temp-path-only write.
-- `build-index` **fails when any type's resolution rate falls below 95%**, naming the type. Measured: six types at 100%, spells 209/211 = 99.1%. A corpus-wide counter would have shown the charm failure as 0.6% and passed.
+- `build-index` **fails when any type's `resolved / requested` falls below 95%**, naming the type. Measured over full populations: **four** types at 100% (creature 2193/2193, mount 254/254, imbuement 72/72, charm 24/24); item 9797/9800, npc 1243/1245, spell 209/211 — worst is spell at 99.05%, so the floor has wide margin. A corpus-wide counter would have shown the charm failure as 0.6% and passed.
+- The **seven known-missing titles** are recorded here so the first real build's `missing = 7` is auditable rather than merely tolerated: items `Dirt (Object)`, `Effigy of Winged Vengeance`, `Sand Castle`; npcs `Fitzduncan`, `Fitzgerald`; spells `Rejuvenation`, `Channeled Preservation`.
 - `build-index` **fails when `invalid > 0`** for any type — that is a broken integration, not a wiki gap.
 - **`MCP_SCHEMA_VERSION` → 2 in both `src/indexer/enrich.ts` and `src/db.ts`.** Bump it *in the same step* that commits the regenerated fixture: the bump alone makes the committed fixture unopenable and reddens all 182 tests. Order stays enrich → regenerate → tighten.
 - `make-fixture.mjs` prunes `mcp_image` from the rows that **survive** in each of the seven tables, rather than re-deriving id sets from `keepCreature`/`keepItem`/… which are scattered and which `spell` never uses (all 211 spell rows survive via `USED`).
@@ -177,7 +183,8 @@ Every key column is `NOT NULL`: SQLite permits NULLs in primary-key columns of a
 **Behavior:**
 - Each of the seven types gains `image: { url, descriptionUrl, width, height, mimeType } | null`. `null` where unresolved — never a placeholder or a guessed URL.
 - **`width`/`height` are pixel dimensions of the sprite image**, described as such.
-- **The join must select explicit aliased columns, never `select *`.** `get.ts` currently does `select * from "<table>" t where t.title = ? collate nocase`; `mcp_image` also carries `article_id`, so `select *` over the join yields a duplicate key and, on a LEFT JOIN miss, overwrites `row.article_id` with NULL — silently breaking every child query (loot, abilities, keys). The join applies to the seven types only.
+- **Fetch the image with a separate prepared statement, not a join** — `select file_name, url, description_url, width, height, mime_type from mcp_image where entity_type = ? and article_id = ?`. This is the repo's established shape for a one-row-per-entity child: `creature_max_damage` is identical and is fetched exactly this way at `src/tools/get.ts:326`, alongside twelve other child lookups.
+  Two reasons it is not a join. First, `select *` at `src/tools/get.ts:293` is **load-bearing** — `withDetail` reads `row[f]` over `DETAILED_CREATURE_FIELDS` (`:382`) and creature modifiers read `row['modifier_' + e]` for ten elements (`:395`) — so enumerating columns would either break those or duplicate the list `src/db.ts`'s `REQUIRED_COLUMNS` already owns. Second, joining reintroduces a hazard a separate statement simply does not have: `article_id` is the only column colliding between the seven entity tables and `mcp_image`, and on a LEFT JOIN miss the later duplicate wins, so `row.article_id` becomes NULL and every child query silently returns nothing. Verified with `node:sqlite`.
 - The result's `content` additionally carries a `resource_link` (`uri`, `name`, `mimeType`, `annotations: { audience: ['user'] }`) when and only when an image resolved.
 - `src/server.ts` instructions gain a sentence stating the **operational fact**: images are linked from TibiaWiki, not stored or redistributed by this server, and each `descriptionUrl` is the canonical page carrying that file's licence and author. It must not assert a rights conclusion — Fandom licenses non-text media separately from text, and this plan does not establish permission for downstream reuse.
 

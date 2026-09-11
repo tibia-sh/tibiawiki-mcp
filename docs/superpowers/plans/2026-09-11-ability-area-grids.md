@@ -210,3 +210,34 @@ Additive tables — no upstream table is altered:
 - [ ] A `{{Haste}}` scene is discarded, not attached — asserted by test.
 - [ ] Enrichment failure leaves a pre-existing index byte-identical.
 - [ ] Fixture under 1.5 MB with `mcp_*` rows for its anchors.
+
+## Review (2026-09-11)
+
+- **Verdict: Needs revision before implementation**
+- Reviewers: plan-final-reviewer; codex-consult (high, 40s, 27049 tokens); grok-consult — on request only, not run
+- Tier: **single**, upheld by both reviewers. `scripts/review-tier.py` cannot compute it — the change set does not exist yet — so the declaration is judged on merits: no auth, secrets, or concurrency surface, writes confined to a temp file behind the existing atomic rename.
+- Adopted: none — a `Needs revision` verdict leaves the body untouched. The findings below are the revision brief.
+
+### Blocking — confirmed against the primary source, not taken on trust
+
+1. **The pattern count is 114, not 94, and the test asserting 94 would pass on a broken parser.** `Module:SceneBuilder/data` holds 94 `["key"]` plus **20 `['key']`** entries. A double-quote-only regex — the obvious first implementation — returns exactly 94 and satisfies the Task 1 assertion while silently discarding 20 patterns, including `rootkraken1`/`rootkraken2`, whose creature is already a committed fixture anchor. Ninth instance of the repo's "test passes while feature is broken" pattern, and it was authored into the plan.
+2. **The cell legend is wrong.** `Module:SceneBuilder` defines `[3] = target_element`, not a direction marker; `[4]`–`[8]` are extra sprites. Values **0–5 are in live use**. The plan renders `3` as `>` and commits `AREA_LEGEND` verbatim — shipping wrong data to agents as authoritative, and `affectedTiles` reports 0 for patterns built from `4`/`5`.
+3. **`casterInArea` is not derivable** from `{key,width,cells}`: cell values are mutually exclusive, so a caster tile can never also read as affected. The real signal is the Scene template's `effect_on_caster=yes`, which the plan discards.
+4. **Task 3 never states where `patternKey` comes from.** The reference is a *nested* `scene={{Scene|spell=<key>}}`; the depth rule mentions only `[[ ]]`, so a splitter tracking links alone shreds every scene-carrying member.
+5. **`buildIndex` has no injection point.** All five existing cases in `test/build-index.test.ts` inject only `run`; an unconditional `enrich()` sends them to the live wiki, and Task 4's own failure test has nothing to inject through.
+6. **A nullable composite primary key does not enforce uniqueness in SQLite** — reproduced locally: the duplicate insert was accepted and the table held 2 rows. `ability_effect`/`ability_element` are `.nullable()` today.
+7. **Tier fallback can contradict explicit data** — dropping to `(name)` may uniquely match a row whose element contradicts the wikitext's own `element=`.
+8. **The join-rate gate is measured on the wrong quantity.** A ref can join and still point at a rejected pattern, so extraction could report 92% with zero areas stored.
+9. **Enrichment must precede validation, and cannot use `openDb`.** `openDb` is `{ readOnly: true }` and schema-validating: once `mcp_*` is required, validating before enriching rejects the generator's own fresh output.
+
+### Also to fix (non-blocking)
+
+`rotate90=yes` and `input_array` Scenes are real and must be counted-and-discarded; `make-fixture.mjs` would empty the new tables rather than prune them; the 1.5 MB fixture budget has no gate anywhere; 85% vs 90% is stated three times inconsistently; the 7.3% figure describes scene-carrying members, not all abilities; `Retry-After: 2` is 2000 ms; prefer native `headers.get()` over a custom `header()`; requiring `mcp_*` breaks every installed index, so the error must name `build-index`.
+
+### Provenance correction
+
+The spike backs the 92.7% join rate and its buckets, the four-column key, the member-kind dispatch, verbatim `element=`, link collapsing, and tiered matching. It does **not** back the pattern count or the cell semantics — both entered the table unsourced, both are wrong, and both were marked "do not re-derive". `8sqmwave` = 45 cells / width 9 was independently confirmed correct.
+
+### Rejected
+
+- None. Every finding was verified against the repo or the live module before adoption.

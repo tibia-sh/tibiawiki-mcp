@@ -141,3 +141,38 @@ other 10 are singletons.
 **Method:** live `action=query` over all 2,209 `Category:Creatures` pages, joined
 against the local index (5,854 ability rows; the four-column key is unique across
 all of them, `(creature_id, name)` collapses to 5,835 — both confirmed).
+
+## Addendum 2 — tier distribution and identity drift (2026-09-11)
+
+Raised by the second gate pass: after a fallback tier matches, the *extracted*
+`(effect, element)` need not equal the *matched row's*. Storing the extracted form
+makes the row unretrievable by an exact runtime join. Measured over the full corpus:
+
+| Tier | Joins | Identity drift |
+|---|---:|---:|
+| 1 — `(name, effect, element)` | 1,055 | 0 |
+| 2 — `(name, effect)` | 553 | **553** |
+| 3 — `(name)` | 141 | **141** |
+| **total** | **1,749** | **694 (39.7%)** |
+
+**Every tier-2 and tier-3 join drifts** — by construction: a fallback tier matches
+precisely when the dropped component differs. Typical shape: wikitext omits
+`element=`, the generator's row defaults it (`('1300-1500','')` → `('1300-1500','physical')`).
+
+**Consequence had this shipped:** enrichment would store 1,749 rows and report a
+passing 98.8% stored/eligible, while 39.7% of them returned `null` at runtime. The
+build gate would not have caught it — it counts rows written, not rows retrievable.
+
+**Why the tests would not have caught it either:** the planned runtime anchors —
+Dragon's `Fire Wave` and `Self-Healing` — are both tier-1, the only tier that does not
+drift. The repo's recurring failure mode reproduced once more, in the acceptance
+criteria rather than the code.
+
+**Required:** `SceneRef` carries the **matched row's** normalised
+`(name, effect, element)`, never the extracted text; and at least one runtime test
+must anchor on a **tier-2 or tier-3** ability, since a tier-1 anchor cannot fail.
+
+**Correction to Addendum 1:** it said the tiered match "never mis-assigned once
+across the whole corpus." That overstates the evidence. 0 ambiguous means no
+*detected* ambiguity — a tier that matches exactly one row can still match the wrong
+one. The measurement bounds detectable collisions, not correctness.

@@ -122,11 +122,39 @@ test('pages absent from the index are skipped, not charged against coverage', as
   assert.equal(stats.stored, 2);
 });
 
+test('a page the API lists but never returns is counted as missing', async () => {
+  const path = copy();
+  // Dragon is in the index; the API lists it but returns no content for it.
+  const api = fakeApi({ Dragon: DRAGON_WIKITEXT });
+  const truncated = { ...api, async pageWikitext() { return []; } };
+  const stats = await enrich(path, truncated);
+
+  assert.equal(stats.missingPages, 1);
+  // Without the reconciliation this reads as a clean run over an empty corpus.
+  assert.equal(stats.scenes, 0);
+});
+
+test('two members claiming one ability row are reported, not silently ordered', async () => {
+  const path = copy();
+  // Both members resolve to Dragon's Fire Wave row but name different patterns.
+  const wikitext = `{{Ability|Fire Wave|100-170|element=fire|scene={{Scene|spell=8sqmwave}}}}
+|{{Ability|Fire Wave|100-170|element=fire|scene={{Scene|spell=buffspell}}}}`;
+  const stats = await enrich(path, fakeApi({ Dragon: wikitext }));
+
+  assert.equal(stats.conflictingKey, 1, 'the losing mapping must be visible');
+  assert.equal(stats.stored, 1, 'stored counts rows actually written, not attempts');
+  const db = open(path);
+  assert.equal(count(db, 'mcp_ability_area'), 1);
+  assert.equal(stats.stored, count(db, 'mcp_ability_area'), 'stored must equal real rows');
+  db.close();
+});
+
 test('eligibleScenes excludes intentional discards only', () => {
   const base = {
     scenes: 100, joined: 80, ambiguous: 1, noRow: 4,
     discardedKind: 10, discardedNoSpell: 2, discardedRotate: 1, unparsedMember: 2,
     patterns: 114, rejectedPatterns: [], stored: 80, danglingKey: 0, pagesNotInIndex: 0,
+    missingPages: 0, conflictingKey: 0,
   };
   // 100 - (10 + 2 + 1 + 2) = 85. ambiguous and noRow are failures, not discards,
   // so they stay in the denominator.

@@ -73,6 +73,15 @@ export async function buildIndex(
     const stats = await enrichIndex(temp, api);
     process.stderr.write(`Enrichment:\n${formatStats(stats)}\n`);
 
+    if (stats.missingPages > 0) {
+      // Coverage is a ratio over pages that came back. Accepting a partial fetch
+      // would let a truncated response report full coverage on a gutted index.
+      throw new Error(
+        `${stats.missingPages} indexed creature page(s) returned no content. Coverage ` +
+          'cannot be judged on a partial fetch; refusing to install.',
+      );
+    }
+
     const eligible = eligibleScenes(stats);
     if (eligible <= 0) {
       // A NaN ratio compares false against any threshold, so an empty corpus would

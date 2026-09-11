@@ -46,6 +46,21 @@ test('batches titles at the anonymous limit of 50 per request', async () => {
   assert.ok(!last.includes('P99'), 'third batch must not re-send P99');
 });
 
+test('every requested title is asked for exactly once', async () => {
+  const titles = Array.from({ length: 120 }, (_, n) => `P${n}`);
+  const r = recorder([json(pages(['x']))]);
+  await createWikiApi({ fetcher: r.fetcher, clock }).pageWikitext(titles);
+
+  // Partitioning into 3 requests is not the same as preserving all 120 titles: an
+  // off-by-one batcher drops or duplicates one and still makes 3 requests.
+  const asked = r.calls.flatMap((c) => {
+    const raw = new URL(c.url).searchParams.get('titles') ?? '';
+    return raw.split('|').filter(Boolean);
+  });
+  assert.equal(asked.length, 120);
+  assert.deepEqual([...new Set(asked)].sort(), [...titles].sort());
+});
+
 test('follows continue until it is absent', async () => {
   const r = recorder([
     json({ ...pages(['A']), continue: { rvcontinue: 'tok' } }),

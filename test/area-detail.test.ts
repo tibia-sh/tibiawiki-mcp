@@ -125,10 +125,12 @@ test('an ability with no matched scene returns null, never an empty grid', async
   assert.equal(melee.area, null);
 }));
 
-test('a creature whose abilities all lack scenes still answers', async () => withServer(async (h) => {
+test('a creature with no scenes at all returns every ability with a null area', async () => withServer(async (h) => {
   const abilities = await abilitiesOf(h, 'Rotworm');
   assert.ok(abilities.length > 0);
-  assert.ok(abilities.every((a) => a.area === null || typeof a.area.ascii === 'string'));
+  // Accepting "null or any string" would pass even if every ability were handed an
+  // unrelated grid. Rotworm has no scenes upstream, so every area must be null.
+  assert.deepEqual(abilities.map((a) => a.area), abilities.map(() => null));
 }));
 
 test('the legend ships once in the tool description, not per area', async () => withServer(async (h) => {

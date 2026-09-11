@@ -24,6 +24,10 @@ export type EnrichStats = ExtractStats & {
   stored: number;
   danglingKey: number;
   pagesNotInIndex: number;
+  /** Indexed creature pages the API listed but returned no content for. */
+  missingPages: number;
+  /** Two members resolving to one ability row but naming different patterns. */
+  conflictingKey: number;
 };
 
 export type Enricher = (dbPath: string, api: WikiApi) => Promise<EnrichStats>;
@@ -87,20 +91,33 @@ export async function enrich(dbPath: string, api: WikiApi): Promise<EnrichStats>
       scenes: 0, joined: 0, ambiguous: 0, noRow: 0,
       discardedKind: 0, discardedNoSpell: 0, discardedRotate: 0, unparsedMember: 0,
       patterns: patterns.length, rejectedPatterns: rejected,
-      stored: 0, danglingKey: 0, pagesNotInIndex: 0,
+      stored: 0, danglingKey: 0, pagesNotInIndex: 0, missingPages: 0, conflictingKey: 0,
     };
 
     const insertArea = db.prepare(
-      `insert or ignore into mcp_ability_area
+      `insert into mcp_ability_area
          (creature_id, ability_name, ability_effect, ability_element, pattern_key, effect_on_caster)
        values (?, ?, ?, ?, ?, ?)`,
     );
+    // `insert or ignore` would let a second member silently lose to the first while
+    // still counting as stored, making the outcome depend on member order. Track the
+    // identities instead, so a genuine conflict is visible rather than arbitrary.
+    const placed = new Map<string, string>();
 
     // The category holds list pages and redirects as well as creatures; those are
     // skipped and never charged against the coverage gate.
     const titles = await api.categoryMembers(CREATURE_CATEGORY);
     for (let i = 0; i < titles.length; i += 50) {
-      for (const page of await api.pageWikitext(titles.slice(i, i + 50))) {
+      const batch = titles.slice(i, i + 50);
+      const pages = await api.pageWikitext(batch);
+      // A page the API lists but does not return content for would otherwise vanish
+      // from both numerator and denominator, so a truncated response could report
+      // full coverage while the index silently lost every area on those pages.
+      const returned = new Set(pages.map((p) => p.title));
+      for (const title of batch) {
+        if (!returned.has(title) && ids.has(title)) stats.missingPages += 1;
+      }
+      for (const page of pages) {
         const creatureId = ids.get(page.title);
         if (creatureId === undefined) {
           stats.pagesNotInIndex += 1;
@@ -117,6 +134,13 @@ export async function enrich(dbPath: string, api: WikiApi): Promise<EnrichStats>
             stats.danglingKey += 1;
             continue;
           }
+          const identity = [creatureId, ref.abilityName, ref.abilityEffect, ref.abilityElement].join('\u0000');
+          const existing = placed.get(identity);
+          if (existing !== undefined) {
+            if (existing !== ref.patternKey) stats.conflictingKey += 1;
+            continue;
+          }
+          placed.set(identity, ref.patternKey);
           insertArea.run(
             creatureId,
             ref.abilityName,
@@ -160,7 +184,9 @@ export function formatStats(stats: EnrichStats): string {
     `    no row        ${stats.noRow}`,
     `    dangling key  ${stats.danglingKey}`,
     `    discarded     ${stats.discardedKind} kind, ${stats.discardedNoSpell} no-spell, ${stats.discardedRotate} rotate90, ${stats.unparsedMember} unparsed`,
+    `    conflicting   ${stats.conflictingKey}`,
     `  pages not in index ${stats.pagesNotInIndex}`,
+    `  MISSING pages      ${stats.missingPages}`,
     `  stored/eligible ${stats.stored}/${eligible} = ${pct}%`,
   ].join('\n');
 }

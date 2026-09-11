@@ -122,6 +122,19 @@ test('a rotate90 Scene is discarded rather than stored transposed', () => {
   assert.equal(r.stats.discardedRotate, 1);
 });
 
+test('rotate90 inside another argument is not mistaken for the real one', () => {
+  // Substring matching discards this good scene: `rotate90=yes` is prose in `note`.
+  const wt = `|{{Ability|Fire Wave|100-170|element=fire|scene={{Scene|spell=8sqmwave|note=rotate90=yes}}}}`;
+  const r = extractSceneRefs(wt, DRAGON);
+  assert.equal(r.stats.discardedRotate, 0);
+  assert.equal(only(r).patternKey, '8sqmwave');
+});
+
+test('a repeated Scene argument resolves last-wins, as MediaWiki does', () => {
+  const wt = `|{{Ability|Fire Wave|100-170|element=fire|scene={{Scene|spell=8sqmwave|effect_on_caster=yes|effect_on_caster=no}}}}`;
+  assert.equal(only(extractSceneRefs(wt, DRAGON)).effectOnCaster, false);
+});
+
 test('a Scene with no spell= is discarded', () => {
   const wt = `|{{Ability|Fire Wave|100-170|element=fire|scene={{Scene|input_array=0,1,0}}}}`;
   const r = extractSceneRefs(wt, DRAGON);

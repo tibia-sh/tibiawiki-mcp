@@ -17,7 +17,7 @@ import type { AreaPattern } from '../area.ts';
  *    up the `8` in `"8sqmwave"` and yields 46 values for a 45-cell grid, so the key
  *    and the body are matched separately.
  */
-const ENTRY = /\[(?:"([^"]+)"|'([^']+)')\]\s*=\s*\{\s*\{([^}]*)\}\s*,\s*(\d+)\s*\}/g;
+const ENTRY = /\[(?:"([^"]+)"|'([^']+)')\]\s*=\s*\{\s*\{([^}]*)\}\s*,\s*([^}]*)\}/g;
 
 export type SceneDataResult = {
   patterns: AreaPattern[];
@@ -32,7 +32,12 @@ export function parseSceneData(lua: string): SceneDataResult {
 
   for (const match of lua.matchAll(ENTRY)) {
     const key = match[1] ?? match[2]!;
-    const width = Number(match[4]);
+    // Width is captured loosely and validated here. Demanding \d+ in the pattern
+    // instead makes a malformed width (`-2`) fail to match the entry at all, so it
+    // yields neither a pattern nor a rejection - invisible, which is the one
+    // outcome this function promises never to produce.
+    const rawWidth = match[4]!.trim();
+    const width = Number(rawWidth);
     const body = match[3]!;
 
     if (seen.has(key)) {
@@ -41,13 +46,16 @@ export function parseSceneData(lua: string): SceneDataResult {
     }
     seen.add(key);
 
-    if (!Number.isInteger(width) || width <= 0) {
-      rejected.push({ key, reason: `width must be a positive integer, got ${match[4]}` });
+    if (!/^\d+$/.test(rawWidth) || width <= 0) {
+      rejected.push({ key, reason: `width must be a positive integer, got "${rawWidth}"` });
       continue;
     }
-    const tokens = body.split(',').map((t) => t.trim()).filter((t) => t !== '');
+    // One optional trailing comma is tolerated; an interior empty slot is not.
+    // Filtering empties instead turns `{0,,1}` into a valid two-cell grid, which is
+    // silent repair of malformed data rather than the promised rejection.
+    const tokens = body.replace(/,\s*$/, '').split(',').map((t) => t.trim());
     if (tokens.some((t) => !/^\d+$/.test(t))) {
-      rejected.push({ key, reason: 'cells must be non-negative integers' });
+      rejected.push({ key, reason: 'cells must be non-negative integers with no empty slots' });
       continue;
     }
     const cells = tokens.map(Number);

@@ -124,6 +124,26 @@ function parseArgs(body: string): Args {
   return { positional, named };
 }
 
+/**
+ * Parses the nested `{{Scene|...}}` into its own named arguments.
+ *
+ * Substring-matching the raw text instead is wrong in both directions: a `rotate90=yes`
+ * appearing inside some other argument's prose would discard a good scene, and a later
+ * `effect_on_caster=no` would not override an earlier `yes`. MediaWiki resolves repeated
+ * named arguments last-wins, and so does this.
+ */
+function parseScene(raw: string): Record<string, string> {
+  const open = raw.indexOf('{{');
+  if (open === -1) return {};
+  const inner = raw.slice(open + 2).replace(/\}\}\s*$/, '');
+  const args: Record<string, string> = {};
+  for (const part of splitDepth0(inner)) {
+    const m = /^\s*([A-Za-z_0-9]+)\s*=([\s\S]*)$/.exec(part);
+    if (m) args[m[1]!] = m[2]!.trim();
+  }
+  return args;
+}
+
 /** `undefined` means the argument was absent; `''` means it was supplied but empty. */
 function arg(args: Args, name: string, index?: number): string | undefined {
   if (Object.hasOwn(args.named, name)) return collapse(args.named[name]!);
@@ -211,9 +231,9 @@ export function extractSceneRefs(
     if (DROPPED.has(kind)) { stats.discardedKind += 1; continue; }
 
     const args = parseArgs(body);
-    const sceneBody = args.named['scene'] ?? '';
-    if (/rotate90\s*=\s*yes/.test(sceneBody)) { stats.discardedRotate += 1; continue; }
-    const spell = /spell\s*=\s*([^|}\n]+)/.exec(sceneBody);
+    const scene = parseScene(args.named['scene'] ?? '');
+    if (scene['rotate90'] === 'yes') { stats.discardedRotate += 1; continue; }
+    const spell = scene['spell'];
     if (!spell) { stats.discardedNoSpell += 1; continue; }
 
     const want = perKind(kind, args);
@@ -228,8 +248,8 @@ export function extractSceneRefs(
       abilityName: result.row.name,
       abilityEffect: norm(result.row.effect),
       abilityElement: norm(result.row.element),
-      patternKey: spell[1]!.trim(),
-      effectOnCaster: /effect_on_caster\s*=\s*yes/.test(sceneBody),
+      patternKey: spell,
+      effectOnCaster: scene['effect_on_caster'] === 'yes',
     });
     stats.joined += 1;
   }

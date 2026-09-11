@@ -1,7 +1,10 @@
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/server';
 import type { TibiaDb } from '../db.ts';
-import { ENTITY_TYPES, entityTypeSchema, searchTable, statusClause, type EntityType } from '../domain.ts';
+import {
+  ENTITY_TYPES, entityTypeSchema, entityTable, entityHasStatus, statusClause,
+  type EntityType,
+} from '../domain.ts';
 import { encodeCursor, decodeCursor } from '../cursor.ts';
 
 const outputSchema = z.object({
@@ -21,11 +24,14 @@ export function registerSearch(server: McpServer, handle: TibiaDb): void {
   const statements = new Map<string, ReturnType<typeof db.prepare>>();
   for (const type of ENTITY_TYPES) {
     for (const includeInactive of [false, true]) {
-      const status = statusClause('t', includeInactive);
+      // world and game_update have no status column, so the clause must be omitted
+      // entirely rather than merely disabled - these statements are prepared eagerly
+      // here, so an unconditional clause would fail at server construction.
+      const status = entityHasStatus(type) ? statusClause('t', includeInactive) : '';
       statements.set(
         `${type}:${includeInactive}`,
         db.prepare(
-          `select t.title from "${searchTable(type)}" t
+          `select t.title from "${entityTable(type)}" t
            where t.title like ? collate nocase` + (status ? ` and ${status}` : ''),
         ),
       );
@@ -36,13 +42,14 @@ export function registerSearch(server: McpServer, handle: TibiaDb): void {
     NAME,
     {
       description:
-        'Find Tibia pages whose name contains a substring, across creatures, items, NPCs, ' +
-        'quests and spells. Use this to turn an approximate name into the exact page name ' +
-        'that tibia_get expects. Results are ordered shortest-name-first, so the closest match leads.',
+        'Find Tibia pages whose name contains a substring, across all fourteen kinds of ' +
+        'page (creature, item, npc, quest, spell, achievement, house, imbuement, charm, ' +
+        'mount, outfit, book, world, update). Turns an approximate name into the exact page ' +
+        'name tibia_get expects. Ordered shortest-name-first, so the closest match leads.',
       inputSchema: z.object({
         query: z.string().min(1).describe('Substring to match against page names, case-insensitive.'),
         types: z.array(entityTypeSchema).optional()
-          .describe('Restrict to these kinds of page. Defaults to all five.'),
+          .describe('Restrict to these kinds of page. Defaults to all fourteen.'),
         include_inactive: z.boolean().default(false)
           .describe('Include deprecated, event-only and unavailable pages.'),
         limit: z.number().int().min(1).max(100).default(25),

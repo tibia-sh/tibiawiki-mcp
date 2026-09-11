@@ -34,9 +34,47 @@ tibiawiki-mcp build-index      # ~3 minutes, ~14 MB
 
 ## Use with Claude Code
 
+Two ways, and they ship different things.
+
+**As an MCP server only** — the npm package:
+
 ```bash
 claude mcp add --transport stdio tibiawiki -- npx -y tibiawiki-mcp
 ```
+
+**As a plugin** — the server *plus* a skill that teaches an agent how to query it
+(name resolution, the 100-is-neutral modifier convention, the data quirks that
+produce wrong answers). The plugin pieces never reach the npm tarball, because
+`package.json` has `files: ["dist"]`.
+
+> **Marketplace install is not supported yet.** `.mcp.json` points at
+> `${CLAUDE_PLUGIN_ROOT}/dist/index.js`, `dist/` is deliberately not committed, and
+> Claude Code does not run a build or a `pnpm` install for a plugin it fetches. A
+> marketplace or bare `git clone` install therefore starts with no server. Use the
+> local checkout below, which builds first. Shipping `dist/` or publishing a
+> prebuilt bundle would fix this and is not done here.
+
+```bash
+git clone https://github.com/jakubmucha/tibiawiki-mcp
+cd tibiawiki-mcp && pnpm install && pnpm build   # dist/ is gitignored, so build once
+claude --plugin-dir .
+```
+
+The build step is not optional: `dist/` is deliberately not committed, and
+`.mcp.json` points at `${CLAUDE_PLUGIN_ROOT}/dist/index.js`. A freshly cloned plugin
+without it will fail to start.
+
+## What the skill adds
+
+The MCP server alone gives an agent the tools. The bundled skill gives it the
+judgement to use them well — and it costs one line of context until it fires:
+
+- resolve approximate names with `tibia_search` before `tibia_get`
+- modifiers are percentages where 100 is neutral, so a Dragon at `modifier_fire: 0`
+  is *immune* to fire, not weak to it
+- `hitpoints: null` means unrecorded, not zero — 433 creatures have no recorded health
+- `imbuement.slots` is a category list, not a count
+- non-active pages are hidden unless `include_inactive: true`
 
 ## Tools
 

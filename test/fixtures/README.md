@@ -21,8 +21,27 @@ It is not a random sample. Each retained row exists to make a specific test mean
 - **Gold Coin** — the currency join target for vendor prices.
 - One non-`active` creature, so the status filter has something to exclude.
 
+Every new entity type keeps one or two **named** rows chosen because they actually
+carry the child data the detail tests assert on — a type with no children proves
+nothing:
+
+- **Captain Bluebear** — 12 `npc_destination` rows. The fixture previously held
+  **zero**, so "an NPC with destinations" could not have passed.
+- **Golden Key** — 7 `item_key` rows. `item_key` is one-to-many (Silver Key has 61),
+  so a singular field read with `.get()` would silently drop rows.
+- **The Plasmother** — three abilities all named `Poison Ball`. `(creature_id, name)`
+  is not unique, so this proves detail joins keep all three.
+- **Powerful Reap**, **Assassin Outfits**, **Goldfinger (Book)**, **Warriors' Guildhall**,
+  **Updates/7.9**, **Rashid** — one anchor each for materials, outfit quests, a book with
+  an item, house rent, a game update, and the 7-row weekly schedule.
+
+Retention pulls in each named row's foreign-key targets. This matters: the orphan
+sweep *deletes* an offending row rather than repairing it, so a named row whose
+target were missing would simply vanish. A misspelled name now throws rather than
+yielding an empty table.
+
 Tables no tool queries are emptied but kept, so the schema stays identical to a real
-index. That is what keeps the file under 1 MB.
+index. That is what keeps the file near 900 KB.
 
 ## Reproducing it
 

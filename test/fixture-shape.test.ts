@@ -1,0 +1,100 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { DatabaseSync } from 'node:sqlite';
+import { FIXTURE } from './harness.ts';
+
+/**
+ * The fixture is the substrate every tool test runs against. Twice in this project a
+ * test passed while the thing it guarded was broken, both times because the fixture
+ * lacked the rows that would have exposed it. This test names each table explicitly
+ * so a future trim cannot silently empty one and leave the suite green.
+ */
+const REQUIRED_NON_EMPTY = [
+  'creature', 'item', 'item_attribute', 'creature_drop', 'npc',
+  'npc_offer_sell', 'npc_offer_buy', 'quest', 'quest_reward', 'spell', 'database_info',
+  'achievement', 'house', 'imbuement', 'imbuement_material', 'charm', 'mount',
+  'outfit', 'outfit_quest', 'book', 'world', 'game_update', 'rashid_position',
+  'creature_ability', 'creature_max_damage', 'creature_sound',
+  'item_key', 'item_sound', 'item_store_offer', 'item_proficiency_perk',
+  'npc_job', 'npc_race', 'npc_destination', 'quest_danger',
+] as const;
+
+test('every table the tools read has at least one fixture row', () => {
+  const db = new DatabaseSync(FIXTURE, { readOnly: true });
+  const empty: string[] = [];
+  for (const table of REQUIRED_NON_EMPTY) {
+    const { c } = db.prepare(`select count(*) c from "${table}"`).get() as { c: number };
+    if (c === 0) empty.push(table);
+  }
+  db.close();
+  assert.deepEqual(empty, [], 'these tables are empty, so any test asserting on them passes vacuously');
+});
+
+/**
+ * Table-wide counts are NOT sufficient, and this project has the scar to prove it:
+ * `quest_danger` held 90 rows from incidental quests while the deliberately named
+ * quest had 0 of its 60, because retaining a quest without its danger creatures let
+ * the orphan sweep delete them. A guard must assert the NAMED anchor has its child
+ * rows, not that the table is non-empty somewhere.
+ */
+const ANCHOR_CHILDREN: ReadonlyArray<readonly [string, string, string]> = [
+  // [description, parent title, SQL counting that parent's child rows]
+  ['Dragon abilities', 'Dragon',
+   `select count(*) c from creature_ability a join creature c on c.article_id = a.creature_id where c.title = ?`],
+  ['Dragon max damage', 'Dragon',
+   `select count(*) c from creature_max_damage m join creature c on c.article_id = m.creature_id where c.title = ?`],
+  ['Golden Key keys', 'Golden Key',
+   `select count(*) c from item_key k join item i on i.article_id = k.item_id where i.title = ?`],
+  ['Crypt Bile perks', 'Crypt Bile',
+   `select count(*) c from item_proficiency_perk p join item i on i.article_id = p.item_id where i.title = ?`],
+  ['Strong Mana Potion store offers', 'Strong Mana Potion',
+   `select count(*) c from item_store_offer o join item i on i.article_id = o.item_id where i.title = ?`],
+  ['Captain Bluebear destinations', 'Captain Bluebear',
+   `select count(*) c from npc_destination d join npc n on n.article_id = d.npc_id where n.title = ?`],
+  ['Forgotten Knowledge Quest dangers', 'Forgotten Knowledge Quest',
+   `select count(*) c from quest_danger d join quest q on q.article_id = d.quest_id where q.title = ?`],
+  ['Powerful Reap materials', 'Powerful Reap',
+   `select count(*) c from imbuement_material m join imbuement b on b.article_id = m.imbuement_id where b.title = ?`],
+  ['Assassin Outfits quests', 'Assassin Outfits',
+   `select count(*) c from outfit_quest q join outfit o on o.article_id = q.outfit_id where o.title = ?`],
+];
+
+test('each named anchor actually carries its own child rows', () => {
+  const db = new DatabaseSync(FIXTURE, { readOnly: true });
+  const missing: string[] = [];
+  for (const [label, title, sql] of ANCHOR_CHILDREN) {
+    const { c } = db.prepare(sql).get(title) as { c: number };
+    if (c === 0) missing.push(label);
+  }
+  db.close();
+  assert.deepEqual(missing, [],
+    'these anchors have zero child rows, so a detail test naming them proves nothing');
+});
+
+test('the fixture carries the named anchors the detail tests depend on', () => {
+  const db = new DatabaseSync(FIXTURE, { readOnly: true });
+  const count = (sql: string, ...p: string[]) =>
+    (db.prepare(sql).get(...p) as { c: number }).c;
+
+  // (creature_id, name) is NOT unique - three rows share 'Poison Ball'. Detail joins
+  // must return all three, so the anchor has to be present to prove it.
+  assert.equal(count(
+    `select count(*) c from creature_ability a join creature c on c.article_id = a.creature_id
+     where c.title = ? and a.name = ?`, 'The Plasmother', 'Poison Ball'), 3);
+
+  // item_key is one-to-many; a singular keyInfo with .get() would drop rows.
+  assert.ok(count(
+    `select count(*) c from item_key k join item i on i.article_id = k.item_id where i.title = ?`,
+    'Golden Key') > 1, 'need a multi-key item');
+
+  // The committed fixture had ZERO npc_destination rows before this task.
+  assert.ok(count(
+    `select count(*) c from npc_destination d join npc n on n.article_id = d.npc_id where n.title = ?`,
+    'Captain Bluebear') > 0);
+
+  assert.equal(count('select count(*) c from rashid_position'), 7);
+  assert.equal(count(
+    `select count(*) c from creature_ability a join creature c on c.article_id = a.creature_id
+     where c.title = ?`, 'Dragon'), 4);
+  db.close();
+});

@@ -42,9 +42,10 @@ export function registerSearch(server: McpServer, handle: TibiaDb): void {
     NAME,
     {
       description:
-        'Find Tibia pages whose name contains a substring, across creatures, items, NPCs, ' +
-        'quests and spells. Use this to turn an approximate name into the exact page name ' +
-        'that tibia_get expects. Results are ordered shortest-name-first, so the closest match leads.',
+        'Find Tibia pages whose name contains a substring, across all fourteen kinds of ' +
+        'page (creature, item, npc, quest, spell, achievement, house, imbuement, charm, ' +
+        'mount, outfit, book, world, update). Turns an approximate name into the exact page ' +
+        'name tibia_get expects. Ordered shortest-name-first, so the closest match leads.',
       inputSchema: z.object({
         query: z.string().min(1).describe('Substring to match against page names, case-insensitive.'),
         types: z.array(entityTypeSchema).optional()

@@ -75,8 +75,8 @@ NPC, and without a type the call returns an error asking you to choose.
 
 `tibia_get` returns more than the headline stats:
 
-- **creature** — `abilities` with damage ranges, `maxDamage` per element and total,
-  `loot` with chances
+- **creature** — `abilities` with damage ranges and an `area` grid (below),
+  `maxDamage` per element and total, `loot` with chances
 - **item** — EAV `attributes` (attack, defense, required level), `keys`, `storeOffers`,
   `proficiencyPerks`
 - **npc** — `jobs`, `races`, `destinations` (travel with fares); Rashid additionally
@@ -86,6 +86,31 @@ NPC, and without a type the call returns an error asking you to choose.
 
 Use `verbosity: "detailed"` for extra descriptive columns and for a book's full text,
 which is omitted by default because it is the heaviest field in the corpus.
+
+## Ability areas
+
+An ability may carry an `area`: the tiles it covers, as a grid you can reason over.
+The wiki draws these as animated GIFs, which are useless to a model — only the first
+frame of an animation is ever seen — so the underlying tile data is served instead.
+
+```
+. . . . . . # # #     '.' unaffected   '@' the caster
+. . . # # # # # #     '#' effect tile  '*' the target tile
+@ # # # # # # # #     4-8  extra sprite layers
+. . . * # # # # #
+. . . . . . # # #     Dragon's Fire Wave: 8sqmwave, 25 tiles, caster unharmed
+```
+
+`ascii` is the rendered grid, `cells` the same data row-major as numbers, `width`
+and `height` its dimensions, `effectTiles` how many tiles the effect covers, and
+`effectOnCaster` whether the caster is caught in it — that last one is stated by the
+wiki, not inferred from the grid, because a caster tile can never also read as an
+effect tile.
+
+`area` is `null` for most abilities, and that is honest rather than missing: only
+abilities the wiki drew a scene for have one. About 1,750 abilities across ~560
+creatures do. The grid is oriented as the caster faces; it does not encode range,
+cooldown, or whether the creature actually uses it at a given health threshold.
 
 ## Attribution
 

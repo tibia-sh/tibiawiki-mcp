@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { renderArea, AREA_LEGEND } from '../area.ts';
 import type { McpServer } from '@modelcontextprotocol/server';
 import type { Provenance, TibiaDb } from '../db.ts';
 import {
@@ -46,6 +47,15 @@ const creatureOut = z.object({
     name: z.string(),
     effect: z.string().nullable(),
     element: z.string().nullable(),
+    area: z.object({
+      key: z.string(),
+      width: z.number(),
+      height: z.number(),
+      cells: z.array(z.number()),
+      ascii: z.string(),
+      effectTiles: z.number(),
+      effectOnCaster: z.boolean(),
+    }).nullable(),
   })),
   maxDamage: z.record(z.string(), z.number().nullable()).nullable(),
   sounds: z.array(z.string()),
@@ -295,9 +305,24 @@ export function registerGet(server: McpServer, handle: TibiaDb): void {
   // Every detail query orders on real columns and is a TOTAL order. Implicit rowid
   // order is not safe: these are plain rowid tables, and make-fixture.mjs runs
   // VACUUM, which SQLite may use to renumber rowids.
+  // Left-joined in one statement rather than a lookup per ability. The stored
+  // columns are NOT NULL and already hold the matched row's identity, so only the
+  // upstream side needs normalising: creature_ability.effect is NULL on 126 rows and
+  // '' on 137 with the same meaning, and `=` matches neither while `is` matches only
+  // the first. coalesce is the one form correct for both.
   const abilities = db.prepare(
-    `select name, effect, element from creature_ability where creature_id = ?
-     order by name asc, effect asc, element asc`);
+    `select a.name, a.effect, a.element,
+            p.key as area_key, p.width as area_width, p.cells as area_cells,
+            m.effect_on_caster as area_on_caster
+       from creature_ability a
+       left join mcp_ability_area m
+              on m.creature_id     = a.creature_id
+             and m.ability_name    = a.name
+             and m.ability_effect  = coalesce(a.effect, '')
+             and m.ability_element = coalesce(a.element, '')
+       left join mcp_area_pattern p on p.key = m.pattern_key
+      where a.creature_id = ?
+      order by a.name asc, a.effect asc, a.element asc`);
   const maxDamage = db.prepare('select * from creature_max_damage where creature_id = ?');
   const creatureSounds = db.prepare(
     'select content from creature_sound where creature_id = ? order by content asc');
@@ -373,6 +398,16 @@ export function registerGet(server: McpServer, handle: TibiaDb): void {
           })),
           abilities: abilities.all(row.article_id as number).map((a) => ({
             name: String(a.name), effect: str(a.effect), element: str(a.element),
+            // null is the honest answer for an ability with no matched scene, and
+            // most abilities have none. It must never be an empty grid.
+            area: a.area_key === null || a.area_key === undefined ? null : renderArea(
+              {
+                key: String(a.area_key),
+                width: Number(a.area_width),
+                cells: JSON.parse(String(a.area_cells)) as number[],
+              },
+              { effectOnCaster: Number(a.area_on_caster) === 1 },
+            ),
           })),
           maxDamage: (() => {
             const m = maxDamage.get(row.article_id as number) as Row | undefined;
@@ -543,7 +578,8 @@ export function registerGet(server: McpServer, handle: TibiaDb): void {
         'Full detail for one named Tibia page of any kind: creature (with its loot table, ' +
         'abilities and max damage), item, npc, quest, spell, achievement, house, imbuement, ' +
         'charm, mount, outfit, book, world or update. Takes an exact page name — use ' +
-        'tibia_search first if it is uncertain. Pass `type` to disambiguate a shared name.',
+        'tibia_search first if it is uncertain. Pass `type` to disambiguate a shared name. ' +
+        `Creature abilities may carry an \`area\`: ${AREA_LEGEND}`,
       inputSchema: z.object({
         name: z.string().min(1).describe('Page name, e.g. "Dragon Lord". Case-insensitive.'),
         type: entityTypeSchema.optional().describe('Restrict the lookup to one kind of page.'),

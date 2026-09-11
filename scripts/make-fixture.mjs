@@ -176,7 +176,11 @@ const USED = new Set([
   'imbuement_material', 'outfit_quest',
 ]);
 // rashid_position has no article_id (day, city, location, x, y, z) and is only 7 rows.
-const KEEP_WHOLE = new Set(['rashid_position']);
+// The area tables are written by the enrichment pass, not the generator:
+// mcp_area_pattern is 114 small rows and is the lookup target for every retained
+// ability, so trimming it would only create dangling keys; mcp_schema_version is a
+// single row the probe requires, and emptying it makes the fixture unopenable.
+const KEEP_WHOLE = new Set(['rashid_position', 'mcp_area_pattern', 'mcp_schema_version']);
 const allTables = db
   .prepare("select name from sqlite_master where type='table' and name not like 'sqlite_%'")
   .all()
@@ -185,6 +189,11 @@ for (const t of allTables) {
   if (USED.has(t)) continue;
   if (keepByType.has(t)) {
     db.exec(`delete from "${t}" where article_id not in (${list(kept(t))})`);
+  } else if (t === 'mcp_ability_area') {
+    // Keyed by creature_id, so it cannot ride on keepByType (which prunes by
+    // article_id) nor on the foreign-key sweep (whose FK points at the pattern
+    // table, not at creature).
+    db.exec(`delete from "${t}" where creature_id not in (${list(keepCreature)})`);
   } else if (KEEP_WHOLE.has(t)) {
     // small and keyed by something other than article_id
   } else {

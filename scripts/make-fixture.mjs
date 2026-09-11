@@ -26,6 +26,9 @@ const list = (xs) => (xs.length ? xs.join(',') : '-1');
 const NAMED_CREATURES = [
   'Dragon', 'Dragon Lord', 'Rotworm', 'Demon', 'Cyclops', 'Tarantula', 'Scarab',
   'The Rootkraken',
+  // Three rows all named 'Poison Ball': (creature_id, name) is not unique, so this
+  // is the anchor proving detail joins keep all three rather than collapsing them.
+  'The Plasmother',
 ];
 // Magic Longsword: the zero-source case. Steel Helmet: the vendor case, and its
 // droppers carry the only null-chance rows. Gold Coin: the currency join target.
@@ -37,7 +40,30 @@ const NAMED_CREATURES = [
 const NAMED_ITEMS = [
   'Magic Longsword', 'Steel Helmet', 'Gold Coin', 'Mud',
   'Moonsilver Axe', 'Arrow (Weak)',
+  // Detail-section anchors. item_key is one-to-many (Silver Key has 61 rows), so
+  // Golden Key's 7 prove keys[] is a collection without bloating the fixture.
+  'Golden Key', 'Crypt Bile', 'Strong Mana Potion',
 ];
+
+// One named row per new entity type, each chosen because it actually HAS the child
+// rows the detail tests assert on - a type with no children proves nothing.
+const NAMED_BY_TYPE = {
+  achievement: ['Allow Cookies?', 'Backpack Tourist'],
+  house: ["Warriors' Guildhall", 'The Tibianic'],   // rent 5,000,000 / 500,000
+  imbuement: ['Powerful Reap', 'Powerful Venom'],   // 3 materials each
+  charm: ['Adrenaline Burst', 'Bless'],
+  mount: ['Donkey', 'Racing Bird'],
+  outfit: ['Assassin Outfits', 'Beggar Outfits'],   // 2 outfit_quest rows each
+  book: ['Goldfinger (Book)'],                      // has item_id and the shortest text
+  world: ['Antica', 'Astera'],
+  game_update: ['Updates/7.9', 'Updates/8.00'],
+};
+// Captain Bluebear carries 12 npc_destination rows; the committed fixture had ZERO,
+// so "an NPC with destinations" could not have passed. Rashid anchors the 7-row
+// weekly schedule that rashid_position feeds.
+const NAMED_NPCS = ['Captain Bluebear', 'Rashid'];
+// 60 quest_danger rows, and the quest tables were otherwise derived only via rewards.
+const NAMED_QUESTS = ['Forgotten Knowledge Quest'];
 
 let keepCreature = ids(
   `select article_id from creature where title in (${NAMED_CREATURES.map(() => '?').join(',')})`,
@@ -69,6 +95,40 @@ keepCreature = [...new Set([
   ),
 ])];
 
+// Retain the named rows for every new entity type, then pull in each one's FK
+// targets. This ordering matters: the orphan sweep below DELETES an offending row
+// rather than repairing it, so a named row whose target is missing would be removed.
+/** @type {Map<string, number[]>} */
+const keepByType = new Map();
+for (const [table, names] of Object.entries(NAMED_BY_TYPE)) {
+  const found = ids(
+    `select article_id from "${table}" where title in (${names.map(() => '?').join(',')})`,
+    ...names,
+  );
+  // A misspelled name silently yields an empty retention set and an empty table,
+  // which is exactly how a test comes to pass vacuously. Fail loudly instead.
+  if (found.length !== names.length) {
+    throw new Error(
+      `${table}: retained ${found.length} of ${names.length} named rows — check NAMED_BY_TYPE spelling`,
+    );
+  }
+  keepByType.set(table, found);
+}
+/** @type {(t: string) => number[]} */
+const kept = (t) => keepByType.get(t) ?? [];
+// book.item_id -> item, imbuement_material.item_id -> item, outfit_quest.quest_id -> quest
+keepItem = [...new Set([
+  ...keepItem,
+  ...ids(`select item_id from book where article_id in (${list(kept('book'))}) and item_id is not null`),
+  ...ids(`select item_id from imbuement_material where imbuement_id in (${list(kept('imbuement'))})`),
+])];
+const namedNpcIds = ids(
+  `select article_id from npc where title in (${NAMED_NPCS.map(() => '?').join(',')})`, ...NAMED_NPCS);
+const namedQuestIds = [...new Set([
+  ...ids(`select article_id from quest where title in (${NAMED_QUESTS.map(() => '?').join(',')})`, ...NAMED_QUESTS),
+  ...ids(`select quest_id from outfit_quest where outfit_id in (${list(kept('outfit'))})`),
+])];
+
 // Foreign keys are enforced, and more tables reference these than the ones named
 // above (creature_ability, item_key, npc_job, ...). Rather than hand-order every
 // delete, drop the primary rows with FKs off, then let foreign_key_check find and
@@ -86,10 +146,12 @@ const keepNpc = [...new Set([
   ...ids('select distinct npc_id from npc_offer_buy'),
   ...ids('select distinct npc_id from npc_offer_sell'),
   ...ids("select article_id from npc where title = 'Mud'"),
+  ...namedNpcIds,
 ])];
 db.exec(`delete from npc where article_id not in (${list(keepNpc)})`);
 db.exec(`delete from quest_reward where item_id not in (${list(keepItem)})`);
-db.exec('delete from quest where article_id not in (select quest_id from quest_reward)');
+db.exec(`delete from quest where article_id not in (select quest_id from quest_reward)
+         and article_id not in (${list(namedQuestIds)})`);
 db.exec(`delete from item_attribute where item_id not in (${list(keepItem)})`);
 
 // Empty every table no tool in this plan queries. The tables themselves are kept so
@@ -98,13 +160,28 @@ db.exec(`delete from item_attribute where item_id not in (${list(keepItem)})`);
 const USED = new Set([
   'creature', 'item', 'item_attribute', 'creature_drop', 'npc',
   'npc_offer_sell', 'npc_offer_buy', 'quest', 'quest_reward', 'spell', 'database_info',
+  // Child tables the detail sections read. They are pruned by the orphan sweep, which
+  // is what keeps them small - their parents are already limited to named rows.
+  'creature_ability', 'creature_max_damage', 'creature_sound',
+  'item_key', 'item_sound', 'item_store_offer', 'item_proficiency_perk',
+  'npc_job', 'npc_race', 'npc_destination', 'quest_danger',
+  'imbuement_material', 'outfit_quest',
 ]);
+// rashid_position has no article_id (day, city, location, x, y, z) and is only 7 rows.
+const KEEP_WHOLE = new Set(['rashid_position']);
 const allTables = db
   .prepare("select name from sqlite_master where type='table' and name not like 'sqlite_%'")
   .all()
   .map((r) => String(r.name));
 for (const t of allTables) {
-  if (!USED.has(t)) db.exec(`delete from "${t}"`);
+  if (USED.has(t)) continue;
+  if (keepByType.has(t)) {
+    db.exec(`delete from "${t}" where article_id not in (${list(kept(t))})`);
+  } else if (KEEP_WHOLE.has(t)) {
+    // small and keyed by something other than article_id
+  } else {
+    db.exec(`delete from "${t}"`);
+  }
 }
 
 // Sweep orphans until the database is referentially clean.

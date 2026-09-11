@@ -41,6 +41,37 @@ test('a creature carries its max damage per element and total', async () => {
   assert.equal(dragon.maxDamage.fire, 310);
   assert.equal(dragon.maxDamage.physical, 120);
   assert.equal(dragon.maxDamage.total, 430);
+  // creature_max_damage has no healing column; emitting one invented a field.
+  assert.ok(!('healing' in dragon.maxDamage), 'no phantom healing key');
+  // Sounds are part of the contract and were previously unasserted, so a mutation
+  // replacing them with [] went unnoticed.
+  assert.ok(Array.isArray(dragon.sounds));
+  await h.close();
+});
+
+// Upstream stores -1 for "unknown", not negative damage.
+test('unknown max damage is reported as null, not as -1', async () => {
+  const h = await connect();
+  // Sweep every creature the fixture holds rather than naming one, so this keeps
+  // working if the fixture's sentinel-carrying creature changes.
+  const search = await h.client.callTool({
+    name: 'tibia_search', arguments: { query: 'a', types: ['creature'], limit: 100 },
+  });
+  const titles = (search.structuredContent as any).results.map((r: any) => r.title);
+  assert.ok(titles.length > 0, 'guard: the fixture must hold creatures');
+  let checked = 0;
+  for (const title of titles) {
+    const c = await get(h, title, 'creature');
+    if (!c.maxDamage) continue;
+    checked += 1;
+    for (const [k, v] of Object.entries(c.maxDamage)) {
+      assert.notEqual(v, -1, `${title}.${k} leaked the unknown sentinel`);
+    }
+  }
+  assert.ok(checked > 0, 'guard: at least one creature must have a maxDamage row');
+  // Cave Parrot is the fixture's sentinel carrier: without it the sweep proves nothing.
+  const parrot = await get(h, 'Cave Parrot', 'creature');
+  assert.equal(parrot.maxDamage.total, null, 'the -1 sentinel must surface as null');
   await h.close();
 });
 
@@ -56,7 +87,9 @@ test('a creature with no max damage row returns null, not an error', async () =>
 test('an item returns every key article that uses it', async () => {
   const h = await connect();
   const key = await get(h, 'Golden Key', 'item');
-  assert.ok(key.keys.length > 1, `expected multiple keys, got ${key.keys.length}`);
+  // EXACT count: "> 1" passed while a mutation truncated every key list to two of
+  // seven. A loose assertion on a one-to-many join hides exactly the loss it guards.
+  assert.equal(key.keys.length, 7, 'Golden Key has seven key articles');
   assert.ok(key.keys.every((k: any) => typeof k.number === 'number'));
   await h.close();
 });
@@ -67,7 +100,7 @@ test('an item returns its store offers and proficiency perks', async () => {
   assert.ok(potion.storeOffers.length > 0);
   assert.ok(potion.storeOffers.every((o: any) => typeof o.price === 'number' && o.currency));
   const bile = await get(h, 'Crypt Bile', 'item');
-  assert.ok(bile.proficiencyPerks.length > 0);
+  assert.equal(bile.proficiencyPerks.length, 18, 'Crypt Bile has 18 proficiency perks');
   assert.ok(bile.proficiencyPerks.every((p: any) => typeof p.level === 'number'));
   await h.close();
 });
@@ -113,7 +146,13 @@ test('a quest returns its dangers as creature names and its rewards', async () =
   assert.ok(q.dangers.length > 0);
   assert.ok(q.dangers.every((d: string) => typeof d === 'string' && d.length > 0),
     'dangers must be names, not ids');
-  assert.ok(Array.isArray(q.rewards));
+  assert.equal(q.dangers.length, 60, 'Forgotten Knowledge Quest has 60 dangers');
+  // This quest genuinely has no rewards upstream, so assert rewards on one that
+  // does. `Array.isArray` passed while a mutation replaced rewards wholesale with
+  // [] — assert content, not shape.
+  const lightbearer = await get(h, 'The Lightbearer', 'quest');
+  assert.equal(lightbearer.rewards.length, 8, 'The Lightbearer has 8 rewards');
+  assert.ok(lightbearer.rewards.every((r: string) => typeof r === 'string' && r.length > 0));
   await h.close();
 });
 

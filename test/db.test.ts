@@ -75,3 +75,53 @@ test('openDb validates database_info by KEY, not by column', () => {
     return true;
   });
 });
+
+/**
+ * The probe existed to reject an incompatible index, but was narrower than what the
+ * tools actually read: removing charm.cost_level_2 passed and returned
+ * costs: [100, null, 225]; removing item_proficiency_perk.skill_image passed and
+ * then crashed at tool registration. This asserts the probe covers every column a
+ * tool reads, by dropping each one in turn.
+ */
+test('the probe rejects an index missing any column a tool reads', () => {
+  const cases: ReadonlyArray<readonly [string, string]> = [
+    ['charm', 'cost_level_2'],
+    ['item_proficiency_perk', 'skill_image'],
+    ['house', 'rent'],
+    ['creature_max_damage', 'lifedrain'],
+    ['item_key', 'notes'],
+    ['world', 'battleye'],
+    ['game_update', 'changes'],
+  ];
+  for (const [table, column] of cases) {
+    const dir = mkdtempSync(join(tmpdir(), 'twmcp-probe-'));
+    const path = join(dir, 'partial.db');
+    const db = new DatabaseSync(path);
+    const src = new DatabaseSync(FIXTURE, { readOnly: true });
+    for (const r of src.prepare(
+      "select sql, name from sqlite_master where type='table' and name not like 'sqlite_%'",
+    ).all()) {
+      let sql = String((r as { sql: string }).sql);
+      if (String((r as { name: string }).name) === table) {
+        // The DDL is one line of comma-separated definitions, so drop the column by
+        // splitting that list rather than by filtering lines.
+        const open = sql.indexOf('(');
+        const head = sql.slice(0, open + 1);
+        const body = sql.slice(open + 1, sql.lastIndexOf(')'));
+        const kept = body
+          .split(/,(?![^(]*\))/)
+          .filter((part) => !new RegExp(`^\\s*"?${column}"?\\s`).test(part));
+        sql = `${head}${kept.join(',')})`;
+      }
+      try { db.exec(sql); } catch { /* a dependent FK may fail; the probe still runs */ }
+    }
+    src.close();
+    db.exec("insert into database_info (key, value) values ('version','9.0.0'), ('generate_time','x')");
+    db.close();
+    assert.throws(() => openDb(path), (e: unknown) => {
+      assert.ok(e instanceof SchemaError, `${table}.${column}: expected SchemaError, got ${String(e)}`);
+      assert.match((e as Error).message, new RegExp(column), `${table}.${column} not named in the error`);
+      return true;
+    }, `dropping ${table}.${column} should be rejected`);
+  }
+});

@@ -336,9 +336,18 @@ export function registerGet(server: McpServer, handle: TibiaDb): void {
   // tibiawiki-sql: "Day of the week, Monday starts at 0." Starting this array at
   // Sunday shifted the entire schedule by one day.
   const WEEKDAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+  // The real columns of creature_max_damage. ELEMENTS includes 'healing', which
+  // this table does NOT have — emitting it produced a phantom `healing: null`.
   const DAMAGE_KEYS = [
-    ...ELEMENTS, 'manadrain', 'summons', 'total',
+    'physical', 'earth', 'fire', 'ice', 'energy', 'death', 'holy', 'drown',
+    'lifedrain', 'manadrain', 'summons', 'total',
   ] as const;
+  // Upstream uses -1 for "damage is unknown", not for negative damage. Presented
+  // as a number it reads as a measured value; 26 rows carry it.
+  const damageValue = (v: unknown): number | null => {
+    const n = num(v);
+    return n === -1 ? null : n;
+  };
 
   const shape = (type: EntityType, row: Row, verbosity: 'concise' | 'detailed') => {
     const title = String(row.title);
@@ -367,7 +376,7 @@ export function registerGet(server: McpServer, handle: TibiaDb): void {
           })),
           maxDamage: (() => {
             const m = maxDamage.get(row.article_id as number) as Row | undefined;
-            return m ? Object.fromEntries(DAMAGE_KEYS.map((k) => [k, num(m[k])])) : null;
+            return m ? Object.fromEntries(DAMAGE_KEYS.map((k) => [k, damageValue(m[k])])) : null;
           })(),
           sounds: creatureSounds.all(row.article_id as number).map((r) => String(r.content)),
           source,

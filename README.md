@@ -44,9 +44,15 @@ claude mcp add --transport stdio tibiawiki -- npx -y tibiawiki-mcp
 
 **As a plugin** — the server *plus* a skill that teaches an agent how to query it
 (name resolution, the 100-is-neutral modifier convention, the data quirks that
-produce wrong answers). Distribution is git/marketplace-only: `package.json` has
-`files: ["dist"]`, so `skills/`, `.claude-plugin/` and `.mcp.json` never reach the
-npm tarball.
+produce wrong answers). The plugin pieces never reach the npm tarball, because
+`package.json` has `files: ["dist"]`.
+
+> **Marketplace install is not supported yet.** `.mcp.json` points at
+> `${CLAUDE_PLUGIN_ROOT}/dist/index.js`, `dist/` is deliberately not committed, and
+> Claude Code does not run a build or a `pnpm` install for a plugin it fetches. A
+> marketplace or bare `git clone` install therefore starts with no server. Use the
+> local checkout below, which builds first. Shipping `dist/` or publishing a
+> prebuilt bundle would fix this and is not done here.
 
 ```bash
 git clone https://github.com/jakubmucha/tibiawiki-mcp

@@ -105,8 +105,9 @@ export const NAME = 'tibia_get';
 export function registerGet(server: McpServer, handle: TibiaDb): void {
   const { db, provenance } = handle;
 
-  // spell.title is the one identity column without COLLATE NOCASE, so every lookup
-  // states the collation explicitly rather than relying on the column's default.
+  // Not every identity column declares COLLATE NOCASE - spell, imbuement and book
+  // are plain TEXT UNIQUE - so every lookup states the collation explicitly rather
+  // than relying on the column's default.
   const lookup = (type: EntityType, includeInactive: boolean) => {
     const status = statusClause('t', includeInactive);
     // Table name goes through the closed map in domain.ts, so the type system -

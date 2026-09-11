@@ -31,6 +31,17 @@ function fakeApi(pages: Record<string, string>, lua = LUA): WikiApi & { fetches:
       api.fetches += 1;
       return titles.filter((t) => t in pages).map((title) => ({ title, wikitext: pages[title]! }));
     },
+    async imageInfo(files: string[]) {
+      api.fetches += 1;
+      // Every requested file resolves; image-specific behaviour is covered in
+      // test/images.test.ts, so this only has to satisfy the contract.
+      return files.map((requestedTitle) => ({
+        requestedTitle, title: requestedTitle, found: true as const,
+        url: `https://static.wikia.nocookie.net/tibia/images/a/ab/${requestedTitle.slice(5)}/revision/latest?cb=1`,
+        descriptionUrl: `https://tibia.fandom.com/wiki/${requestedTitle}`,
+        width: 64, height: 64, mime: requestedTitle.endsWith('.png') ? 'image/png' : 'image/gif',
+      }));
+    },
   };
   return api;
 }

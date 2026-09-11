@@ -19,10 +19,24 @@ export type Fetcher = (
 
 export type Clock = { sleep(ms: number): Promise<void> };
 
+/**
+ * One outcome per requested file, so a caller can tell a wiki gap from a broken
+ * response. MediaWiki marks a nonexistent file explicitly - the page comes back with
+ * a `missing` key and a negative pageid - and discarding that evidence is what makes
+ * the two indistinguishable.
+ */
+export type ImageInfoOutcome =
+  | {
+      requestedTitle: string; title: string; found: true;
+      url: string; descriptionUrl: string; width: number; height: number; mime: string;
+    }
+  | { requestedTitle: string; title: string; found: false };
+
 export type WikiApi = {
   pageWikitext(titles: string[]): Promise<Array<{ title: string; wikitext: string }>>;
   moduleSource(title: string): Promise<string>;
   categoryMembers(category: string): Promise<string[]>;
+  imageInfo(files: string[]): Promise<ImageInfoOutcome[]>;
 };
 
 export type WikiApiOptions = {
@@ -134,6 +148,61 @@ export function createWikiApi(opts: WikiApiOptions = {}): WikiApi {
       const [page] = await wikitextOf([title]);
       if (!page) throw new Error(`Module page ${title} returned no content.`);
       return page.wikitext;
+    },
+
+    async imageInfo(files) {
+      const out: ImageInfoOutcome[] = [];
+      for (let i = 0; i < files.length; i += BATCH) {
+        const batch = files.slice(i, i + BATCH);
+        // `normalized` maps the caller's string to the API's title. Without undoing
+        // it there is no way back from a response to the subject that asked for it:
+        // the API normalises, reorders, and collapses distinct requests onto one page.
+        const byTitle = new Map<string, Json>();
+        const denormalise = new Map<string, string>();
+        for await (const body of paginate({
+          action: 'query',
+          prop: 'imageinfo',
+          iiprop: 'url|size|mime',
+          titles: batch.join('|'),
+        })) {
+          const query = body['query'] as
+            | { pages?: Record<string, Json>; normalized?: Array<{ from: string; to: string }> }
+            | undefined;
+          for (const n of query?.normalized ?? []) denormalise.set(n.to, n.from);
+          for (const page of Object.values(query?.pages ?? {})) byTitle.set(String(page['title']), page);
+        }
+
+        const seen = new Set<string>();
+        for (const [title, page] of byTitle) {
+          const requestedTitle = denormalise.get(title) ?? title;
+          seen.add(requestedTitle);
+          const info = (page['imageinfo'] as Array<Json> | undefined)?.[0];
+          if (!info) {
+            out.push({ requestedTitle, title, found: false });
+            continue;
+          }
+          out.push({
+            requestedTitle, title, found: true,
+            url: String(info['url']),
+            descriptionUrl: String(info['descriptionurl'] ?? ''),
+            width: Number(info['width']),
+            height: Number(info['height']),
+            mime: String(info['mime']),
+          });
+        }
+
+        // A file the API neither described nor marked missing means a truncated or
+        // malformed response. Folding that into "missing" would let one lost page
+        // out of fifty read as 98% coverage and pass the per-type floor.
+        const absent = batch.filter((f) => !seen.has(f));
+        if (absent.length > 0) {
+          throw new Error(
+            `imageinfo returned neither data nor a missing marker for ${absent.length} ` +
+              `requested file(s): ${absent.slice(0, 5).join(', ')}. The response was truncated.`,
+          );
+        }
+      }
+      return out;
     },
 
     async categoryMembers(category) {

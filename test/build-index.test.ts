@@ -19,7 +19,8 @@ const sha = (p: string) => createHash('sha256').update(readFileSync(p)).digest('
 let fetches = 0;
 const api = { pageWikitext: async () => { fetches += 1; return []; },
               moduleSource: async () => { fetches += 1; return ''; },
-              categoryMembers: async () => { fetches += 1; return []; } };
+              categoryMembers: async () => { fetches += 1; return []; },
+              imageInfo: async () => { fetches += 1; return []; } };
 
 const stats = (over: Partial<EnrichStats> = {}): EnrichStats => ({
   scenes: 10, joined: 10, ambiguous: 0, noRow: 0,

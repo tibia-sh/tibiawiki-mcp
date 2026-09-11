@@ -176,3 +176,46 @@ must anchor on a **tier-2 or tier-3** ability, since a tier-1 anchor cannot fail
 across the whole corpus." That overstates the evidence. 0 ambiguous means no
 *detected* ambiguity — a tier that matches exactly one row can still match the wrong
 one. The measurement bounds detectable collisions, not correctness.
+
+## Addendum 3 — scene-count reconciliation (2026-09-11)
+
+The second gate flagged a residual risk: a reviewer's 200-page sample projected
+~2,030 corpus scenes against Addendum 1's 1,856. Resolved by counting raw
+`scene={{Scene` occurrences across all 2,209 category pages.
+
+| Quantity | Count |
+|---|---:|
+| raw `scene={{Scene` occurrences | **1,874** |
+| seen by the member parser | 1,856 |
+| **invisible to the parser** | **18** |
+| on pages absent from the index | 0 |
+
+1,856 + 18 = 1,874 exactly. The ~2,030 projection was sampling variance; the
+measured total stands.
+
+### The 18, identified exactly
+
+`{{Ability |` ×8 · `{{Haste\n  |` ×7 · `{{Haste\n   |` ×1 · `{{Ability\n        |` ×1 · `{{healing|` ×1
+
+MediaWiki strips whitespace around template names, so these *are* the same
+templates — which made the plan's "match the template name exactly" rule look
+wrong. **It is not.** Every one of the 10 `Ability`/`healing` variants was checked
+against the index: `row_exists=False` for all 10 (`Iks Yapunac`, `Soulsnatcher`,
+`The Scourge of Oblivion` and its variants). The generator does not emit rows for
+whitespace- or case-variant openers, so discarding their scenes is correct — and
+this is now verified rather than assumed. The other 8 are `Haste`, a dropped kind.
+
+### The real gap
+
+These 18 are not merely discarded, they are **never seen**, so they fall out of the
+`scenes` denominator silently and no counter can observe them. A parser regression
+that started missing legitimate members would shrink the denominator and could
+*raise* the reported rate. Extraction must count unparsed member openers explicitly.
+
+### Also established
+
+**No `Melee` or `Summon` member carries a scene anywhere in the corpus** — scene-bearing
+members are `Ability` 1,681, `Healing` 96, `Debuff` 41, `Outfit` 20, `Haste` 18. The
+per-kind mapping for `Melee` and `Summon` is therefore defensive only; tests for those
+paths are author-invented fixtures exercising code that never fires in production, and
+should be labelled as such rather than presented as corpus-backed.

@@ -159,6 +159,7 @@ export type SceneRef = {
 export type ExtractStats = {
   scenes: number; joined: number; ambiguous: number; noRow: number;
   discardedKind: number; discardedNoSpell: number; discardedRotate: number;
+  unparsedMember: number;   // scene present, enclosing member opener not canonical
 };
 export function extractSceneRefs(
   wikitext: string,
@@ -181,14 +182,15 @@ export function extractSceneRefs(
 - **Normalise NULL to `''` defensively when matching.** NULL occurs only on `plain_text`/`no_template` rows, which never carry a scene, so this guards rather than carries the join.
 - Match in tiers, accepting only a tier yielding exactly one row: `(name, effect, element)` → `(name, effect)` → `(name)`. **A tier may only drop a component the wikitext did not supply** — falling back past an explicit `element=` can uniquely select a row that contradicts it.
 - Count and discard, never attach: a scene on `Haste`/`Debuff`/`Outfit` (79 measured), a Scene with no `spell=` (6, inline `input_array`), a Scene with `rotate90=yes` (1 — the stored grid would render transposed and silently wrong).
+- **Count scenes whose enclosing member opener is not canonical** (`unparsedMember`, 18 measured: `{{Ability |` ×8, `{{Haste\n  |` ×8, `{{Ability\n …|` ×1, `{{healing|` ×1). Discarding them is correct — all 10 `Ability`/`healing` variants were checked and the generator emits **no row** for any of them — but they must be *visible*. Unseen, they leave the `scenes` denominator silently, so a parser regression that started missing legitimate members would shrink the denominator and could *raise* the reported rate. `scenes` must equal the raw `scene={{Scene` count: 1,856 parsed + 18 unparsed = **1,874**.
 - Capture `effect_on_caster` (463 scenes) onto the ref.
 - Every counter is mutually exclusive and they sum to `scenes`.
 
 **Tests to write** (committed wikitext fixtures, no network):
 - Dragon's `{{Ability|Fire Wave|100-170|element=fire|scene={{Scene|spell=8sqmwave|…}}}}` yields `patternKey === '8sqmwave'` — proves nested extraction and the leading-empty-argument fix together
 - a `{{Healing|range=40-70|scene={{Scene|…|effect_on_caster=yes}}}}` joins to `Self-Healing`/`40-70`/`healing` with `effectOnCaster === true` — the per-kind mapping regression
-- a `{{Melee|scene=…}}` with no element joins to element `physical`
-- a `{{Summon|Fire Elemental|1|scene=…}}` joins with element `summon`
+- a `{{Melee|scene=…}}` with no element joins to element `physical`, and a `{{Summon|Fire Elemental|1|scene=…}}` joins with element `summon` — **label both as defensive**: no `Melee` or `Summon` member carries a scene anywhere in the corpus, so these fixtures are author-invented and exercise a path that never fires in production
+- a `{{Ability |` opener (space before the pipe) increments `unparsedMember` and yields no ref
 - a wiki-linked name joins (`Throws [[Distance Fighting|Knives]]` → `Throws Knives`)
 - an `element=fire field` member joins, proving the value is not truncated at the space
 - a **verbatim** `element=fire\n  |scene=…` fixture joins — the newline regression; the flattened examples above are illustrative only, and every committed fixture must be a raw page dump
@@ -283,7 +285,8 @@ export async function buildIndex(
 - [ ] Exactly five tools; `tools/list` under **30,000 bytes** (recorded in the commit).
 - [ ] No runtime network: `grep -rnE "\bfetch\(|node:http|node:https|undici|axios" src/ '--include=*.ts' | grep -v '^src/indexer/'` returns empty.
 - [ ] `mcp_area_pattern` holds **114** rows and contains `rootkraken1` by name.
-- [ ] A real `build-index` reports stored/eligible **≥ 95%**, prints `danglingKey`, and fails rather than passing when the eligible denominator is zero.
+- [ ] A real `build-index` reports stored/eligible **≥ 95%**, prints `danglingKey` and `unparsedMember`, and fails rather than passing when the eligible denominator is zero.
+- [ ] `scenes` equals the raw `scene={{Scene` occurrence count — **1,874** at time of writing — so no scene is invisible to the counters.
 - [ ] A tier-2 or tier-3 ability returns a non-null area at runtime — the 39.7% identity-drift regression.
 - [ ] Dragon's `Fire Wave` returns the `8sqmwave` grid; `Self-Healing` reports `effectOnCaster: true`; an unmatched ability returns `area: null`.
 - [ ] A `{{Haste}}` scene and a `rotate90=yes` scene are each discarded and counted — asserted by test.

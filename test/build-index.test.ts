@@ -6,7 +6,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { buildIndex } from '../src/indexer/build-index.ts';
-import type { EnrichStats } from '../src/indexer/enrich.ts';
+import { eligibleScenes, type EnrichStats } from '../src/indexer/enrich.ts';
 import { FIXTURE } from './harness.ts';
 
 const scratch = () => mkdtempSync(join(tmpdir(), 'twmcp-bi-'));
@@ -166,6 +166,27 @@ test('a partial page fetch fails the build rather than reporting full coverage',
       run: (_cmd, args) => { copyFileSync(FIXTURE, args[args.length - 1]!); return { status: 0, stderr: '' }; },
     }),
     /returned no content|partial fetch/i,
+  );
+  assert.equal(existsSync(target), false);
+});
+
+test('a surge of unrecognised member openers fails the build', async () => {
+  const dir = scratch();
+  const target = join(dir, 'tibiawiki.db');
+  // Coverage still reads as a flawless 100%: these scenes left both the numerator
+  // and the denominator, which is exactly why the ratio alone cannot catch it.
+  const surge = stats({ scenes: 100, unparsedMember: 40, joined: 60, stored: 60 });
+  assert.equal(eligibleScenes(surge), 60);
+  assert.equal(surge.stored / eligibleScenes(surge), 1);
+
+  await assert.rejects(
+    buildIndex({
+      targetPath: target,
+      api,
+      enrich: async () => surge,
+      run: (_cmd, args) => { copyFileSync(FIXTURE, args[args.length - 1]!); return { status: 0, stderr: '' }; },
+    }),
+    /unrecognised member opener/i,
   );
   assert.equal(existsSync(target), false);
 });

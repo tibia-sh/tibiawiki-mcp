@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { DatabaseSync } from 'node:sqlite';
-import { mkdtempSync } from 'node:fs';
+import { mkdtempSync, copyFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { resolveDbPath, openDb, SchemaError } from '../src/db.ts';
@@ -67,14 +67,47 @@ test('openDb validates database_info by KEY, not by column', () => {
   ).all()) {
     db.exec(String((r as { sql: string }).sql));
   }
+  // A schema-only clone has mcp_schema_version present but empty, which the
+  // enrichment probe rejects first. Satisfy it so this test reaches the check it
+  // is actually about; without this row the assertion below passes on the wrong
+  // error and database_info stops being guarded at all.
+  db.exec('insert into mcp_schema_version (version) values (1)');
   full.close();
   db.close();
   assert.throws(() => openDb(bad), (e: unknown) => {
     assert.ok(e instanceof SchemaError);
-    assert.match((e as Error).message, /database_info|version/);
+    assert.match((e as Error).message, /database_info/);
     return true;
   });
 });
+
+/**
+ * The enrichment tables are versioned separately from the generator's schema, so a
+ * future reshape becomes a loud rebuild rather than a silent misread: a v1 runtime
+ * opening a v2 index would parse `cells` under the wrong shape and serve wrong
+ * grids as authoritative. Every branch is asserted, and each must name the remedy.
+ */
+for (const [label, setup] of [
+  ['absent', 'delete from mcp_schema_version'],
+  ['duplicated', 'insert into mcp_schema_version (version) values (1)'],
+  ['newer than supported', 'update mcp_schema_version set version = 99'],
+  ['non-integer', "update mcp_schema_version set version = 'banana'"],
+] as const) {
+  test(`openDb rejects an enrichment version that is ${label}`, () => {
+    const bad = join(scratch(), 'badversion.db');
+    copyFileSync(FIXTURE, bad);
+    const db = new DatabaseSync(bad);
+    db.exec(setup);
+    db.close();
+    assert.throws(() => openDb(bad), (e: unknown) => {
+      assert.ok(e instanceof SchemaError, `expected SchemaError, got ${String(e)}`);
+      assert.match((e as Error).message, /mcp_schema_version|area data/);
+      assert.match((e as Error).message, /tibiawiki-mcp build-index/,
+        'the message must name the remedy, as every other probe error does');
+      return true;
+    });
+  });
+}
 
 /**
  * The probe existed to reject an incompatible index, but was narrower than what the

@@ -16,6 +16,15 @@ const GENERATOR = 'tibiawikisql==9.0.0';
  */
 const MIN_COVERAGE = 0.95;
 
+/**
+ * Ceiling on members whose opener the generator would not recognise, as a share of
+ * all scenes. These leave BOTH sides of the coverage ratio, so a regression that
+ * started misreading canonical members would hold coverage at ~98.8% while quietly
+ * losing their areas - the one blind spot the counter itself cannot close.
+ * Measured at 18 of 1,874 (1.0%); 2% is room to grow without hiding a regression.
+ */
+const MAX_UNPARSED_SHARE = 0.02;
+
 export type Runner = (
   cmd: string,
   args: string[],
@@ -79,6 +88,15 @@ export async function buildIndex(
       throw new Error(
         `${stats.missingPages} indexed creature page(s) returned no content. Coverage ` +
           'cannot be judged on a partial fetch; refusing to install.',
+      );
+    }
+
+    if (stats.scenes > 0 && stats.unparsedMember / stats.scenes > MAX_UNPARSED_SHARE) {
+      throw new Error(
+        `${stats.unparsedMember} of ${stats.scenes} scenes sit behind an unrecognised member ` +
+          `opener (over the ${(100 * MAX_UNPARSED_SHARE).toFixed(0)}% ceiling). These leave both ` +
+          'sides of the coverage ratio, so coverage cannot be trusted here; member parsing has ' +
+          'likely regressed.',
       );
     }
 

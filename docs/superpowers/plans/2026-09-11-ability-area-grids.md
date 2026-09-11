@@ -354,3 +354,18 @@ Addendum 1 said the tiered match "never mis-assigned once across the whole corpu
 ### Gate cap reached
 
 This is the second of at most two gate invocations. A third requires the user's say-so.
+
+## Execution authorization (2026-09-11)
+
+Execution began on **draft 3 without a `Ready` stamp**, by explicit user decision:
+*"Execute draft 3 now, accepting that its latest fixes are unreviewed."*
+
+The standing rule is that only a `Ready` stamp lets execution start. The user was
+told the risk and overrode it knowingly; the gate cap (two invocations, both
+`Needs revision`) is what made a third pass their call rather than mine.
+
+**Unreviewed at start of execution:** every draft-3 change — the matched-row identity
+rule, argument trimming, the `'?'` default, `mcp_schema_version` retention, the `NaN`
+denominator guard, the `db.test.ts` check ordering, the `unparsedMember` counter, and
+the scene-count reconciliation. Draft 3's corrections were verified against the repo
+and the live wiki as they were written, but no reviewer has seen them as a whole.

@@ -1,9 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { connect } from './harness.ts';
-import {
-  ENTITY_TYPES, entityTable, entityChildFk, entityHasStatus,
-} from '../src/domain.ts';
+import { ENTITY_TYPES, entityTable, entityHasStatus } from '../src/domain.ts';
 
 /** One real anchor per new type, all retained by the fixture. */
 const ANCHORS = {
@@ -22,7 +20,6 @@ test('there are fourteen entity types and the maps cover every one', () => {
   assert.equal(ENTITY_TYPES.length, 14);
   for (const t of ENTITY_TYPES) {
     assert.ok(entityTable(t).length > 0, `${t} has no table`);
-    assert.ok(entityChildFk(t).length > 0, `${t} has no child FK column`);
     assert.equal(typeof entityHasStatus(t), 'boolean');
   }
 });
@@ -35,7 +32,6 @@ test('only world and update lack a status column', () => {
 test('the entity maps reject unknown keys and inherited prototype names', () => {
   for (const evil of ['nope', 'toString', 'constructor', 'valueOf', '__proto__'] as const) {
     assert.throws(() => entityTable(evil as never), /unknown entity type/i, `entityTable(${evil})`);
-    assert.throws(() => entityChildFk(evil as never), /unknown entity type/i, `entityChildFk(${evil})`);
     assert.throws(() => entityHasStatus(evil as never), /unknown entity type/i, `entityHasStatus(${evil})`);
   }
 });

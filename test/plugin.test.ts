@@ -64,9 +64,16 @@ test('the lookup tools advertise every entity type they accept', async () => {
   await client.connect(ct);
   const { tools } = await client.listTools();
   for (const name of ['tibia_get', 'tibia_search']) {
-    const description = tools.find((t) => t.name === name)!.description!;
+    const tool = tools.find((t) => t.name === name)!;
+    const description = tool.description!;
     const missing = ENTITY_TYPES.filter((t) => !description.toLowerCase().includes(t));
     assert.deepEqual(missing, [], `${name} does not mention: ${missing.join(', ')}`);
+    // The input schema ships to the model too. A `.describe()` saying "all five"
+    // passed this test while the description was correct, because only the
+    // description was read.
+    const schema = JSON.stringify(tool.inputSchema ?? {}).toLowerCase();
+    assert.ok(!/all five|five kinds|five types/.test(schema),
+      `${name} inputSchema still claims five entity types`);
   }
   await client.close();
   await server.close();

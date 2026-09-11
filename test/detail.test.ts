@@ -77,8 +77,11 @@ test('unknown max damage is reported as null, not as -1', async () => {
 
 test('a creature with no max damage row returns null, not an error', async () => {
   const h = await connect();
-  const c = await get(h, 'Rotworm');
-  assert.ok(c.maxDamage === null || typeof c.maxDamage === 'object');
+  // Rotworm HAS a max-damage row, so the original subject never exercised this
+  // path — and `x === null || typeof x === 'object'` is true of every value here,
+  // making the assertion a tautology on top of that.
+  const c = await get(h, 'Dragon Wrath');
+  assert.equal(c.maxDamage, null, 'this creature has no creature_max_damage row');
   await h.close();
 });
 
@@ -110,7 +113,9 @@ test('an NPC returns its travel destinations with fares', async () => {
   const captain = await get(h, 'Captain Bluebear', 'npc');
   assert.ok(captain.destinations.length > 0);
   assert.ok(captain.destinations.every((d: any) => typeof d.name === 'string'));
-  assert.ok(captain.jobs.length > 0 || captain.races.length > 0);
+  // An OR lets a regression that empties npc_job alone slip through; both are known.
+  assert.equal(captain.jobs.length, 1);
+  assert.equal(captain.races.length, 1);
   await h.close();
 });
 

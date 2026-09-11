@@ -49,7 +49,7 @@ export function registerSearch(server: McpServer, handle: TibiaDb): void {
       inputSchema: z.object({
         query: z.string().min(1).describe('Substring to match against page names, case-insensitive.'),
         types: z.array(entityTypeSchema).optional()
-          .describe('Restrict to these kinds of page. Defaults to all five.'),
+          .describe('Restrict to these kinds of page. Defaults to all fourteen.'),
         include_inactive: z.boolean().default(false)
           .describe('Include deprecated, event-only and unavailable pages.'),
         limit: z.number().int().min(1).max(100).default(25),

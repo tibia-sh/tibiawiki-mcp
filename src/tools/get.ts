@@ -42,6 +42,13 @@ const creatureOut = z.object({
     min: z.number().nullable(),
     max: z.number().nullable(),
   })),
+  abilities: z.array(z.object({
+    name: z.string(),
+    effect: z.string().nullable(),
+    element: z.string().nullable(),
+  })),
+  maxDamage: z.record(z.string(), z.number().nullable()).nullable(),
+  sounds: z.array(z.string()),
   detail, source: sourceSchema,
 });
 const itemOut = z.object({
@@ -56,6 +63,19 @@ const itemOut = z.object({
   isMarketable: z.boolean().nullable(),
   status: z.string().nullable(),
   attributes: z.record(z.string(), z.union([z.string(), z.number()])),
+  // item_key is one-to-many (Silver Key has 61 rows) and each row is a full key
+  // article with its own number, material and location.
+  keys: z.array(z.object({
+    title: z.string(), number: z.number().nullable(), name: z.string().nullable(),
+    material: z.string().nullable(), location: z.string().nullable(), notes: z.string().nullable(),
+  })),
+  storeOffers: z.array(z.object({
+    price: z.number().nullable(), amount: z.number().nullable(), currency: z.string().nullable(),
+  })),
+  proficiencyPerks: z.array(z.object({
+    level: z.number().nullable(), effect: z.string().nullable(), skill: z.string().nullable(),
+  })),
+  sounds: z.array(z.string()),
   detail, source: sourceSchema,
 });
 const npcOut = z.object({
@@ -69,6 +89,19 @@ const npcOut = z.object({
     x: z.number().nullable(), y: z.number().nullable(), z: z.number().nullable(),
   }),
   status: z.string().nullable(),
+  jobs: z.array(z.string()),
+  races: z.array(z.string()),
+  destinations: z.array(z.object({
+    name: z.string(), price: z.number().nullable(), notes: z.string().nullable(),
+  })),
+  // Only Rashid has one; rashid_position.day is an integer 0-6 upstream and is
+  // mapped to weekday names here, since an integer means nothing to a caller.
+  rashidSchedule: z.array(z.object({
+    day: z.string(), city: z.string().nullable(), location: z.string().nullable(),
+    position: z.object({
+      x: z.number().nullable(), y: z.number().nullable(), z: z.number().nullable(),
+    }),
+  })).optional(),
   detail, source: sourceSchema,
 });
 const questOut = z.object({
@@ -81,6 +114,9 @@ const questOut = z.object({
   questLog: z.string().nullable(),
   legend: z.string().nullable(),
   status: z.string().nullable(),
+  // quest_danger stores creature_id; these are joined to names to be usable.
+  dangers: z.array(z.string()),
+  rewards: z.array(z.string()),
   detail, source: sourceSchema,
 });
 const spellOut = z.object({
@@ -141,6 +177,7 @@ const imbuementOut = z.object({
   // imbuement applies to, e.g. "swords,clubs,axes,bows,crossbows".
   slots: z.array(z.string()),
   status: z.string().nullable(),
+  materials: z.array(z.object({ item: z.string(), amount: z.number().nullable() })),
   detail, source: sourceSchema,
 });
 const charmOut = z.object({
@@ -175,6 +212,7 @@ const outfitOut = z.object({
   fullPrice: z.number().nullable(),
   achievement: z.string().nullable(),
   status: z.string().nullable(),
+  quests: z.array(z.object({ quest: z.string(), unlockType: z.string().nullable() })),
   detail, source: sourceSchema,
 });
 const bookOut = z.object({
@@ -254,6 +292,50 @@ export function registerGet(server: McpServer, handle: TibiaDb): void {
   );
   const attrs = db.prepare('select name, value from item_attribute where item_id = ?');
 
+  // Every detail query orders on real columns and is a TOTAL order. Implicit rowid
+  // order is not safe: these are plain rowid tables, and make-fixture.mjs runs
+  // VACUUM, which SQLite may use to renumber rowids.
+  const abilities = db.prepare(
+    `select name, effect, element from creature_ability where creature_id = ?
+     order by name asc, effect asc, element asc`);
+  const maxDamage = db.prepare('select * from creature_max_damage where creature_id = ?');
+  const creatureSounds = db.prepare(
+    'select content from creature_sound where creature_id = ? order by content asc');
+  const itemKeys = db.prepare(
+    `select title, number, name, material, location, notes from item_key where item_id = ?
+     order by number asc, title asc`);
+  const storeOffers = db.prepare(
+    `select price, amount, currency from item_store_offer where item_id = ?
+     order by price asc, amount asc`);
+  const perks = db.prepare(
+    `select proficiency_level, effect, skill_image from item_proficiency_perk where item_id = ?
+     order by proficiency_level asc, effect asc`);
+  const itemSounds = db.prepare(
+    'select content from item_sound where item_id = ? order by content asc');
+  const npcJobs = db.prepare('select name from npc_job where npc_id = ? order by name asc');
+  const npcRaces = db.prepare('select name from npc_race where npc_id = ? order by name asc');
+  const destinations = db.prepare(
+    `select name, price, notes from npc_destination where npc_id = ?
+     order by name asc, price asc`);
+  const rashid = db.prepare('select day, city, location, x, y, z from rashid_position order by day asc');
+  const dangers = db.prepare(
+    `select c.title from quest_danger d join creature c on c.article_id = d.creature_id
+     where d.quest_id = ? order by c.title asc`);
+  const questRewards = db.prepare(
+    `select i.title from quest_reward r join item i on i.article_id = r.item_id
+     where r.quest_id = ? order by i.title asc`);
+  const materials = db.prepare(
+    `select i.title, m.amount from imbuement_material m join item i on i.article_id = m.item_id
+     where m.imbuement_id = ? order by i.title asc`);
+  const outfitQuests = db.prepare(
+    `select q.title, oq.unlock_type from outfit_quest oq join quest q on q.article_id = oq.quest_id
+     where oq.outfit_id = ? order by q.title asc`);
+
+  const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+  const DAMAGE_KEYS = [
+    ...ELEMENTS, 'manadrain', 'summons', 'total',
+  ] as const;
+
   const shape = (type: EntityType, row: Row, verbosity: 'concise' | 'detailed') => {
     const title = String(row.title);
     const source = sourceBlock(title, provenance);
@@ -276,6 +358,14 @@ export function registerGet(server: McpServer, handle: TibiaDb): void {
           loot: drops.all(row.article_id as number).map((d) => ({
             item: String(d.item), chance: num(d.chance), min: num(d.lo), max: num(d.hi),
           })),
+          abilities: abilities.all(row.article_id as number).map((a) => ({
+            name: String(a.name), effect: str(a.effect), element: str(a.element),
+          })),
+          maxDamage: (() => {
+            const m = maxDamage.get(row.article_id as number) as Row | undefined;
+            return m ? Object.fromEntries(DAMAGE_KEYS.map((k) => [k, num(m[k])])) : null;
+          })(),
+          sounds: creatureSounds.all(row.article_id as number).map((r) => String(r.content)),
           source,
         }, DETAILED_CREATURE_FIELDS);
       case 'item': {
@@ -290,7 +380,19 @@ export function registerGet(server: McpServer, handle: TibiaDb): void {
           typeSecondary: str(row.type_secondary), weight: num(row.weight),
           valueBuy: num(row.value_buy), valueSell: num(row.value_sell),
           isMarketable: row.is_marketable === null ? null : Boolean(row.is_marketable),
-          status: str(row.status), attributes: bag, source,
+          status: str(row.status), attributes: bag,
+          keys: itemKeys.all(row.article_id as number).map((k) => ({
+            title: String(k.title), number: num(k.number), name: str(k.name),
+            material: str(k.material), location: str(k.location), notes: str(k.notes),
+          })),
+          storeOffers: storeOffers.all(row.article_id as number).map((o) => ({
+            price: num(o.price), amount: num(o.amount), currency: str(o.currency),
+          })),
+          proficiencyPerks: perks.all(row.article_id as number).map((p) => ({
+            level: num(p.proficiency_level), effect: str(p.effect), skill: str(p.skill_image),
+          })),
+          sounds: itemSounds.all(row.article_id as number).map((r) => String(r.content)),
+          source,
         }, DETAILED_ITEM_FIELDS);
       }
       case 'npc':
@@ -298,7 +400,22 @@ export function registerGet(server: McpServer, handle: TibiaDb): void {
           type: 'npc' as const, title, gender: str(row.gender), city: str(row.city),
           subarea: str(row.subarea), location: str(row.location),
           position: { x: num(row.x), y: num(row.y), z: num(row.z) },
-          status: str(row.status), source,
+          status: str(row.status),
+          jobs: npcJobs.all(row.article_id as number).map((r) => String(r.name)),
+          races: npcRaces.all(row.article_id as number).map((r) => String(r.name)),
+          destinations: destinations.all(row.article_id as number).map((d) => ({
+            name: String(d.name), price: num(d.price), notes: str(d.notes),
+          })),
+          ...(title === 'Rashid'
+            ? {
+                rashidSchedule: rashid.all().map((r) => ({
+                  day: WEEKDAYS[Number(r.day)] ?? String(r.day),
+                  city: str(r.city), location: str(r.location),
+                  position: { x: num(r.x), y: num(r.y), z: num(r.z) },
+                })),
+              }
+            : {}),
+          source,
         };
       case 'quest':
         return {
@@ -306,7 +423,10 @@ export function registerGet(server: McpServer, handle: TibiaDb): void {
           levelRequired: num(row.level_required), levelRecommended: num(row.level_recommended),
           isPremium: row.is_premium === null ? null : Boolean(row.is_premium),
           questLog: str(row.quest_log), legend: str(row.legend),
-          status: str(row.status), source,
+          status: str(row.status),
+          dangers: dangers.all(row.article_id as number).map((r) => String(r.title)),
+          rewards: questRewards.all(row.article_id as number).map((r) => String(r.title)),
+          source,
         };
       case 'spell':
         return {
@@ -339,7 +459,11 @@ export function registerGet(server: McpServer, handle: TibiaDb): void {
           category: str(row.category), imbuementType: str(row.type),
           effect: str(row.effect),
           slots: str(row.slots)?.split(',').map((x) => x.trim()).filter(Boolean) ?? [],
-          status: str(row.status), source,
+          status: str(row.status),
+          materials: materials.all(row.article_id as number).map((m) => ({
+            item: String(m.title), amount: num(m.amount),
+          })),
+          source,
         };
       case 'charm':
         return {
@@ -361,7 +485,11 @@ export function registerGet(server: McpServer, handle: TibiaDb): void {
           type: 'outfit' as const, title, outfitType: str(row.outfit_type),
           isPremium: bool(row.is_premium), isBought: bool(row.is_bought),
           isTournament: bool(row.is_tournament), fullPrice: num(row.full_price),
-          achievement: str(row.achievement), status: str(row.status), source,
+          achievement: str(row.achievement), status: str(row.status),
+          quests: outfitQuests.all(row.article_id as number).map((q) => ({
+            quest: String(q.title), unlockType: str(q.unlock_type),
+          })),
+          source,
         };
       case 'book':
         return {

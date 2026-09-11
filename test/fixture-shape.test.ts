@@ -1,7 +1,31 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { DatabaseSync } from 'node:sqlite';
+import { statSync } from 'node:fs';
+import { MCP_SCHEMA_VERSION } from '../src/db.ts';
+import { MCP_SCHEMA_VERSION as INDEXER_VERSION } from '../src/indexer/enrich.ts';
 import { FIXTURE } from './harness.ts';
+
+/**
+ * The fixture is committed, so its size is a real cost on every clone. An ungated
+ * budget is a budget nobody checks.
+ */
+const MAX_FIXTURE_BYTES = 1_500_000;
+
+test('the committed fixture stays within its size budget', () => {
+  const bytes = statSync(FIXTURE).size;
+  assert.ok(
+    bytes <= MAX_FIXTURE_BYTES,
+    `fixture is ${(bytes / 1e6).toFixed(2)} MB, over the ${MAX_FIXTURE_BYTES / 1e6} MB budget`,
+  );
+});
+
+test('the runtime and the indexer agree on the enrichment schema version', () => {
+  // db.ts declares this rather than importing it, to keep the build-time network
+  // module out of the server. A drift between the two would make the probe reject
+  // every freshly built index.
+  assert.equal(MCP_SCHEMA_VERSION, INDEXER_VERSION);
+});
 
 /**
  * The fixture is the substrate every tool test runs against. Twice in this project a
@@ -17,6 +41,7 @@ const REQUIRED_NON_EMPTY = [
   'creature_ability', 'creature_max_damage', 'creature_sound',
   'item_key', 'item_sound', 'item_store_offer', 'item_proficiency_perk',
   'npc_job', 'npc_race', 'npc_destination', 'quest_danger',
+  'mcp_area_pattern', 'mcp_ability_area', 'mcp_schema_version',
 ] as const;
 
 test('every table the tools read has at least one fixture row', () => {

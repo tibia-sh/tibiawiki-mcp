@@ -13,6 +13,13 @@ export class SchemaError extends Error {}
  * The shape the tools require. Probed once at startup so a generator-version drift
  * names the column it is missing instead of silently returning nulls for it.
  */
+/**
+ * Enrichment schema version the runtime understands. Kept here rather than imported
+ * from src/indexer/, which would pull the build-time network module into the server.
+ * src/indexer/enrich.ts exports the same constant and a test asserts they agree.
+ */
+export const MCP_SCHEMA_VERSION = 1;
+
 const REQUIRED_COLUMNS: Record<string, readonly string[]> = {
   creature: [
     'article_id', 'title', 'name', 'hitpoints', 'experience', 'armor', 'speed',
@@ -25,6 +32,13 @@ const REQUIRED_COLUMNS: Record<string, readonly string[]> = {
     'value_buy', 'value_sell', 'is_marketable', 'flavor_text', 'status',
   ],
   item_attribute: ['item_id', 'name', 'value'],
+  // Written by the build-time enrichment pass, not by the generator.
+  mcp_area_pattern: ['key', 'width', 'cells'],
+  mcp_ability_area: [
+    'creature_id', 'ability_name', 'ability_effect', 'ability_element',
+    'pattern_key', 'effect_on_caster',
+  ],
+  mcp_schema_version: ['version'],
   creature_drop: ['creature_id', 'item_id', 'chance', 'min', 'max'],
   npc: ['article_id', 'title', 'gender', 'city', 'subarea', 'location', 'x', 'y', 'z', 'status'],
   npc_offer_sell: ['npc_id', 'item_id', 'value', 'currency_id'],
@@ -112,6 +126,11 @@ function assertSchema(db: DatabaseSync): void {
       );
     }
   }
+  // Deliberately after the column loop: db.test.ts builds schema-only databases to
+  // prove the probe names a dropped column, and those have this table with no rows.
+  // Checking row counts first would make every one of them report the wrong reason.
+  assertEnrichmentVersion(db);
+
   const keys = new Set(
     db.prepare('select key from database_info').all().map((r) => String(r.key)),
   );
@@ -119,6 +138,34 @@ function assertSchema(db: DatabaseSync): void {
   if (missingKeys.length > 0) {
     throw new SchemaError(
       `Index table "database_info" is missing required key(s): ${missingKeys.join(', ')}. ` +
+        'Rebuild with `tibiawiki-mcp build-index`.',
+    );
+  }
+}
+
+/**
+ * The enrichment schema is versioned separately from the generator's, so a shape
+ * change becomes a loud "rebuild required" rather than a silent misread.
+ */
+function assertEnrichmentVersion(db: DatabaseSync): void {
+  const rows = db.prepare('select version from mcp_schema_version').all();
+  if (rows.length !== 1) {
+    throw new SchemaError(
+      `Index table "mcp_schema_version" holds ${rows.length} rows, expected exactly 1. ` +
+        'Rebuild with `tibiawiki-mcp build-index`.',
+    );
+  }
+  const version = Number(rows[0]!['version']);
+  if (!Number.isInteger(version)) {
+    throw new SchemaError(
+      'Index table "mcp_schema_version" holds a non-integer version. ' +
+        'Rebuild with `tibiawiki-mcp build-index`.',
+    );
+  }
+  if (version !== MCP_SCHEMA_VERSION) {
+    const direction = version > MCP_SCHEMA_VERSION ? 'newer than' : 'older than';
+    throw new SchemaError(
+      `Index area data is version ${version}, ${direction} the supported ${MCP_SCHEMA_VERSION}. ` +
         'Rebuild with `tibiawiki-mcp build-index`.',
     );
   }

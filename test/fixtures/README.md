@@ -41,14 +41,39 @@ target were missing would simply vanish. A misspelled name now throws rather tha
 yielding an empty table.
 
 Tables no tool queries are emptied but kept, so the schema stays identical to a real
-index. That is what keeps the file near 900 KB.
+index. That is what keeps the file near 1 MB.
+
+## Area tables
+
+`mcp_area_pattern`, `mcp_ability_area` and `mcp_schema_version` are written by the
+build-time enrichment pass, not by the generator, so they only exist if the source
+index was already enriched. Regenerate in that order or the tables come out missing.
+
+They are retained differently from everything else:
+
+- `mcp_area_pattern` is kept whole (114 rows, a few KB). It is the lookup target for
+  every retained ability, so trimming it would only create dangling keys.
+- `mcp_schema_version` is kept whole. It is one row, and the probe rejects an index
+  without it - an emptied one makes the whole fixture unopenable.
+- `mcp_ability_area` is pruned by `creature_id`. It cannot ride on the `article_id`
+  pruning other child tables use, nor on the foreign-key sweep, whose key points at
+  the pattern table rather than at `creature`.
+
+Anchors: Dragon carries `Fire Wave` -> `8sqmwave` and a `Self-Healing` with
+`effect_on_caster = 1`; The Rootkraken carries `Death and Holy AoE` -> `rootkraken1`,
+whose key is single-quoted upstream and whose grid uses cell value 4.
 
 ## Reproducing it
 
 ```bash
-tibiawiki-mcp build-index                 # ~3 min; data/tibiawiki.db is gitignored
+tibiawiki-mcp build-index                 # ~3 min generate + ~25 s enrichment;
+                                          # data/tibiawiki.db is gitignored
 node scripts/make-fixture.mjs data/tibiawiki.db test/fixtures/tibiawiki-fixture.db
 ```
+
+`build-index` generates, enriches, validates, then installs atomically. Enrichment
+fetches the live wiki and fails the build if stored areas fall below 95% of eligible
+scenes; it measured 98.8% (1,748 of 1,770) on 2026-09-11.
 
 A fresh contributor must build the full index first — it is not in the repository.
 

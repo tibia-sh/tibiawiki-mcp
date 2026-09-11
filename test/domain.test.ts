@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { DatabaseSync } from 'node:sqlite';
 import {
-  ELEMENTS, modifierColumn, WEAK_TO, RESISTANT_TO, searchTable,
+  ELEMENTS, modifierColumn, WEAK_TO, RESISTANT_TO, entityTable,
   creatureSort, itemSort, eavOperator, statusClause,
   DETAILED_CREATURE_FIELDS, DETAILED_ITEM_FIELDS,
 } from '../src/domain.ts';
@@ -25,7 +25,7 @@ test('the modifier convention is encoded once: >100 is weak, <100 is resistant',
 // an out-of-enum key rather than pass it through - one negative test per map.
 test('all five SQL-fragment maps reject unknown keys', () => {
   assert.throws(() => modifierColumn('lava' as never), /unknown element/i);
-  assert.throws(() => searchTable('dragon' as never), /unknown entity type/i);
+  assert.throws(() => entityTable('dragon' as never), /unknown entity type/i);
   assert.throws(() => creatureSort('rowid' as never), /unknown sort/i);
   assert.throws(() => itemSort('rowid' as never), /unknown sort/i);
   assert.throws(() => eavOperator('drop' as never), /unknown operator/i);
@@ -36,7 +36,7 @@ test('the maps also reject inherited prototype names', () => {
   // truthy and would sail past a `if (!value)` guard into an SQL fragment. The
   // original negative test used 'dragon'/'rowid' and passed while this was broken.
   for (const evil of ['toString', 'constructor', 'valueOf', '__proto__'] as const) {
-    assert.throws(() => searchTable(evil as never), /unknown entity type/i, `searchTable(${evil})`);
+    assert.throws(() => entityTable(evil as never), /unknown entity type/i, `entityTable(${evil})`);
     assert.throws(() => creatureSort(evil as never), /unknown sort/i, `creatureSort(${evil})`);
     assert.throws(() => itemSort(evil as never), /unknown sort/i, `itemSort(${evil})`);
     assert.throws(() => eavOperator(evil as never), /unknown operator/i, `eavOperator(${evil})`);
@@ -44,9 +44,9 @@ test('the maps also reject inherited prototype names', () => {
   }
 });
 
-test('searchTable maps entity types to real table names', () => {
-  assert.equal(searchTable('creature'), 'creature');
-  assert.equal(searchTable('npc'), 'npc');
+test('entityTable maps entity types to real table names', () => {
+  assert.equal(entityTable('creature'), 'creature');
+  assert.equal(entityTable('npc'), 'npc');
 });
 
 test('statusClause is alias-qualified, because every query joins two status columns', () => {

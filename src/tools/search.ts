@@ -1,7 +1,10 @@
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/server';
 import type { TibiaDb } from '../db.ts';
-import { ENTITY_TYPES, entityTypeSchema, searchTable, statusClause, type EntityType } from '../domain.ts';
+import {
+  ENTITY_TYPES, entityTypeSchema, entityTable, entityHasStatus, statusClause,
+  type EntityType,
+} from '../domain.ts';
 import { encodeCursor, decodeCursor } from '../cursor.ts';
 
 const outputSchema = z.object({
@@ -21,11 +24,14 @@ export function registerSearch(server: McpServer, handle: TibiaDb): void {
   const statements = new Map<string, ReturnType<typeof db.prepare>>();
   for (const type of ENTITY_TYPES) {
     for (const includeInactive of [false, true]) {
-      const status = statusClause('t', includeInactive);
+      // world and game_update have no status column, so the clause must be omitted
+      // entirely rather than merely disabled - these statements are prepared eagerly
+      // here, so an unconditional clause would fail at server construction.
+      const status = entityHasStatus(type) ? statusClause('t', includeInactive) : '';
       statements.set(
         `${type}:${includeInactive}`,
         db.prepare(
-          `select t.title from "${searchTable(type)}" t
+          `select t.title from "${entityTable(type)}" t
            where t.title like ? collate nocase` + (status ? ` and ${status}` : ''),
         ),
       );

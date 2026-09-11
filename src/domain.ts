@@ -26,21 +26,58 @@ export function modifierColumn(element: Element): string {
 export const WEAK_TO = (column: string): string => `${column} > 100`;
 export const RESISTANT_TO = (column: string): string => `${column} < 100`;
 
-export const ENTITY_TYPES = ['creature', 'item', 'npc', 'quest', 'spell'] as const;
+export const ENTITY_TYPES = [
+  'creature', 'item', 'npc', 'quest', 'spell',
+  'achievement', 'house', 'imbuement', 'charm', 'mount', 'outfit', 'book',
+  'world', 'update',
+] as const;
 export type EntityType = (typeof ENTITY_TYPES)[number];
 export const entityTypeSchema = z.enum(ENTITY_TYPES);
 
-const SEARCH_TABLES: Record<EntityType, string> = {
-  creature: 'creature', item: 'item', npc: 'npc', quest: 'quest', spell: 'spell',
+/**
+ * Per-type facts. `table` is interpolated into SQL, so lookups go through
+ * Object.hasOwn rather than a truthiness check: a plain-object lookup resolves
+ * inherited names, and `ENTITIES['toString']` would otherwise return a function.
+ *
+ * `childFk` is the column a child table uses to point back here. It is NOT the
+ * primary key — every entity table keys on `article_id`, so a per-type map of that
+ * would be a fourteen-entry constant saying the same thing fourteen times.
+ *
+ * `hasStatus` is false for `world` and `update`: those two tables have no `status`
+ * column, and filtering them raises `no such column: t.status`.
+ */
+const ENTITIES: Record<EntityType, { table: string; childFk: string; hasStatus: boolean }> = {
+  creature: { table: 'creature', childFk: 'creature_id', hasStatus: true },
+  item: { table: 'item', childFk: 'item_id', hasStatus: true },
+  npc: { table: 'npc', childFk: 'npc_id', hasStatus: true },
+  quest: { table: 'quest', childFk: 'quest_id', hasStatus: true },
+  spell: { table: 'spell', childFk: 'spell_id', hasStatus: true },
+  achievement: { table: 'achievement', childFk: 'achievement_id', hasStatus: true },
+  house: { table: 'house', childFk: 'house_id', hasStatus: true },
+  imbuement: { table: 'imbuement', childFk: 'imbuement_id', hasStatus: true },
+  charm: { table: 'charm', childFk: 'charm_id', hasStatus: true },
+  mount: { table: 'mount', childFk: 'mount_id', hasStatus: true },
+  outfit: { table: 'outfit', childFk: 'outfit_id', hasStatus: true },
+  book: { table: 'book', childFk: 'book_id', hasStatus: true },
+  world: { table: 'world', childFk: 'world_id', hasStatus: false },
+  update: { table: 'game_update', childFk: 'update_id', hasStatus: false },
 };
-export function searchTable(type: EntityType): string {
-  // Object.hasOwn, not a truthiness check: a plain-object lookup resolves inherited
-  // names, so SEARCH_TABLES['toString'] would return Object.prototype.toString and
-  // sail past `if (!t)` straight into an interpolated SQL fragment.
-  if (!Object.hasOwn(SEARCH_TABLES, type)) {
+
+function entity(type: EntityType): { table: string; childFk: string; hasStatus: boolean } {
+  if (!Object.hasOwn(ENTITIES, type)) {
     throw new Error(`Unknown entity type: ${String(type)}`);
   }
-  return SEARCH_TABLES[type];
+  return ENTITIES[type];
+}
+
+export function entityTable(type: EntityType): string {
+  return entity(type).table;
+}
+export function entityChildFk(type: EntityType): string {
+  return entity(type).childFk;
+}
+export function entityHasStatus(type: EntityType): boolean {
+  return entity(type).hasStatus;
 }
 
 export const CREATURE_SORTS = ['experience', 'hitpoints', 'title'] as const;

@@ -128,6 +128,14 @@ const namedQuestIds = [...new Set([
   ...ids(`select article_id from quest where title in (${NAMED_QUESTS.map(() => '?').join(',')})`, ...NAMED_QUESTS),
   ...ids(`select quest_id from outfit_quest where outfit_id in (${list(kept('outfit'))})`),
 ])];
+// quest_danger points at creatures. Retaining a quest without its danger creatures
+// means the sweep deletes every one of its danger rows - Forgotten Knowledge Quest
+// lost all 60 that way, while the table still held 90 rows from other quests, so a
+// table-wide emptiness check saw nothing wrong.
+keepCreature = [...new Set([
+  ...keepCreature,
+  ...ids(`select distinct creature_id from quest_danger where quest_id in (${list(namedQuestIds)})`),
+])];
 
 // Foreign keys are enforced, and more tables reference these than the ones named
 // above (creature_ability, item_key, npc_job, ...). Rather than hand-order every

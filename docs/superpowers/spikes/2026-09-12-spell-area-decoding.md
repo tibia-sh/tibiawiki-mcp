@@ -134,3 +134,72 @@ rests on that distinction.
 documentation, or wiki tile data for spells in the way `Module:SceneBuilder` provides
 it for creature abilities. If spell pages ever gain `{{Scene}}` templates, the existing
 ability pipeline serves them directly with no image decoding at all.
+
+---
+
+## CORRECTION — the "do not ship" conclusion was wrong; the classifier was broken
+
+Prompted by the user asking whether a more reliable method existed. It does, and
+finding it exposed the bug behind the previous section.
+
+### The bug
+
+The classifier treated **any non-transparent pixel** in a delta frame as effect. But
+these delta frames **redraw the grey floor tiles**, which are opaque. So for most
+images every touched tile read as 100% covered, producing bounding boxes rather than
+shapes. `Berserk` only appeared to work because its sprites are dark marks on
+transparency — the one case where opacity happens to coincide with effect.
+
+That is why `Fire wave` decoded to a rectangle while the frame plainly showed a cone,
+and why "animation extent is not affected area" looked like a semantic dead end. It
+was not semantic at all.
+
+### The fix
+
+Classify a pixel as effect when it **differs from the background plate** (frame 0)
+beyond a tolerance, and threshold each tile relative to the most-covered tile in that
+frame, since sprite density varies. No new dependencies.
+
+### Result: 30 images collapse to 12 coherent shape families
+
+| shape | tiles | images |
+|---|---:|---|
+| `1×1` | 1 | **8** — every single-target strike |
+| `7×7` circle | 37 | **7** — Avalanche, Divine caldera, Great fireball, Groundshaker, Mass heal, Stone shower, Thunderstorm |
+| `5×4` cone | 12 | **3** — Fire wave ×2, Ice wave |
+| `3×3` | 9 | 2 — Berserk, Challenge |
+| `1×5` line | 5 | 2 — Energy beam ×2 |
+| `3×5` | 11 | 2 — Energy wave ×2 |
+| 6 further shapes | | 1 each — Eternal winter, Hell's core, Rage of the skies, Front Sweep, Great energy beam ×2 |
+
+### Why this is good evidence, absent an oracle
+
+There is still no external ground truth for player spell areas. What there is:
+
+1. **Convergence.** Seven independently drawn images produce a **cell-for-cell
+   identical** 37-tile circle. Eight produce an identical single tile. Noise does not
+   converge.
+2. **Before/after pairs agree.** Art redrawn years apart (`Fire wave1.gif` vs
+   `Fire wave1(after winter update 2007).gif`, and both `Energy strike` and
+   `Energy wave` pairs) decodes to the same shape.
+3. **Shapes match what the images show.** Verified by eye: the cone is a cone, the
+   circle is a circle.
+4. **Families match spell semantics.** Strikes hit one tile; waves are cones; balls
+   are circles; beams are lines.
+
+The earlier name-matched cross-check against creature-ability grids remains a **poor
+oracle** and should not be used: a creature ability named "Avalanche" is a
+single-target strike (`7sqmstrike`), while the player's Avalanche rune is a 7×7
+circle. They are different things that share a name. 0 of 7 match cell-for-cell, and
+that is expected rather than alarming.
+
+## Revised recommendation: viable, worth building
+
+Caveats that remain and belong in the plan, unchanged from before:
+
+- covers **25 of 211 spells**
+- output is a **binary mask**, not the labelled `0`–`8` grid ability data carries, so
+  it must not be served in the same shape or field as `area`
+- `sips` is macOS-only, making this the first build step that cannot run on Linux
+- provenance should be explicit in the data (`derivedFrom: "animation"`), so an agent
+  can tell a decoded shape from the wiki's own tile data

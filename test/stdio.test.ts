@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { Client } from '@modelcontextprotocol/client';
 import { StdioClientTransport } from '@modelcontextprotocol/client/stdio';
-import { FIXTURE } from './harness.ts';
+import { FIXTURE, PACKAGE_VERSION } from './harness.ts';
 
 /**
  * Protocol conformance against the REAL published binary over REAL stdio - the
@@ -33,6 +33,17 @@ test('the built binary serves all five tools over stdio', async () => {
     assert.equal(t.annotations?.readOnlyHint, true, `${t.name} must be read-only`);
   }
   await client.close();
+});
+
+// A host tells releases apart by the handshake's serverInfo, so it must report the version
+// npm published. It was once a literal that no release bumped.
+test('the built binary reports the package version in its handshake', async () => {
+  const client = await connectStdio();
+  try {
+    assert.equal(client.getServerVersion()?.version, PACKAGE_VERSION);
+  } finally {
+    await client.close();
+  }
 });
 
 test('a real attribute query works end to end over stdio', async () => {

@@ -1,5 +1,5 @@
 import { after } from 'node:test';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { InMemoryTransport } from '@modelcontextprotocol/server';
@@ -8,6 +8,11 @@ import { openDb } from '../src/db.ts';
 import { createServer } from '../src/server.ts';
 
 export const FIXTURE = new URL('./fixtures/tibiawiki-fixture.db', import.meta.url).pathname;
+
+/** The version package.json declares, which is the version npm publishes. */
+export const PACKAGE_VERSION = (
+  JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')) as { version: string }
+).version;
 
 /**
  * A source of temp directories that are removed when the calling file's tests finish.

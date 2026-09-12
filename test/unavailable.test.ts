@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { Client } from '@modelcontextprotocol/client';
 import { StdioClientTransport } from '@modelcontextprotocol/client/stdio';
 import { TOOL_NAMES } from '../src/server.ts';
+import { PACKAGE_VERSION } from './harness.ts';
 
 /**
  * Regression: the server used to exit(1) when the index was missing. An MCP host
@@ -53,6 +54,11 @@ async function withMissingIndex(body: (client: Client) => Promise<void>): Promis
 test('the server still connects when the index is missing', () => withMissingIndex(async (client) => {
   const { tools } = await client.listTools();
   assert.equal(tools.length, TOOL_NAMES.length, 'the full tool surface must still be advertised');
+}));
+
+test('it reports the package version in its handshake', () => withMissingIndex(async (client) => {
+  // Built separately from the healthy server, so it is checked separately.
+  assert.equal(client.getServerVersion()?.version, PACKAGE_VERSION);
 }));
 
 test('its instructions explain the missing index', () => withMissingIndex(async (client) => {

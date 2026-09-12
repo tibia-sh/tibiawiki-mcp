@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { z } from 'zod';
 import { McpServer } from '@modelcontextprotocol/server';
 import type { TibiaDb } from './db.ts';
@@ -6,6 +7,17 @@ import { registerSearch, NAME as SEARCH } from './tools/search.ts';
 import { registerFindCreatures, NAME as FIND_CREATURES } from './tools/find-creatures.ts';
 import { registerFindItems, NAME as FIND_ITEMS } from './tools/find-items.ts';
 import { registerHowToObtain, NAME as HOW_TO_OBTAIN } from './tools/how-to-obtain.ts';
+
+/**
+ * What both servers report in the MCP handshake. The version is package.json's, read at
+ * runtime rather than copied here, so the protocol always reports the version npm
+ * published. package.json sits one level above both src/ and dist/, and npm packs it
+ * into every tarball.
+ */
+const packageJson = JSON.parse(
+  readFileSync(new URL('../package.json', import.meta.url), 'utf8'),
+) as { version: string };
+const SERVER_INFO = { name: 'tibiawiki-mcp', version: packageJson.version };
 
 /**
  * Licence obligations are met in the server's own metadata rather than a README
@@ -31,7 +43,7 @@ export const TOOL_NAMES = [GET, SEARCH, FIND_CREATURES, FIND_ITEMS, HOW_TO_OBTAI
 export function createServer(handle: TibiaDb): McpServer {
   const { provenance } = handle;
   const server = new McpServer(
-    { name: 'tibiawiki-mcp', version: '0.1.0' },
+    SERVER_INFO,
     {
       capabilities: { tools: {} },
       instructions:
@@ -64,7 +76,7 @@ export function createServer(handle: TibiaDb): McpServer {
  */
 export function createUnavailableServer(reason: string): McpServer {
   const server = new McpServer(
-    { name: 'tibiawiki-mcp', version: '0.1.0' },
+    SERVER_INFO,
     {
       capabilities: { tools: {} },
       instructions:

@@ -122,8 +122,12 @@ snapshot you build yourself, so upgrading the package never refreshes it — see
 [Refreshing](#refreshing).
 
 The tarball ships exactly `dist/` and `data/spell-areas.json`, plus the `package.json`,
-`README.md` and `LICENSE` npm always adds; `npm pack --dry-run` is the check that
-nothing else leaks in.
+`README.md` and `LICENSE` npm always adds; `test/packaging.test.ts` runs
+`npm pack --dry-run` as part of `pnpm test`, so anything else leaking in fails CI.
+
+`pnpm smoke <tarball-or-package@version>` is the consumer-side check: it installs the
+package into a throwaway directory and drives the *installed* binary over real stdio —
+against a local tarball before publishing, against the registry after.
 
 ## Attribution
 

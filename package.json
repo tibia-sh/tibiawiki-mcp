@@ -32,6 +32,7 @@
     "build": "tsc -p tsconfig.build.json",
     "test": "pnpm typecheck && pnpm build && node --test test/*.test.ts",
     "decode-spell-areas": "node scripts/decode-spell-areas.ts",
+    "smoke": "node scripts/smoke.mjs",
     "prepublishOnly": "pnpm test"
   },
   "dependencies": {

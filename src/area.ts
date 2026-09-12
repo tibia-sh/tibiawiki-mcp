@@ -65,3 +65,80 @@ export function renderArea(pattern: AreaPattern, opts: { effectOnCaster: boolean
     effectOnCaster: opts.effectOnCaster,
   };
 }
+
+/**
+ * A decoded spell area: a binary mask, not the labelled grid above.
+ *
+ * `Mask` lives here rather than beside the decoder because `src/` must never import
+ * from `scripts/` - `tsconfig.build.json` sets `rootDir: src`, so even a type-only
+ * import that way is TS6059 and fails the build. The decoder imports this instead.
+ */
+export type Mask = { width: number; height: number; cells: number[] };
+
+export type SpellShape = {
+  width: number;
+  height: number;
+  cells: number[];
+  ascii: string;
+  affectedTiles: number;
+  derivedFrom: 'animation';
+  sourceImage: string;
+  sourceUrl: string;
+  corroborated: boolean;
+};
+
+/**
+ * Crops to the affected bounding box.
+ *
+ * Every image-to-image comparison must go through this. Comparing raw canvases
+ * reports a conflict between two images that agree: TibiaWiki's two Energy Beam
+ * animations decode to a cell-identical 1x5 on canvases of 3x8 and 3x9.
+ */
+export function normaliseMask(mask: Mask): Mask {
+  const ys: number[] = [];
+  const xs: number[] = [];
+  for (let y = 0; y < mask.height; y += 1) {
+    for (let x = 0; x < mask.width; x += 1) {
+      if (mask.cells[y * mask.width + x]) { ys.push(y); xs.push(x); }
+    }
+  }
+  if (ys.length === 0) return { width: 0, height: 0, cells: [] };
+  const [y0, y1] = [Math.min(...ys), Math.max(...ys)];
+  const [x0, x1] = [Math.min(...xs), Math.max(...xs)];
+  const width = x1 - x0 + 1;
+  const cells: number[] = [];
+  for (let y = y0; y <= y1; y += 1) {
+    for (let x = x0; x <= x1; x += 1) cells.push(mask.cells[y * mask.width + x]!);
+  }
+  return { width, height: y1 - y0 + 1, cells };
+}
+
+/** Only two glyphs: the decode cannot recover caster, target or sprite tiles. */
+export function renderSpellShape(input: {
+  width: number; height: number; cells: number[];
+  sourceImage: string; sourceUrl: string; corroborated: boolean;
+}): SpellShape {
+  const { width, height, cells } = input;
+  if (!Number.isInteger(width) || width <= 0 || !Number.isInteger(height) || height <= 0) {
+    throw new Error(`Spell shape dimensions must be positive integers, got ${width}x${height}.`);
+  }
+  if (cells.length !== width * height) {
+    throw new Error(`Spell shape has ${cells.length} cells for a ${width}x${height} grid.`);
+  }
+  if (cells.some((c) => c !== 0 && c !== 1)) {
+    throw new Error('Spell shape cells must be 0 or 1; the decode produces a binary mask.');
+  }
+  const rows: string[] = [];
+  for (let r = 0; r < height; r += 1) {
+    rows.push(cells.slice(r * width, (r + 1) * width).map((c) => (c ? '#' : '.')).join(' '));
+  }
+  return {
+    width, height, cells,
+    ascii: rows.join('\n'),
+    affectedTiles: cells.filter((c) => c === 1).length,
+    derivedFrom: 'animation',
+    sourceImage: input.sourceImage,
+    sourceUrl: input.sourceUrl,
+    corroborated: input.corroborated,
+  };
+}

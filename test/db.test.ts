@@ -82,6 +82,14 @@ test('cacheDbPath, the build target, honours the explicit env override', () => {
   assert.equal(cacheDbPath({ TIBIAWIKI_MCP_DB: '/tmp/x.db' } as NodeJS.ProcessEnv), '/tmp/x.db');
 });
 
+test('cacheDbPath treats an empty XDG_CACHE_HOME as unset', () => {
+  // The XDG Base Directory spec: an unset or empty value means $HOME/.cache.
+  assert.equal(
+    cacheDbPath({ HOME: '/home/u', XDG_CACHE_HOME: '' } as NodeJS.ProcessEnv),
+    '/home/u/.cache/tibiawiki-mcp/tibiawiki.db',
+  );
+});
+
 /**
  * The default locator, against real package layouts in a scratch node_modules, so the
  * error codes are Node's own rather than stand-ins. Only MODULE_NOT_FOUND may read as

@@ -181,6 +181,11 @@ const USED = new Set([
 // ability, so trimming it would only create dangling keys; mcp_schema_version is a
 // single row the probe requires, and emptying it makes the fixture unopenable.
 const KEEP_WHOLE = new Set(['rashid_position', 'mcp_area_pattern', 'mcp_schema_version']);
+// mcp_image is keyed (entity_type, article_id) across seven parent tables, so it
+// rides on neither keepByType (which prunes by article_id inside one table) nor the
+// FK sweep (it declares no FK). Pruned from the rows that actually SURVIVE, after
+// the sweep below, rather than from re-derived id sets.
+const IMAGE_PARENTS = ['creature', 'item', 'npc', 'spell', 'mount', 'imbuement', 'charm'];
 const allTables = db
   .prepare("select name from sqlite_master where type='table' and name not like 'sqlite_%'")
   .all()
@@ -189,6 +194,8 @@ for (const t of allTables) {
   if (USED.has(t)) continue;
   if (keepByType.has(t)) {
     db.exec(`delete from "${t}" where article_id not in (${list(kept(t))})`);
+  } else if (t === 'mcp_image') {
+    // Deferred: pruned after the orphan sweep, once parents have stopped changing.
   } else if (t === 'mcp_ability_area') {
     // Keyed by creature_id, so it cannot ride on keepByType (which prunes by
     // article_id) nor on the foreign-key sweep (whose FK points at the pattern
@@ -215,6 +222,22 @@ for (let pass = 1; ; pass++) {
     db.exec(`delete from "${table}" where rowid in (${rowids.join(',')})`);
   }
 }
+// Now that parents have stopped changing, keep only the image rows whose parent
+// actually survived. Doing this before the sweep would retain rows for parents the
+// sweep then deletes.
+for (const table of IMAGE_PARENTS) {
+  db.exec(
+    `delete from mcp_image where entity_type = '${table}'
+       and article_id not in (select article_id from "${table}")`,
+  );
+}
+const orphanImages = Number(
+  db.prepare(`select count(*) c from mcp_image m where not exists (
+       select 1 from creature c where c.article_id = m.article_id and m.entity_type = 'creature')
+     and m.entity_type = 'creature'`).get()?.c ?? 0,
+);
+if (orphanImages > 0) throw new Error(`mcp_image still holds ${orphanImages} orphaned creature rows`);
+
 db.exec('pragma foreign_keys = on');
 db.exec('vacuum');
 

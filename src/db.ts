@@ -18,7 +18,7 @@ export class SchemaError extends Error {}
  * from src/indexer/, which would pull the build-time network module into the server.
  * src/indexer/enrich.ts exports the same constant and a test asserts they agree.
  */
-export const MCP_SCHEMA_VERSION = 1;
+export const MCP_SCHEMA_VERSION = 2;
 
 const REQUIRED_COLUMNS: Record<string, readonly string[]> = {
   creature: [
@@ -39,6 +39,10 @@ const REQUIRED_COLUMNS: Record<string, readonly string[]> = {
     'pattern_key', 'effect_on_caster',
   ],
   mcp_schema_version: ['version'],
+  mcp_image: [
+    'entity_type', 'article_id', 'file_name', 'url', 'description_url',
+    'width', 'height', 'mime_type',
+  ],
   creature_drop: ['creature_id', 'item_id', 'chance', 'min', 'max'],
   npc: ['article_id', 'title', 'gender', 'city', 'subarea', 'location', 'x', 'y', 'z', 'status'],
   npc_offer_sell: ['npc_id', 'item_id', 'value', 'currency_id'],

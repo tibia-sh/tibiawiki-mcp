@@ -4,7 +4,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { copyFileSync, mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { enrich, eligibleScenes, MCP_SCHEMA_VERSION } from '../src/indexer/enrich.ts';
+import { enrich, eligibleScenes, MCP_SCHEMA_VERSION, IMAGE_TYPES } from '../src/indexer/enrich.ts';
 import type { WikiApi } from '../src/indexer/wiki-api.ts';
 import { FIXTURE } from './harness.ts';
 
@@ -31,9 +31,26 @@ function fakeApi(pages: Record<string, string>, lua = LUA): WikiApi & { fetches:
       api.fetches += 1;
       return titles.filter((t) => t in pages).map((title) => ({ title, wikitext: pages[title]! }));
     },
+    async imageInfo(files: string[]) {
+      api.fetches += 1;
+      // Every requested file resolves; image-specific behaviour is covered in
+      // test/images.test.ts, so this only has to satisfy the contract.
+      return files.map((requestedTitle) => ({
+        requestedTitle, title: requestedTitle, found: true as const,
+        url: `https://static.wikia.nocookie.net/tibia/images/a/ab/${requestedTitle.slice(5)}/revision/latest?cb=1`,
+        descriptionUrl: `https://tibia.fandom.com/wiki/${requestedTitle}`,
+        width: 64, height: 64, mime: requestedTitle.endsWith('.png') ? 'image/png' : 'image/gif',
+      }));
+    },
   };
   return api;
 }
+
+/** Per-type image stats that satisfy the build gate: all seven present, all resolved. */
+const allTypesResolved = () => Object.fromEntries(
+  (['creature', 'item', 'npc', 'spell', 'mount', 'imbuement', 'charm'] as const).map((t) =>
+    [t, { subjects: 1, resolved: 1, missing: 0, invalid: 0, skipped: 0 }]),
+);
 
 const open = (p: string) => new DatabaseSync(p, { readOnly: true });
 const count = (db: DatabaseSync, table: string) =>
@@ -58,6 +75,40 @@ test('enrichment creates all three tables and stores the pattern by name', async
   assert.equal(stats.stored, 2);
   assert.equal(stats.ambiguous, 0);
   assert.equal(stats.danglingKey, 0);
+});
+
+test('IMAGE_TYPES lists exactly the seven image-bearing types', () => {
+  // The build gate iterates this same constant, so a type deleted from it vanishes
+  // from both the work and its own policing without any test noticing.
+  assert.deepEqual(
+    IMAGE_TYPES.map((t) => t.entityType).sort(),
+    ['charm', 'creature', 'imbuement', 'item', 'mount', 'npc', 'spell'],
+  );
+});
+
+test('enrichment writes image rows, named per type', async () => {
+  const path = copy();
+  await enrich(path, fakeApi({ Dragon: DRAGON_WIKITEXT }));
+  const db = open(path);
+
+  // Named, per type. A bare count would stay green with only spells stored, and an
+  // empty mcp_image would make every tibia_get return image: null silently.
+  for (const [type, table, title, ext] of [
+    ['creature', 'creature', 'Dragon', 'gif'],
+    ['charm', 'charm', 'Adrenaline Burst', 'png'],
+    ['imbuement', 'imbuement', 'Powerful Reap', 'png'],
+  ] as const) {
+    const row = db.prepare(
+      `select m.file_name, m.url, m.mime_type from mcp_image m
+         join "${table}" e on e.article_id = m.article_id
+        where m.entity_type = ? and e.title = ?`,
+    ).get(type, title) as { file_name: string; url: string; mime_type: string } | undefined;
+    assert.ok(row, `${type} ${title} must have an image row`);
+    assert.equal(row.file_name, `${title}.${ext}`);
+    assert.ok(row.url.length > 0, 'the url must not be empty');
+  }
+  assert.ok(count(db, 'mcp_image') > 100, 'all seven types contribute rows');
+  db.close();
 });
 
 test('the stored row carries the matched identity and the caster flag', async () => {
@@ -154,7 +205,7 @@ test('eligibleScenes excludes intentional discards only', () => {
     scenes: 100, joined: 80, ambiguous: 1, noRow: 4,
     discardedKind: 10, discardedNoSpell: 2, discardedRotate: 1, unparsedMember: 2,
     patterns: 114, rejectedPatterns: [], stored: 80, danglingKey: 0, pagesNotInIndex: 0,
-    missingPages: 0, conflictingKey: 0,
+    missingPages: 0, conflictingKey: 0, images: allTypesResolved(),
   };
   // 100 - (10 + 2 + 1 + 2) = 85. ambiguous and noRow are failures, not discards,
   // so they stay in the denominator.

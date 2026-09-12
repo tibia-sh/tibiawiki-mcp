@@ -132,6 +132,115 @@ test('every request identifies the client and a contact', async () => {
   }
 });
 
+const imagePages = (found: string[], missing: string[] = []) => ({
+  query: {
+    pages: Object.fromEntries([
+      ...found.map((t, n) => [String(n), {
+        title: t, pageid: 100 + n,
+        imageinfo: [{
+          url: `https://static.wikia.nocookie.net/tibia/images/a/ab/${t.slice(5)}/revision/latest?cb=1`,
+          descriptionurl: `https://tibia.fandom.com/wiki/${t}`,
+          width: 64, height: 64, mime: 'image/gif',
+        }],
+      }]),
+      // MediaWiki marks a nonexistent file explicitly, with a negative pageid.
+      ...missing.map((t, n) => [String(-1 - n), { title: t, missing: '', ns: 6 }]),
+    ]),
+  },
+});
+
+test('imageInfo batches at fifty and asks for every file exactly once', async () => {
+  const files = Array.from({ length: 120 }, (_, n) => `File:P${n}.gif`);
+  const calls: Call[] = [];
+  const echo: Fetcher = async (url, init) => {
+    calls.push({ url, headers: init.headers });
+    const asked = (new URL(url).searchParams.get('titles') ?? '').split('|').filter(Boolean);
+    return new Response(JSON.stringify(imagePages(asked)), { status: 200 });
+  };
+  const r = { calls, fetcher: echo, get count() { return calls.length; } };
+  await createWikiApi({ fetcher: r.fetcher, clock }).imageInfo(files);
+
+  assert.equal(r.count, 3);
+  const asked = r.calls.flatMap((c) => (new URL(c.url).searchParams.get('titles') ?? '').split('|').filter(Boolean));
+  assert.equal(asked.length, 120);
+  assert.deepEqual([...new Set(asked)].sort(), [...files].sort());
+});
+
+test('imageInfo undoes normalisation so the caller can map back to its subject', async () => {
+  // Verified live: the API rewrites File:Steel_Helmet.gif -> File:Steel Helmet.gif.
+  const r = recorder([() => new Response(JSON.stringify({
+    query: {
+      normalized: [{ from: 'File:Steel_Helmet.gif', to: 'File:Steel Helmet.gif' }],
+      ...imagePages(['File:Steel Helmet.gif']).query,
+    },
+  }), { status: 200 })]);
+  const out = await createWikiApi({ fetcher: r.fetcher, clock }).imageInfo(['File:Steel_Helmet.gif']);
+
+  assert.equal(out.length, 1);
+  assert.equal(out[0]!.requestedTitle, 'File:Steel_Helmet.gif', 'must echo what the caller asked for');
+  assert.equal(out[0]!.title, 'File:Steel Helmet.gif');
+});
+
+test('imageInfo maps a reordered response to the right request', async () => {
+  const r = recorder([json(imagePages(['File:B.gif', 'File:A.gif']))]);
+  const out = await createWikiApi({ fetcher: r.fetcher, clock }).imageInfo(['File:A.gif', 'File:B.gif']);
+  const byReq = new Map(out.map((o) => [o.requestedTitle, o]));
+  for (const name of ['A', 'B']) {
+    const hit = byReq.get(`File:${name}.gif`);
+    assert.ok(hit, `File:${name}.gif should have an outcome`);
+    assert.ok(hit.found, `File:${name}.gif should have resolved`);
+    assert.ok(hit.url.includes(`${name}.gif`), 'each request must get its OWN url back');
+  }
+});
+
+test('imageInfo answers both requests when two titles collapse onto one page', async () => {
+  // Defensive: 0 cross-table title collisions today. The API normalises
+  // File:Steel_Helmet.gif onto File:Steel Helmet.gif, so a reverse to->from map
+  // loses one request and reports it as a truncated response.
+  const r = recorder([() => new Response(JSON.stringify({
+    query: {
+      normalized: [{ from: 'File:Steel_Helmet.gif', to: 'File:Steel Helmet.gif' }],
+      ...imagePages(['File:Steel Helmet.gif']).query,
+    },
+  }), { status: 200 })]);
+  const out = await createWikiApi({ fetcher: r.fetcher, clock })
+    .imageInfo(['File:Steel_Helmet.gif', 'File:Steel Helmet.gif']);
+
+  assert.equal(out.length, 2, 'both requested strings must get an outcome');
+  assert.deepEqual(
+    out.map((o) => o.requestedTitle).sort(),
+    ['File:Steel Helmet.gif', 'File:Steel_Helmet.gif'],
+  );
+  assert.ok(out.every((o) => o.found), 'both resolve to the same page');
+});
+
+test('imageInfo reports an API-confirmed missing file as found: false', async () => {
+  const r = recorder([json(imagePages(['File:A.gif'], ['File:Gone.gif']))]);
+  const out = await createWikiApi({ fetcher: r.fetcher, clock }).imageInfo(['File:A.gif', 'File:Gone.gif']);
+  const gone = out.find((o) => o.requestedTitle === 'File:Gone.gif');
+  assert.ok(gone);
+  assert.equal(gone.found, false, 'a wiki gap, distinguishable from a broken response');
+  assert.ok(!('url' in gone));
+});
+
+test('imageInfo throws when a requested file is absent from the response entirely', async () => {
+  // A truncated batch. Folding this into `missing` would let one lost page out of
+  // fifty read as 98% coverage and sail through the per-type floor.
+  const r = recorder([json(imagePages(['File:A.gif']))]);
+  const api = createWikiApi({ fetcher: r.fetcher, clock });
+  await assert.rejects(
+    () => api.imageInfo(['File:A.gif', 'File:Vanished.gif']),
+    (e: Error) => e.message.includes('File:Vanished.gif'),
+  );
+});
+
+test('imageInfo carries the description url the API returns for free', async () => {
+  const r = recorder([json(imagePages(['File:Dragon.gif']))]);
+  const [only] = await createWikiApi({ fetcher: r.fetcher, clock }).imageInfo(['File:Dragon.gif']);
+  assert.ok(only?.found);
+  assert.equal(only.descriptionUrl, 'https://tibia.fandom.com/wiki/File:Dragon.gif');
+});
+
 test('moduleSource returns raw wikitext for a module page', async () => {
   const r = recorder([json(pages(['Module:SceneBuilder/data']))]);
   const api = createWikiApi({ fetcher: r.fetcher, clock });

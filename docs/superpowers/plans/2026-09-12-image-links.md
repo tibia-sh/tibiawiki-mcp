@@ -261,3 +261,34 @@ all-seven-types-present gate, `descriptionUrl` validation, the `subjects` counte
 rename, the image-less-creature regression anchor, the 311-bytes-per-type projection
 with its 80-character description cap, and the withdrawal of draft 1's incorrect
 rejection of a correct codex finding.
+
+## Execution finding — URL fetchability is not verifiable here (2026-09-12)
+
+Task 4's acceptance says "a real `tibia_get` returns a URL that resolves." **It could
+not be verified in this environment, and is recorded rather than marked passed.**
+
+Measured from the build host:
+
+| request | result |
+|---|---|
+| `api.php?action=query…` | **200** |
+| `static.wikia.nocookie.net/.../Dragon.gif` | **403**, Cloudflare bot page |
+| same, with a browser User-Agent | **403** |
+| `tibia.fandom.com/wiki/File:Dragon.gif` (the `descriptionUrl`) | **403** |
+| `tibia.fandom.com/wiki/Special:FilePath/Dragon.gif` | **403** |
+
+Cloudflare blocks *page* requests from this egress while allowing `api.php`, so
+ordinary wiki page views fail here too. This is an environment property, not a defect
+in the stored URLs: they are exactly what the API reports for each file and exactly
+what the wiki itself renders from.
+
+**What is verified:** the URL is the API's own value, character for character; its
+scheme and host are validated at store time; it is well-formed and canonical.
+**What is not:** that any given client can fetch it. Whether a programmatic fetch
+succeeds depends on Cloudflare and on the fetching client, neither of which this
+server controls — the same reason the plan already refuses to promise that a picture
+renders. An agent that cannot fetch the CDN directly still has `descriptionUrl` as
+the human-resolvable provenance page.
+
+This strengthens rather than weakens the decision to annotate the `resource_link`
+`audience: ["user"]`: the reliable consumer is a person in a browser.

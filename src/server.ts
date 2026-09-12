@@ -13,7 +13,9 @@ import { registerHowToObtain, NAME as HOW_TO_OBTAIN } from './tools/how-to-obtai
  */
 export const ATTRIBUTION =
   'Data from TibiaWiki (https://tibia.fandom.com), licensed CC BY-SA. ' +
-  'Tibia is made by CipSoft; game content and images are copyright CipSoft GmbH.';
+  'Tibia is made by CipSoft; game content and images are copyright CipSoft GmbH. ' +
+    'Images are linked from TibiaWiki, not stored or redistributed by this server; '+
+    'each image carries a descriptionUrl, the wiki page holding its licence and author.';
 
 export const TOOL_NAMES = [GET, SEARCH, FIND_CREATURES, FIND_ITEMS, HOW_TO_OBTAIN] as const;
 

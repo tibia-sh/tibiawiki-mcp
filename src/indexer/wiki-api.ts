@@ -19,10 +19,24 @@ export type Fetcher = (
 
 export type Clock = { sleep(ms: number): Promise<void> };
 
+/**
+ * One outcome per requested file, so a caller can tell a wiki gap from a broken
+ * response. MediaWiki marks a nonexistent file explicitly - the page comes back with
+ * a `missing` key and a negative pageid - and discarding that evidence is what makes
+ * the two indistinguishable.
+ */
+export type ImageInfoOutcome =
+  | {
+      requestedTitle: string; title: string; found: true;
+      url: string; descriptionUrl: string; width: number; height: number; mime: string;
+    }
+  | { requestedTitle: string; title: string; found: false };
+
 export type WikiApi = {
   pageWikitext(titles: string[]): Promise<Array<{ title: string; wikitext: string }>>;
   moduleSource(title: string): Promise<string>;
   categoryMembers(category: string): Promise<string[]>;
+  imageInfo(files: string[]): Promise<ImageInfoOutcome[]>;
 };
 
 export type WikiApiOptions = {
@@ -134,6 +148,67 @@ export function createWikiApi(opts: WikiApiOptions = {}): WikiApi {
       const [page] = await wikitextOf([title]);
       if (!page) throw new Error(`Module page ${title} returned no content.`);
       return page.wikitext;
+    },
+
+    async imageInfo(files) {
+      const out: ImageInfoOutcome[] = [];
+      for (let i = 0; i < files.length; i += BATCH) {
+        const batch = files.slice(i, i + BATCH);
+        // `normalized` maps the caller's string to the API's title. Without undoing
+        // it there is no way back from a response to the subject that asked for it:
+        // the API normalises, reorders, and collapses distinct requests onto one page.
+        const byTitle = new Map<string, Json>();
+        // `from -> to`, so a request can be resolved forwards to its page. The
+        // reverse direction loses information: when two requested titles normalise
+        // onto one page, only one `from` survives and the other looks unanswered.
+        const normalisedTo = new Map<string, string>();
+        for await (const body of paginate({
+          action: 'query',
+          prop: 'imageinfo',
+          iiprop: 'url|size|mime',
+          titles: batch.join('|'),
+        })) {
+          const query = body['query'] as
+            | { pages?: Record<string, Json>; normalized?: Array<{ from: string; to: string }> }
+            | undefined;
+          for (const n of query?.normalized ?? []) normalisedTo.set(n.from, n.to);
+          for (const page of Object.values(query?.pages ?? {})) byTitle.set(String(page['title']), page);
+        }
+
+        const absent: string[] = [];
+        for (const requestedTitle of batch) {
+          const title = normalisedTo.get(requestedTitle) ?? requestedTitle;
+          const page = byTitle.get(title);
+          if (!page) {
+            absent.push(requestedTitle);
+            continue;
+          }
+          const info = (page['imageinfo'] as Array<Json> | undefined)?.[0];
+          if (!info) {
+            out.push({ requestedTitle, title, found: false });
+            continue;
+          }
+          out.push({
+            requestedTitle, title, found: true,
+            url: String(info['url']),
+            descriptionUrl: String(info['descriptionurl'] ?? ''),
+            width: Number(info['width']),
+            height: Number(info['height']),
+            mime: String(info['mime']),
+          });
+        }
+
+        // A file the API neither described nor marked missing means a truncated or
+        // malformed response. Folding that into "missing" would let one lost page
+        // out of fifty read as 98% coverage and pass the per-type floor.
+        if (absent.length > 0) {
+          throw new Error(
+            `imageinfo returned neither data nor a missing marker for ${absent.length} ` +
+              `requested file(s): ${absent.slice(0, 5).join(', ')}. The response was truncated.`,
+          );
+        }
+      }
+      return out;
     },
 
     async categoryMembers(category) {

@@ -4,7 +4,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { mkdtempSync, copyFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { resolveDbPath, openDb, SchemaError } from '../src/db.ts';
+import { resolveDbPath, openDb, SchemaError, MCP_SCHEMA_VERSION } from '../src/db.ts';
 
 const FIXTURE = new URL('./fixtures/tibiawiki-fixture.db', import.meta.url).pathname;
 const scratch = () => mkdtempSync(join(tmpdir(), 'twmcp-'));
@@ -71,12 +71,31 @@ test('openDb validates database_info by KEY, not by column', () => {
   // enrichment probe rejects first. Satisfy it so this test reaches the check it
   // is actually about; without this row the assertion below passes on the wrong
   // error and database_info stops being guarded at all.
-  db.exec('insert into mcp_schema_version (version) values (1)');
+  // MCP_SCHEMA_VERSION, not a literal: a stale literal makes this test fail at the
+  // version check before reaching the database_info check it is actually about.
+  db.exec(`insert into mcp_schema_version (version) values (${MCP_SCHEMA_VERSION})`);
   full.close();
   db.close();
   assert.throws(() => openDb(bad), (e: unknown) => {
     assert.ok(e instanceof SchemaError);
     assert.match((e as Error).message, /database_info/);
+    return true;
+  });
+});
+
+test('openDb rejects an index that has no mcp_image table', () => {
+  const bad = join(scratch(), 'noimages.db');
+  copyFileSync(FIXTURE, bad);
+  const db = new DatabaseSync(bad);
+  db.exec('drop table mcp_image');
+  db.close();
+  assert.throws(() => openDb(bad), (e: unknown) => {
+    assert.ok(e instanceof SchemaError);
+    // Named specifically: every SchemaError in src/db.ts ends with the same
+    // "Rebuild with `tibiawiki-mcp build-index`" remedy, so matching that alone
+    // passes on any other probe failure.
+    assert.match((e as Error).message, /mcp_image/);
+    assert.match((e as Error).message, /tibiawiki-mcp build-index/);
     return true;
   });
 });
@@ -89,8 +108,9 @@ test('openDb validates database_info by KEY, not by column', () => {
  */
 for (const [label, setup, expected] of [
   ['absent', 'delete from mcp_schema_version', /holds 0 rows/],
-  ['duplicated', 'insert into mcp_schema_version (version) values (1)', /holds 2 rows/],
+  ['duplicated', `insert into mcp_schema_version (version) values (${MCP_SCHEMA_VERSION})`, /holds 2 rows/],
   ['newer than supported', 'update mcp_schema_version set version = 99', /newer than/],
+  ['older than supported', 'update mcp_schema_version set version = 1', /older than/],
   // Anchored on this branch's own wording. A loose alternation would also match the
   // mismatch branch's "version NaN, older than..." message, which is how a targeted
   // check becomes deletable without any test noticing.

@@ -1,0 +1,80 @@
+name: release
+
+on:
+  push:
+    branches: [main]
+  # Lets the MCP registry publish be retried for a tag npm already has, without
+  # running the npm publish again.
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing release tag to publish to the MCP registry
+        required: true
+
+permissions:
+  contents: read
+
+# Release runs never overlap, and one in progress is never cancelled, because a cancelled
+# run can leave a tag with nothing published.
+concurrency:
+  group: release
+  cancel-in-progress: false
+  queue: max  # the release PR merge's own run must not be replaced while it waits
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    outputs:
+      released: ${{ steps.publish.outputs.released }}  # 'true' once npm accepted the publish, else empty
+      tag: ${{ steps.release.outputs.tag_name }}
+    permissions:
+      contents: write       # create tags and releases
+      pull-requests: write  # open and groom the release PR
+      issues: write         # create and apply the release PR labels
+      id-token: write       # OIDC for trusted publishing
+    steps:
+      - uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7  # v5.0.0
+        id: release
+        with:
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+
+      # Everything below runs only on the merge of the release PR, and only in a run triggered
+      # at the tagged commit, because npm provenance names the commit that triggered the run.
+      # The one exception is the first step: it fails a run triggered anywhere else, so a
+      # release that could not be published shows up as a red run.
+      - name: Release tagged at another commit, not published
+        if: ${{ steps.release.outputs.release_created && steps.release.outputs.sha != github.sha }}
+        env:
+          TAG: ${{ steps.release.outputs.tag_name }}
+          TAGGED_SHA: ${{ steps.release.outputs.sha }}
+        run: |
+          echo "::error::$TAG was tagged at $TAGGED_SHA but this run was triggered at $GITHUB_SHA, so nothing was published and npm has nothing for $TAG."
+          exit 1
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8  # v5.0.0
+        if: ${{ steps.release.outputs.release_created && steps.release.outputs.sha == github.sha }}
+        with:
+          ref: ${{ steps.release.outputs.sha }}  # the tagged commit, not the run's trigger
+          persist-credentials: false
+      - uses: pnpm/action-setup@a7487c7e89a18df4991f7f222e4898a00d66ddda  # v4.1.0
+        if: ${{ steps.release.outputs.release_created && steps.release.outputs.sha == github.sha }}
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444  # v5.0.0
+        if: ${{ steps.release.outputs.release_created && steps.release.outputs.sha == github.sha }}
+        with:
+          node-version: '24'
+          cache: pnpm
+      # setup-node pins the npm bundled with the Node release; trusted publishing needs
+      # >= 11.5.1. Pinned exactly, not @latest: this job holds id-token: write, and a
+      # floating install is the one unpinned thing in a workflow whose constraints
+      # demand pins everywhere.
+      - run: npm install -g npm@12.0.2
+        if: ${{ steps.release.outputs.release_created && steps.release.outputs.sha == github.sha }}
+      - run: pnpm install --frozen-lockfile
+        if: ${{ steps.release.outputs.release_created && steps.release.outputs.sha == github.sha }}
+      - run: pnpm test
+        if: ${{ steps.release.outputs.release_created && steps.release.outputs.sha == github.sha }}
+      - id: publish
+        if: ${{ steps.release.outputs.release_created && steps.release.outputs.sha == github.sha }}
+        run: |
+          npm publish
+          echo "released=true" >> "$GITHUB_OUTPUT"

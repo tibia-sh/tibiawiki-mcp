@@ -28,7 +28,7 @@ local index is the only way to ask a real question, and it costs about three min
 ## Install
 
 ```bash
-pnpm add -g tibiawiki-mcp
+pnpm add -g @tibia.sh/tibiawiki-mcp
 tibiawiki-mcp build-index      # ~3 minutes, ~14 MB
 ```
 
@@ -39,13 +39,13 @@ Two ways, and they ship different things.
 **As an MCP server only** — the npm package:
 
 ```bash
-claude mcp add --transport stdio tibiawiki -- npx -y tibiawiki-mcp
+claude mcp add --transport stdio tibiawiki -- npx -y @tibia.sh/tibiawiki-mcp
 ```
 
 **As a plugin** — the server *plus* a skill that teaches an agent how to query it
 (name resolution, the 100-is-neutral modifier convention, the data quirks that
 produce wrong answers). The plugin pieces never reach the npm tarball, because
-`package.json` has `files: ["dist"]`.
+`package.json` has `files: ["dist", "data/spell-areas.json"]`.
 
 > **Marketplace install is not supported yet.** `.mcp.json` points at
 > `${CLAUDE_PLUGIN_ROOT}/dist/index.js`, `dist/` is deliberately not committed, and
@@ -55,7 +55,7 @@ produce wrong answers). The plugin pieces never reach the npm tarball, because
 > prebuilt bundle would fix this and is not done here.
 
 ```bash
-git clone https://github.com/jakubmucha/tibiawiki-mcp
+git clone https://github.com/tibia-sh/tibiawiki-mcp
 cd tibiawiki-mcp && pnpm install && pnpm build   # dist/ is gitignored, so build once
 claude --plugin-dir .
 ```
@@ -115,13 +115,15 @@ run on a schedule. Re-run without `--check` to regenerate.
 
 ## Releases
 
-There are none, deliberately. The package is not published to npm and the version
-stays at `0.1.0`; install it from source (see above). The index it serves is a local
-snapshot a maintainer regenerates, so a published version number would imply a
-freshness guarantee the package cannot make on its own.
+Releases go to npm as `@tibia.sh/tibiawiki-mcp`, starting at `0.1.0`.
 
-If that changes, `files` already ships exactly `dist/` and `data/spell-areas.json`,
-and `npm pack --dry-run` is the check that nothing else leaks in.
+The version number describes the server, not the data. The index it serves is a local
+snapshot you build yourself, so upgrading the package never refreshes it — see
+[Refreshing](#refreshing).
+
+The tarball ships exactly `dist/` and `data/spell-areas.json`, plus the `package.json`,
+`README.md` and `LICENSE` npm always adds; `npm pack --dry-run` is the check that
+nothing else leaks in.
 
 ## Attribution
 

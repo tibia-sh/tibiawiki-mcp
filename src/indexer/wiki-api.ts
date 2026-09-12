@@ -47,7 +47,7 @@ export type WikiApiOptions = {
 };
 
 const DEFAULT_UA =
-  'tibiawiki-mcp/1.0 (build-time index generator; https://github.com/jakubmucha/tibiawiki-mcp)';
+  'tibiawiki-mcp/1.0 (build-time index generator; https://github.com/tibia-sh/tibiawiki-mcp)';
 
 type Json = Record<string, unknown>;
 

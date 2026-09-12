@@ -175,3 +175,33 @@ create table mcp_spell_area (
 - [ ] The legend and the server instructions both state that caster and target tiles are not distinguished.
 - [ ] `MCP_SCHEMA_VERSION` is 3 in both files; a version-2 index is rejected.
 - [ ] No test compares a decoded spell shape against a creature-ability pattern — that oracle is retired and documented as invalid.
+
+## Review 1 — first draft (2026-09-12)
+
+- **Verdict: Needs revision before implementation**
+- Reviewers: plan-final-reviewer; codex-consult (high, 43s, 38820 tokens); grok-consult — on request only, not run
+- Tier: **single**, upheld.
+- Adopted: none in this stamp. Findings below are the brief for draft 2.
+
+### Blocking — each verified before adoption
+
+1. **The conflict count was wrong, and it was my measurement that was wrong.** Both reviewers caught it. `Energy Beam` is a **false** conflict: both images decode to a cell-identical `1×5` shape and differ only in canvas padding (3×8 vs 3×9), because my check compared raw canvas masks rather than normalised shapes. **One** real conflict remains (`Great Energy Beam`, 1×7 vs 1×8), so **24** spells are servable, not 23, and **6 of 7** art pairs agree, not 5. Every acceptance anchor derived from those numbers was wrong.
+2. **The facts table read as arithmetically impossible** because it never stated its units. Reconciled: **25 spells**, **32 spell-image associations**, **30 unique images** — the gap is **2 images shared by two spells each** (`Berserk1.gif` → Berserk + Fierce Berserk; `Flame strike1(after…)` → Flame Strike + Apprentice's Strike). A shared image means that spell's shape is attributed by page reference, not dedicated art, and must be recorded as such.
+3. **`data/spell-areas.json` would never reach an installed copy.** `package.json` declares `files: ["dist"]` and the build compiles `rootDir: src`, so nothing under `data/` is published. Task 3 makes a missing JSON a hard build failure, and `tibiawiki-mcp build-index` is the documented user command — every install would fail to build an index. Verified.
+4. **Spell-name matching would silently miss.** The spike names spells informally; **`Mass Heal` does not exist in the index at all** (`Mass Healing` does), and `Divine caldera`, `Hell's core`, `Rage of the skies` match only case-insensitively. `spell.title` is plain `TEXT UNIQUE` with no `COLLATE NOCASE`. With a `<20` floor, three or four such misses pass silently and serve `null` for real spells — the charm-shaped failure this repo already shipped once.
+5. **The decoder would have no test of any kind.** It is the one component with a documented history of confidently wrong output, and the proposed JSON assertions (`cells.length === width*height`, `affectedTiles === count of 1s`) are invariants its producer satisfies by construction.
+6. **`SPELL_SHAPE_LEGEND` had no declared destination, and the existing legend actively mis-teaches the new field.** `AREA_LEGEND` ships in `tibia_get`'s description and says `'@' the caster, '*' the target`; an agent reading a spell `ascii` with no `@` would conclude the caster is outside the effect, which the decode cannot establish. Measured: the `areaShape` subschema is **494 bytes** bare, **~587** with a 76-char describe, landing near **29,950** of 30,000 — under 50 bytes of margin, and `AREA_LEGEND`-sized text in the description would overflow.
+7. **Task 3's tests are not implementable against its own contract.** `Enricher` is fixed as `(dbPath, api) => Promise<EnrichStats>`; there is no seam to supply an alternate JSON, so "a missing JSON fails the build" can only be reached by deleting the committed artefact.
+8. **"Ship only what independent images agree on" contradicts the coverage.** Taken literally it excludes every single-image spell. The rule is: exclude where *available* images disagree.
+
+### Also to fix
+
+Record every contributing image with its own `?cb=` revision, plus a corroboration flag, since 6 of the 24 served shapes rest on a single un-corroborated decode; validate cells as strictly binary rather than merely counting; add `test/build-index.test.ts` (it hand-writes the enrichment DDL) and `package.json` to the file list; name `mcp_spell_area` in `REQUIRED_NON_EMPTY` with an Avalanche `ANCHOR_CHILDREN` entry, and exempt it from `make-fixture.mjs`'s default `delete from "<t>"` branch before adding post-sweep pruning; gate unmatched JSON entries at **0**.
+
+### Adopted design change
+
+**Write the decoder in TypeScript, not Python.** `node:zlib` is stdlib, so the PNG reader ports directly and `sips` is shelled out either way. This keeps the repo single-language, puts the classifier under `node:test` with committed golden inputs — which is what closes finding 5 — and keeps the served-count floor in one place instead of two languages. The isolation argument for a separate offline script is unaffected.
+
+### Rejected
+
+- **"Serve the newest image with a flag" instead of excluding.** `?cb=` is a file's last-edit timestamp, not a claim about which art depicts the current game, so re-uploaded old art sorts newest. Exclusion stands.

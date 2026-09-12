@@ -1,16 +1,16 @@
 {
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
-  "name": "io.github.jakubmucha/tibiawiki-mcp",
+  "name": "sh.tibia/tibiawiki-mcp",
   "description": "Offline TibiaWiki knowledge base: attribute queries over creatures, items, NPCs, quests and spells",
   "repository": {
-    "url": "https://github.com/jakubmucha/tibiawiki-mcp",
+    "url": "https://github.com/tibia-sh/tibiawiki-mcp",
     "source": "github"
   },
   "version": "0.1.0",
   "packages": [
     {
       "registryType": "npm",
-      "identifier": "tibiawiki-mcp",
+      "identifier": "@tibia.sh/tibiawiki-mcp",
       "version": "0.1.0",
       "transport": { "type": "stdio" }
     }

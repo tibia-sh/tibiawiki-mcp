@@ -132,6 +132,24 @@ test('every request identifies the client and a contact', async () => {
   }
 });
 
+/**
+ * The test above is deliberately loose, and stays that way: its subject is a property
+ * that must hold for whatever UA a caller injects through `opts.userAgent`, so pinning
+ * this project's own identity inside it would break that seam. The cost is that the
+ * *default* UA's contact URL was covered by nothing, and it duly rotted through an
+ * owner change. A 404 there is worse than no URL at all, because the only reason to
+ * put one in a bot's UA is to give a wiki admin somewhere to complain.
+ */
+test('the default User-Agent names a repository that exists', async () => {
+  const r = recorder([json(pages(['A']))]);
+  await createWikiApi({ fetcher: r.fetcher, clock }).pageWikitext(['A']);
+  const ua = r.calls[0]!.headers['User-Agent'] ?? '';
+  assert.ok(
+    ua.includes('https://github.com/tibia-sh/tibiawiki-mcp'),
+    `the default UA does not name the current repository: ${ua}`,
+  );
+});
+
 const imagePages = (found: string[], missing: string[] = []) => ({
   query: {
     pages: Object.fromEntries([

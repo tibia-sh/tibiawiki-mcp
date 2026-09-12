@@ -82,3 +82,15 @@ A fresh contributor must build the full index first — it is not in the reposit
 This fixture is redistributed wiki content: data from TibiaWiki
 (https://tibia.fandom.com), licensed CC BY-SA. Tibia is made by CipSoft; game content
 and images are copyright CipSoft GmbH. No images are included.
+
+## `spell-areas-measured.json`
+
+The decoder's regression oracle, not documentation. It holds the 30 masks the original
+prototype produced, and `test/spell-areas-data.test.ts` compares every served shape in
+`data/spell-areas.json` against it cell for cell.
+
+It matters because there is **no external source of truth** for player spell areas:
+this artefact is the only thing that would catch a decoder change silently altering a
+shape. It lived under `docs/` briefly, was gitignored along with the rest of that
+directory, and the guard failed on any fresh clone while passing locally. Keep it here,
+tracked.

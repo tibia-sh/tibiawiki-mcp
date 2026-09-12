@@ -78,7 +78,7 @@ test('stats are recomputed from the file, not copied from the plan', () => {
  */
 test('every served mask still matches the spike measurement', () => {
   const spike = read<{ images: Record<string, { w: number; h: number; mask: number[][] }> }>(
-    '../docs/superpowers/spikes/2026-09-12-spell-areas-measured.json',
+    './fixtures/spell-areas-measured.json',
   );
   const drifted: string[] = [];
   for (const [spell, e] of Object.entries(data.spells)) {

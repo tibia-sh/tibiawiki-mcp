@@ -140,13 +140,17 @@ export async function buildIndex(
       }
     }
 
-    // Spell shapes: unmatched is gated at zero rather than absorbed by the floor.
-    // Three or four casing misses would otherwise pass while serving null for real
-    // spells - the charm-shaped failure this project already shipped once.
+    // An unmatched key is reported loudly but does NOT fail the build. The keys are
+    // validated against the index at authoring time - scripts/decode-spell-areas.ts
+    // throws on any unmatched title - so a mismatch here means the wiki renamed a
+    // page since. Failing would brick `tibiawiki-mcp build-index` for every user,
+    // including a fresh install with no index at all, over one cosmetic derived
+    // shape. The floor below still catches a wholesale mismatch.
     if (stats.spellShapes.unmatched > 0) {
-      throw new Error(
-        `${stats.spellShapes.unmatched} spell area key(s) matched no row in the index. ` +
-          'Keys must be spell page titles as the index holds them; refusing to install.',
+      process.stderr.write(
+        `warning: ${stats.spellShapes.unmatched} spell area key(s) matched no row in the ` +
+          `index and were skipped: ${stats.spellShapes.unmatchedTitles.join(', ')}. ` +
+          'The wiki has likely renamed a spell page; re-run `pnpm decode-spell-areas`.\n',
       );
     }
     if (stats.spellShapes.served < MIN_SPELL_SHAPES) {

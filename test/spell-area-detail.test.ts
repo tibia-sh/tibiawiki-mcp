@@ -115,6 +115,12 @@ test('the instructions explain the derivation and its limits', async () => withS
   // `corroborated: false` is true of 18 of 24, but only 4 are wholly unsupported.
   assert.match(instructions, /corroborated means a second image/i);
   assert.match(instructions, /does not mean unsupported/i);
+
+  // The server's attribution notice promises a licence page for every image it
+  // references, but areaShape carries a bare CDN sourceUrl. Assert the clause that
+  // resolves it - NOT /descriptionUrl/, which already appears in the older image
+  // sentence and so would match against unmodified code.
+  assert.match(instructions, /wiki\/File: followed by the sourceImage/);
 }));
 
 test('tools/list stays within its budget', async () => withServer(async (h) => {

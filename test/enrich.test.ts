@@ -125,6 +125,9 @@ test('a spell key matching no index row is counted, not stored', async () => {
   const stats = await enrich(path, fakeApi({ Dragon: DRAGON_WIKITEXT }), { spellAreasPath: bad });
   assert.equal(stats.spellShapes.served, 1);
   assert.equal(stats.spellShapes.unmatched, 1);
+  // Named, not merely counted: build-index reports these so a maintainer can see
+  // which key drifted. A bare count leaves them guessing among 24 spells.
+  assert.deepEqual(stats.spellShapes.unmatchedTitles, ['Mass Heal']);
 });
 
 test('a malformed spell mask is rejected before it is stored', async () => {
@@ -265,7 +268,7 @@ test('eligibleScenes excludes intentional discards only', () => {
     scenes: 100, joined: 80, ambiguous: 1, noRow: 4,
     discardedKind: 10, discardedNoSpell: 2, discardedRotate: 1, unparsedMember: 2,
     patterns: 114, rejectedPatterns: [], stored: 80, danglingKey: 0, pagesNotInIndex: 0,
-    missingPages: 0, conflictingKey: 0, images: allTypesResolved(), spellShapes: { served: 24, unmatched: 0 },
+    missingPages: 0, conflictingKey: 0, images: allTypesResolved(), spellShapes: { served: 24, unmatched: 0, unmatchedTitles: [] },
   };
   // 100 - (10 + 2 + 1 + 2) = 85. ambiguous and noRow are failures, not discards,
   // so they stay in the denominator.

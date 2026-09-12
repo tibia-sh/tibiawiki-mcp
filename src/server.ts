@@ -20,7 +20,9 @@ export const ATTRIBUTION =
     'own animation rather than read from tile data, and present for a minority of spells. ' +
     'It marks affected tiles only - it does not distinguish the caster or target tile, and ' +
     'is not caster-relative, so the glyph vocabulary of a creature ability area does not ' +
-    'apply to it. corroborated means a second image of the same spell agreed; false does ' +
+    'apply to it. Its descriptionUrl - the wiki page carrying that image\'s licence and ' +
+    'author - is https://tibia.fandom.com/wiki/File: followed by the sourceImage value. ' +
+    'corroborated means a second image of the same spell agreed; false does ' +
     'not mean unsupported, since most uncorroborated shapes match other spells\' images.';
 
 export const TOOL_NAMES = [GET, SEARCH, FIND_CREATURES, FIND_ITEMS, HOW_TO_OBTAIN] as const;

@@ -88,8 +88,21 @@ test('the frame with the most affected tiles wins, not the first or the union', 
   const big = frame('multi-delta-big');
   const mask = classify(plate, [small, big]);
   assert.equal(ascii(mask), CONE, 'the larger frame must win');
-  assert.equal(ascii(classify(plate, [small])), '. . . . .\n. . # . .\n. . # . .\n. . . . .');
-  assert.notEqual(ascii(classify(plate, [small])), CONE, 'first-frame selection would differ');
+
+  // First-frame selection would differ.
+  assert.notEqual(ascii(classify(plate, [small])), CONE);
+
+  // And so would a union. `small` lights [0,0], which the cone does not, so the
+  // union is strictly larger than either frame. Without that cell the union equals
+  // `big` and this assertion is vacuous - which is exactly what it was before.
+  const union = [
+    '# . # . .',
+    '. # # # .',
+    '. # # # .',
+    '# # # # #',
+  ].join('\n');
+  assert.notEqual(ascii(mask), union, 'the winning frame is not the union of frames');
+  assert.ok(ascii(classify(plate, [small])).startsWith('# .'), 'small lights a cell outside the cone');
 });
 
 test('offsets place a delta, and ignoring them moves every tile', () => {

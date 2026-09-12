@@ -4,7 +4,10 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { fileURLToPath } from 'node:url';
-import { classify, extractWebpFrames, readPng, type Frame } from './spell-decode.ts';
+import {
+  classify, decideSpell, extractWebpFrames, isAreaCandidate, readPng, shapeKey,
+  type Candidate, type Frame,
+} from './spell-decode.ts';
 import { normaliseMask, type Mask } from '../src/area.ts';
 
 /**
@@ -123,11 +126,7 @@ const refs = await inventory(spellTitles);
 const sized = await sizes([...new Set([...refs.values()].flat())]);
 
 // Area candidates: tile-aligned, larger than one tile, and not an outfit preview.
-const isCandidate = (f: string): boolean => {
-  const s = sized.get(f);
-  return !!s && s.width % TILE === 0 && s.height % TILE === 0
-    && (s.width > TILE || s.height > TILE) && !f.includes('(Outfit)');
-};
+const isCandidate = (f: string): boolean => isAreaCandidate(f, sized.get(f), TILE);
 const candidates = new Map(
   [...refs].map(([spell, files]) => [spell, files.filter(isCandidate)] as const).filter(([, f]) => f.length > 0),
 );
@@ -146,28 +145,27 @@ const spells: Record<string, unknown> = {};
 const excluded: Record<string, unknown> = {};
 const shapeUsers = new Map<string, string[]>();
 for (const [file, m] of masks) {
-  const key = JSON.stringify(m.cells) + `|${m.width}`;
-  shapeUsers.set(key, [...(shapeUsers.get(key) ?? []), file]);
+  shapeUsers.set(shapeKey(m), [...(shapeUsers.get(shapeKey(m)) ?? []), file]);
 }
 
 let corroborated = 0, familyCorroborated = 0, uncorroborated = 0;
 for (const [spell, files] of [...candidates].sort()) {
   const title = canonical.get(spell.toLowerCase());
   if (!title) throw new Error(`Spell "${spell}" has no row in ${indexPath}; keys must be index titles.`);
-  const shapes = new Set(files.map((f) => JSON.stringify(masks.get(f)!.cells) + `|${masks.get(f)!.width}`));
   const source = (f: string) => ({ image: f, url: sized.get(f)!.url, revision: sized.get(f)!.revision });
+  const decision = decideSpell(files.map((f): Candidate => ({ image: f, mask: masks.get(f)! })));
 
-  if (shapes.size !== 1) {
+  if (decision.kind === 'excluded') {
     excluded[title] = {
-      reason: 'images disagree',
+      reason: decision.reason,
       sources: files.map((f) => ({ ...source(f), shape: `${masks.get(f)!.width}x${masks.get(f)!.height}` })),
     };
     continue;
   }
-  const mask = masks.get(files[0]!)!;
-  const isCorroborated = files.length > 1;
+  const mask = decision.mask;
+  const isCorroborated = decision.corroborated;
   if (isCorroborated) corroborated += 1;
-  else if ((shapeUsers.get([...shapes][0]!) ?? []).length > 1) familyCorroborated += 1;
+  else if ((shapeUsers.get(shapeKey(mask)) ?? []).length > 1) familyCorroborated += 1;
   else uncorroborated += 1;
 
   spells[title] = {

@@ -182,3 +182,38 @@ export function classify(
   }
   return best;
 }
+
+/** A candidate image and the shape it decoded to. */
+export type Candidate = { image: string; mask: Mask };
+
+export type SpellDecision =
+  | { kind: 'served'; mask: Mask; corroborated: boolean; images: string[] }
+  | { kind: 'excluded'; reason: string; images: string[] };
+
+/** Identity for comparison: normalised cells plus width, never the raw canvas. */
+export const shapeKey = (m: Mask): string => `${JSON.stringify(m.cells)}|${m.width}`;
+
+/**
+ * Decides whether a spell's candidates agree. Pure, so the rule that carries this
+ * feature's safety - exclude on disagreement - is testable without a network.
+ *
+ * Padding is not disagreement: TibiaWiki's two Energy Beam animations decode to a
+ * cell-identical 1x5 on canvases of 3x8 and 3x9, and comparing raw canvases calls
+ * that a conflict. Callers pass already-normalised masks.
+ */
+export function decideSpell(candidates: readonly Candidate[]): SpellDecision {
+  if (candidates.length === 0) return { kind: 'excluded', reason: 'no candidates', images: [] };
+  const images = candidates.map((c) => c.image);
+  const keys = new Set(candidates.map((c) => shapeKey(c.mask)));
+  if (keys.size !== 1) return { kind: 'excluded', reason: 'images disagree', images };
+  return { kind: 'served', mask: candidates[0]!.mask, corroborated: candidates.length > 1, images };
+}
+
+/** Area candidates: tile-aligned, larger than one tile, and not an outfit preview. */
+export function isAreaCandidate(
+  file: string, size: { width: number; height: number } | undefined, tile = 32,
+): boolean {
+  if (!size) return false;
+  return size.width % tile === 0 && size.height % tile === 0
+    && (size.width > tile || size.height > tile) && !file.includes('(Outfit)');
+}

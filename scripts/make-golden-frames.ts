@@ -102,7 +102,9 @@ for (const [name, cols, rows, cells] of cases) {
 // A two-delta case where the union differs from the winning frame, so an
 // implementation that took the first frame or unioned everything is caught.
 writeFileSync(`${dir}multi-plate.png`, plate(5, 4));
-writeFileSync(`${dir}multi-delta-small.png`, frame(5, 4, [[2, 1], [2, 2]]));
+// [0, 0] is OUTSIDE the cone, so union(small, big) !== big. Without a cell outside,
+// a union classifier produces exactly `big` and the "not the union" test proves nothing.
+writeFileSync(`${dir}multi-delta-small.png`, frame(5, 4, [[0, 0], [2, 1], [2, 2]]));
 writeFileSync(`${dir}multi-delta-big.png`, frame(5, 4, CONE));
 
 console.log(`wrote ${cases.length * 2 + 3} golden frames to ${dir}`);

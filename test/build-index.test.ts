@@ -32,7 +32,7 @@ const stats = (over: Partial<EnrichStats> = {}): EnrichStats => ({
   scenes: 10, joined: 10, ambiguous: 0, noRow: 0,
   discardedKind: 0, discardedNoSpell: 0, discardedRotate: 0, unparsedMember: 0,
   patterns: 114, rejectedPatterns: [], stored: 10, danglingKey: 0, pagesNotInIndex: 0,
-  missingPages: 0, conflictingKey: 0, images: allTypesResolved(), spellShapes: { served: 24, unmatched: 0 },
+  missingPages: 0, conflictingKey: 0, images: allTypesResolved(), spellShapes: { served: 24, unmatched: 0, unmatchedTitles: [] },
   ...over,
 });
 const noopEnrich = async () => stats();
@@ -273,18 +273,26 @@ test('missing images alone do not fail the build', async () => {
   assert.ok(existsSync(target));
 });
 
-test('an unmatched spell area key fails the build, naming the cause', async () => {
+test('an unmatched spell area key warns by name without bricking the build', async () => {
   const dir = scratch();
   const target = join(dir, 'tibiawiki.db');
-  await assert.rejects(
-    buildIndex({
+  const written: string[] = [];
+  const stderr = process.stderr.write.bind(process.stderr);
+  process.stderr.write = ((c: string) => { written.push(String(c)); return true; }) as typeof stderr;
+  try {
+    await buildIndex({
       targetPath: target, api,
-      enrich: async () => stats({ spellShapes: { served: 23, unmatched: 1 } }),
+      enrich: async () => stats({ spellShapes: { served: 23, unmatched: 1, unmatchedTitles: ['Mass Heal'] } }),
       run: (_cmd, args) => { copyFileSync(FIXTURE, args[args.length - 1]!); return { status: 0, stderr: '' }; },
-    }),
-    /matched no row in the index/,
-  );
-  assert.equal(existsSync(target), false, 'a failed gate must not install');
+    });
+  } finally {
+    process.stderr.write = stderr;
+  }
+  // A wiki rename must not stop every user building an index over one derived shape.
+  assert.ok(existsSync(target), 'the index still installs');
+  const warning = written.join('');
+  assert.match(warning, /spell area key/);
+  assert.match(warning, /Mass Heal/, 'the failing key is named, not just counted');
 });
 
 test('too few spell area shapes fails the build', async () => {
@@ -294,7 +302,7 @@ test('too few spell area shapes fails the build', async () => {
   await assert.rejects(
     buildIndex({
       targetPath: target, api,
-      enrich: async () => stats({ spellShapes: { served: 3, unmatched: 0 } }),
+      enrich: async () => stats({ spellShapes: { served: 3, unmatched: 0, unmatchedTitles: [] } }),
       run: (_cmd, args) => { copyFileSync(FIXTURE, args[args.length - 1]!); return { status: 0, stderr: '' }; },
     }),
     /below the floor of 20/,

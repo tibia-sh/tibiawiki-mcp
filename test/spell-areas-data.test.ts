@@ -2,7 +2,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { normaliseMask } from '../src/area.ts';
+import { normaliseMask, type Mask } from '../src/area.ts';
+import { decideSpell, isAreaCandidate } from '../scripts/spell-decode.ts';
 
 type Entry = {
   width: number; height: number; cells: number[]; affectedTiles: number;
@@ -111,4 +112,50 @@ test('corroboration is recorded per spell, not inferred', () => {
   const single = Object.values(data.spells).filter((e) => e.sources.length === 1);
   assert.ok(single.every((e) => !e.corroborated));
   assert.equal(single.length, 18);
+});
+
+/**
+ * The exclusion rule is this feature's load-bearing safety property, and inspecting
+ * an already-correct artefact cannot detect a runner that stopped comparing masks.
+ * These drive the decision logic directly, with no network.
+ */
+test('padding-only differences agree; genuinely different shapes do not', () => {
+  const beam = (height: number, from: number): Mask => ({
+    width: 3, height,
+    cells: Array.from({ length: 3 * height }, (_, i) =>
+      (i % 3 === 1 && Math.floor(i / 3) >= from && Math.floor(i / 3) < from + 5 ? 1 : 0)),
+  });
+  // The real Energy Beam pair: identical 1x5 on canvases of 3x8 and 3x9.
+  const agreeing = decideSpell([
+    { image: 'a.gif', mask: normaliseMask(beam(8, 1)) },
+    { image: 'b.gif', mask: normaliseMask(beam(9, 2)) },
+  ]);
+  assert.equal(agreeing.kind, 'served');
+  assert.equal(agreeing.kind === 'served' && agreeing.corroborated, true);
+
+  // The real Great Energy Beam pair: 1x7 against 1x8.
+  const line = (n: number): Mask => ({ width: 1, height: n, cells: new Array(n).fill(1) });
+  const disagreeing = decideSpell([
+    { image: 'c.gif', mask: line(7) },
+    { image: 'd.gif', mask: line(8) },
+  ]);
+  assert.equal(disagreeing.kind, 'excluded');
+  assert.equal(disagreeing.kind === 'excluded' && disagreeing.reason, 'images disagree');
+  assert.deepEqual(disagreeing.images, ['c.gif', 'd.gif'], 'both sources are named');
+});
+
+test('a single image serves, and is not marked corroborated', () => {
+  const one = decideSpell([{ image: 'a.gif', mask: { width: 1, height: 1, cells: [1] } }]);
+  assert.equal(one.kind, 'served');
+  assert.equal(one.kind === 'served' && one.corroborated, false);
+  assert.equal(decideSpell([]).kind, 'excluded', 'no candidates cannot be served');
+});
+
+test('the candidate filter admits area images and rejects the rest', () => {
+  const tile = (w: number, h: number) => ({ width: w, height: h });
+  assert.equal(isAreaCandidate('Avalanche1.gif', tile(288, 288)), true);
+  assert.equal(isAreaCandidate('Icon.gif', tile(32, 32)), false, 'one tile is not an area');
+  assert.equal(isAreaCandidate('Burned Icon.gif', tile(11, 11)), false, 'not tile-aligned');
+  assert.equal(isAreaCandidate('Avatar (Outfit).gif', tile(64, 64)), false, 'outfits are not areas');
+  assert.equal(isAreaCandidate('Missing.gif', undefined), false, 'an unsized file is not a candidate');
 });

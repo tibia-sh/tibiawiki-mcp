@@ -48,7 +48,7 @@ export type EnrichStats = ExtractStats & {
   missingPages: number;
   /** Two members resolving to one ability row but naming different patterns. */
   conflictingKey: number;
-  spellShapes: { served: number; unmatched: number };
+  spellShapes: { served: number; unmatched: number; unmatchedTitles: string[] };
 };
 
 /**
@@ -155,7 +155,7 @@ export async function enrich(
       discardedKind: 0, discardedNoSpell: 0, discardedRotate: 0, unparsedMember: 0,
       patterns: patterns.length, rejectedPatterns: rejected,
       stored: 0, images: {}, danglingKey: 0, pagesNotInIndex: 0, missingPages: 0, conflictingKey: 0,
-      spellShapes: { served: 0, unmatched: 0 },
+      spellShapes: { served: 0, unmatched: 0, unmatchedTitles: [] },
     };
 
     const insertArea = db.prepare(
@@ -262,6 +262,9 @@ export async function enrich(
       const id = spellIds.get(title.toLowerCase());
       if (id === undefined) {
         stats.spellShapes.unmatched += 1;
+        // Named, not just counted: a bare count leaves the maintainer with no way
+        // to tell which key drifted from the index's titles.
+        if (stats.spellShapes.unmatchedTitles.length < 10) stats.spellShapes.unmatchedTitles.push(title);
         continue;
       }
       const { width, height, cells } = entry;
@@ -301,7 +304,7 @@ export function formatStats(stats: EnrichStats): string {
   const eligible = eligibleScenes(stats);
   const pct = eligible > 0 ? ((100 * stats.stored) / eligible).toFixed(1) : 'n/a';
   return [
-    `  spell shapes    ${stats.spellShapes.served} served, ${stats.spellShapes.unmatched} unmatched`,
+    `  spell shapes    ${stats.spellShapes.served} served, ${stats.spellShapes.unmatched} unmatched` + (stats.spellShapes.unmatched > 0 ? ` (${stats.spellShapes.unmatchedTitles.join(', ')})` : ''),
     `  patterns        ${stats.patterns}${stats.rejectedPatterns.length > 0 ? ` (${stats.rejectedPatterns.length} rejected)` : ''}`,
     `  scenes          ${stats.scenes}`,
     `    stored        ${stats.stored}`,

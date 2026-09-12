@@ -77,6 +77,31 @@ test('enrichment creates all three tables and stores the pattern by name', async
   assert.equal(stats.danglingKey, 0);
 });
 
+test('enrichment writes image rows, named per type', async () => {
+  const path = copy();
+  await enrich(path, fakeApi({ Dragon: DRAGON_WIKITEXT }));
+  const db = open(path);
+
+  // Named, per type. A bare count would stay green with only spells stored, and an
+  // empty mcp_image would make every tibia_get return image: null silently.
+  for (const [type, table, title, ext] of [
+    ['creature', 'creature', 'Dragon', 'gif'],
+    ['charm', 'charm', 'Adrenaline Burst', 'png'],
+    ['imbuement', 'imbuement', 'Powerful Reap', 'png'],
+  ] as const) {
+    const row = db.prepare(
+      `select m.file_name, m.url, m.mime_type from mcp_image m
+         join "${table}" e on e.article_id = m.article_id
+        where m.entity_type = ? and e.title = ?`,
+    ).get(type, title) as { file_name: string; url: string; mime_type: string } | undefined;
+    assert.ok(row, `${type} ${title} must have an image row`);
+    assert.equal(row.file_name, `${title}.${ext}`);
+    assert.ok(row.url.length > 0, 'the url must not be empty');
+  }
+  assert.ok(count(db, 'mcp_image') > 100, 'all seven types contribute rows');
+  db.close();
+});
+
 test('the stored row carries the matched identity and the caster flag', async () => {
   const path = copy();
   await enrich(path, fakeApi({ Dragon: DRAGON_WIKITEXT }));

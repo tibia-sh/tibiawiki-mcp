@@ -158,7 +158,10 @@ export function createWikiApi(opts: WikiApiOptions = {}): WikiApi {
         // it there is no way back from a response to the subject that asked for it:
         // the API normalises, reorders, and collapses distinct requests onto one page.
         const byTitle = new Map<string, Json>();
-        const denormalise = new Map<string, string>();
+        // `from -> to`, so a request can be resolved forwards to its page. The
+        // reverse direction loses information: when two requested titles normalise
+        // onto one page, only one `from` survives and the other looks unanswered.
+        const normalisedTo = new Map<string, string>();
         for await (const body of paginate({
           action: 'query',
           prop: 'imageinfo',
@@ -168,14 +171,18 @@ export function createWikiApi(opts: WikiApiOptions = {}): WikiApi {
           const query = body['query'] as
             | { pages?: Record<string, Json>; normalized?: Array<{ from: string; to: string }> }
             | undefined;
-          for (const n of query?.normalized ?? []) denormalise.set(n.to, n.from);
+          for (const n of query?.normalized ?? []) normalisedTo.set(n.from, n.to);
           for (const page of Object.values(query?.pages ?? {})) byTitle.set(String(page['title']), page);
         }
 
-        const seen = new Set<string>();
-        for (const [title, page] of byTitle) {
-          const requestedTitle = denormalise.get(title) ?? title;
-          seen.add(requestedTitle);
+        const absent: string[] = [];
+        for (const requestedTitle of batch) {
+          const title = normalisedTo.get(requestedTitle) ?? requestedTitle;
+          const page = byTitle.get(title);
+          if (!page) {
+            absent.push(requestedTitle);
+            continue;
+          }
           const info = (page['imageinfo'] as Array<Json> | undefined)?.[0];
           if (!info) {
             out.push({ requestedTitle, title, found: false });
@@ -194,7 +201,6 @@ export function createWikiApi(opts: WikiApiOptions = {}): WikiApi {
         // A file the API neither described nor marked missing means a truncated or
         // malformed response. Folding that into "missing" would let one lost page
         // out of fifty read as 98% coverage and pass the per-type floor.
-        const absent = batch.filter((f) => !seen.has(f));
         if (absent.length > 0) {
           throw new Error(
             `imageinfo returned neither data nor a missing marker for ${absent.length} ` +

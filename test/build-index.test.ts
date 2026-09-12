@@ -6,7 +6,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { buildIndex } from '../src/indexer/build-index.ts';
-import { eligibleScenes, type EnrichStats } from '../src/indexer/enrich.ts';
+import { eligibleScenes, MCP_SCHEMA_VERSION, type EnrichStats } from '../src/indexer/enrich.ts';
 import { FIXTURE } from './harness.ts';
 
 const scratch = () => mkdtempSync(join(tmpdir(), 'twmcp-bi-'));
@@ -156,7 +156,7 @@ test('enrichment runs before validation, not after', async () => {
                  width integer not null, height integer not null, mime_type text not null,
                  primary key (entity_type, article_id));
                insert into mcp_area_pattern values ('8sqmwave', 9, '[0]');
-               insert into mcp_schema_version values (2);`);
+               insert into mcp_schema_version values (${MCP_SCHEMA_VERSION});`);
       db.close();
       return stats();
     },
@@ -237,6 +237,7 @@ test('a type that was never requested fails the build', async () => {
     }),
     /no subjects for "charm"/,
   );
+  assert.equal(existsSync(target), false, 'a failed gate must not install');
 });
 
 test('an unusable image response fails the build even at full coverage', async () => {
@@ -252,6 +253,7 @@ test('an unusable image response fails the build even at full coverage', async (
     }),
     /item.*4 unusable/s,
   );
+  assert.equal(existsSync(target), false, 'a failed gate must not install');
 });
 
 test('missing images alone do not fail the build', async () => {

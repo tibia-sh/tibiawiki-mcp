@@ -207,6 +207,19 @@ export async function enrich(dbPath: string, api: WikiApi): Promise<EnrichStats>
       );
     }
 
+    // Measured on disk, not from intent. resolveImages reports what it MEANT to
+    // store; without this the per-type floor passes over an index whose mcp_image
+    // is empty, and every tibia_get then returns image: null with nothing failing.
+    const writtenImages = Number(
+      (db.prepare('select count(*) c from mcp_image').get() as { c: number }).c,
+    );
+    if (writtenImages !== refs.length) {
+      throw new Error(
+        `Image rows on disk (${writtenImages}) do not match the ${refs.length} resolved. ` +
+          'Enrichment did not store what it resolved; refusing to install.',
+      );
+    }
+
     db.prepare('insert into mcp_schema_version (version) values (?)').run(MCP_SCHEMA_VERSION);
     return stats;
   } finally {

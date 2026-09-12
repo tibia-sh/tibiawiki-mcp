@@ -32,6 +32,7 @@ const detail = z.record(z.string(), z.union([z.string(), z.number(), z.null()]))
  * occupies one square. Any describe() text here is emitted once per entity type.
  */
 const imageSchema = z.object({
+  fileName: z.string(),
   url: z.string(),
   descriptionUrl: z.string(),
   width: z.number(),
@@ -408,6 +409,7 @@ export function registerGet(server: McpServer, handle: TibiaDb): void {
       const img = imageRow.get(entityType, r.article_id as number) as Row | undefined;
       return img
         ? {
+            fileName: String(img.file_name),
             url: String(img.url), descriptionUrl: String(img.description_url),
             width: Number(img.width), height: Number(img.height), mimeType: String(img.mime_type),
           }
@@ -659,8 +661,9 @@ export function registerGet(server: McpServer, handle: TibiaDb): void {
 
       const hit = hits[0]!;
       const output = shape(hit.type, hit.row, verbosity);
-      const image = (output as { image?: { url: string; mimeType: string } | null }).image ?? null;
-      const fileName = image ? decodeURIComponent(new URL(image.url).pathname.split('/').at(-3) ?? '') : null;
+      const image = (output as {
+        image?: { url: string; mimeType: string; fileName: string } | null;
+      }).image ?? null;
 
       return {
         content: [
@@ -672,7 +675,7 @@ export function registerGet(server: McpServer, handle: TibiaDb): void {
             ? [{
                 type: 'resource_link' as const,
                 uri: image.url,
-                name: fileName ?? 'image',
+                name: image.fileName,
                 mimeType: image.mimeType,
                 annotations: { audience: ['user' as const] },
               }]

@@ -193,6 +193,27 @@ test('imageInfo maps a reordered response to the right request', async () => {
   }
 });
 
+test('imageInfo answers both requests when two titles collapse onto one page', async () => {
+  // Defensive: 0 cross-table title collisions today. The API normalises
+  // File:Steel_Helmet.gif onto File:Steel Helmet.gif, so a reverse to->from map
+  // loses one request and reports it as a truncated response.
+  const r = recorder([() => new Response(JSON.stringify({
+    query: {
+      normalized: [{ from: 'File:Steel_Helmet.gif', to: 'File:Steel Helmet.gif' }],
+      ...imagePages(['File:Steel Helmet.gif']).query,
+    },
+  }), { status: 200 })]);
+  const out = await createWikiApi({ fetcher: r.fetcher, clock })
+    .imageInfo(['File:Steel_Helmet.gif', 'File:Steel Helmet.gif']);
+
+  assert.equal(out.length, 2, 'both requested strings must get an outcome');
+  assert.deepEqual(
+    out.map((o) => o.requestedTitle).sort(),
+    ['File:Steel Helmet.gif', 'File:Steel_Helmet.gif'],
+  );
+  assert.ok(out.every((o) => o.found), 'both resolve to the same page');
+});
+
 test('imageInfo reports an API-confirmed missing file as found: false', async () => {
   const r = recorder([json(imagePages(['File:A.gif'], ['File:Gone.gif']))]);
   const out = await createWikiApi({ fetcher: r.fetcher, clock }).imageInfo(['File:A.gif', 'File:Gone.gif']);

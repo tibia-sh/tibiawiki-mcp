@@ -262,7 +262,7 @@ rename, the image-less-creature regression anchor, the 311-bytes-per-type projec
 with its 80-character description cap, and the withdrawal of draft 1's incorrect
 rejection of a correct codex finding.
 
-## Execution finding — URL fetchability is not verifiable here (2026-09-12)
+## Execution finding — URL fetchability (2026-09-12, CORRECTED 2026-09-12)
 
 Task 4's acceptance says "a real `tibia_get` returns a URL that resolves." **It could
 not be verified in this environment, and is recorded rather than marked passed.**
@@ -292,3 +292,31 @@ the human-resolvable provenance page.
 
 This strengthens rather than weakens the decision to annotate the `resource_link`
 `audience: ["user"]`: the reliable consumer is a person in a browser.
+
+### CORRECTION — the URLs are fetchable; the finding above was wrong
+
+Re-tested after the user asked why a browser could load these. **The block is
+ordinary hot-link protection keyed on `Referer`, not IP reputation or bot
+fingerprinting.** Every request above omitted a `Referer`.
+
+| request to the stored URL | result |
+|---|---|
+| no extra headers | **403** |
+| `Referer: https://tibia.fandom.com/` | **200**, 14,260 bytes |
+| `Referer` + our own honest User-Agent | **200** |
+| `Referer` + a spoofed Chrome User-Agent | **403** |
+
+Two things worth keeping. First, sending the wiki as `Referer` is **truthful** here,
+not a spoof: the image is being fetched in the context of that wiki's content, which
+is exactly what hot-link protection is designed to permit. Second, claiming to be
+Chrome makes it *worse* — an honest bot User-Agent is treated better than a false
+browser one, so there is no incentive to misrepresent the client.
+
+Cloudflare re-encodes to WebP regardless of `Accept`, but **animation is preserved**
+— Dragon returns 8 frames, and the spell area images return 11 (`Avalanche1`), 10
+(`Berserk1`) and 32 (`Great fireball1`). Frame compositing therefore remains possible,
+which is what a pixel-decoding effort would need.
+
+**Consequence:** the acceptance criterion "a real `tibia_get` returns a URL that
+resolves" is **met**, with the caveat that a client must send a `Referer`. The
+earlier conclusion was drawn from an incomplete test and is retracted.

@@ -75,3 +75,62 @@ covered, a binary mask rather than a labelled grid, and a macOS-only build step.
 proceeds, the plan must decide the projectile rule, state the reduced information
 content in the output shape, and measure the decode against every one of the ~34
 images rather than three.
+
+---
+
+## Full-corpus run, and a finding that changes the recommendation
+
+Ran the decoder over **all 30** area images rather than three, then tried to validate
+the output. The mechanics hold up; the semantics do not.
+
+### Mechanics: 30/30 decoded
+
+Every image decoded without failure. No image touches all of its tiles, so the
+one-tile margin is a consistent convention. Shapes scale sensibly with spell size:
+single-target strikes touch 1 tile, waves 15–24, balls 37–49, large AoEs 73–210.
+6 of 30 show the projectile artefact.
+
+### Validation: weak, and the oracle is unreliable
+
+Seven decoded spells share a name with a creature ability that carries wiki tile data.
+Comparing effect extents: **2 of 7 agree** (`Berserk` 3×3, `Thunderstorm` 7×7).
+
+The five disagreements are **not** evidence the decoder is wrong — a creature ability
+named "Fire Wave" need not be the same size as the player spell of that name. But that
+cuts both ways: the cross-check cannot confirm the decoder either. There is no
+reliable ground truth for player spell areas anywhere in the wiki's data.
+
+### The stopper: animation extent is not affected area
+
+`Fire wave1.gif` decodes to a 6×4 rectangle. Looking at a single mid-animation frame
+shows the effect is plainly a **cone**. Both are "correct": the wave expands outward
+over the animation, so the union across frames is the swept rectangle while any one
+frame is a cone.
+
+Per-tile counts do not separate the two — every touched tile scores 1,984–6,126 with
+no threshold recovering the cone. The information needed is *what the animation means*
+— does a spell hit everything it sweeps, or only its final extent? — and that is not
+in the pixels. It differs per spell: a static flash (Berserk) and an expanding wave
+(Fire Wave) need opposite readings.
+
+## Revised recommendation: do not ship this
+
+The decoder reliably extracts **the tiles an animation touches**. That is not reliably
+**the tiles a spell affects**, and nothing available distinguishes them:
+
+- no ground truth to calibrate against (2 of 7 name matches agree, and the oracle is
+  itself suspect)
+- the union-versus-final-frame question is per-spell and unanswerable from the images
+- the output would be a binary mask presented alongside ability grids that carry real
+  labelled tile data, inviting readers to trust both equally
+- it covers **25 of 211 spells**, against 1,748 abilities already served from actual
+  tile data
+
+Shipping plausible-looking grids that cannot be verified is worse than serving none:
+an agent cannot tell a derived guess from the wiki's own data, and this server's value
+rests on that distinction.
+
+**What would change the answer:** a source of truth for player spell areas — official
+documentation, or wiki tile data for spells in the way `Module:SceneBuilder` provides
+it for creature abilities. If spell pages ever gain `{{Scene}}` templates, the existing
+ability pipeline serves them directly with no image decoding at all.

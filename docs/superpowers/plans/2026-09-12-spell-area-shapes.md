@@ -86,9 +86,14 @@ Facts not derivable from that artefact, each measured directly:
 
 **Interfaces — Produces:**
 ```ts
+// src/area.ts owns Mask: src/ must never import from scripts/. tsconfig.build.json
+// has rootDir: src, so even a type-only import that way is TS6059 and fails
+// `pnpm build` — and "fixing" it by relaxing rootDir would destroy the isolation this
+// architecture exists for. scripts/ imports Mask from src/area.ts, which compiles clean.
+export type Mask = { width: number; height: number; cells: number[] };
+
 // scripts/spell-decode.ts
 export type Frame = { x: number; y: number; width: number; height: number; pixels: Uint8Array };
-export type Mask = { width: number; height: number; cells: number[] };
 export type ClassifyOptions = { tileSize?: number; tolerance?: number; relativeThreshold?: number };
 export function readPng(bytes: Uint8Array): { width: number; height: number; pixels: Uint8Array };
 export function extractWebpFrames(webp: Uint8Array): Array<{ x: number; y: number; payload: Uint8Array }>;
@@ -121,12 +126,13 @@ Generate at minimum: a 7×7 canvas, 32px tiles, one background plate and one del
 
 **Tests to write:**
 - the cone fixture classifies to the expected 12 cells, cell for cell
-- **the same fixture, classified by "any non-transparent pixel", yields a filled bounding box rather than the cone** — asserted directly, so the original bug cannot return unnoticed. This is why the fixture must have opaque deltas
+- **the same fixture, classified by "any non-transparent pixel", yields a filled bounding box rather than the cone.** This is why the fixture must have opaque deltas. Two ways to express it, neither adding production surface: a five-line helper local to the test file, or `classify(bg, deltas, { tolerance: -1 })` — every opaque pixel then "differs", which is exactly the original bug. **Verified on the real Fire Wave frames: `tolerance: 40` gives the cone, `tolerance: -1` gives the filled 4×6 bounding box.** Do **not** add a predicate option to `ClassifyOptions`; the field list above is what the budget measurement assumes
 - an anchor each for `1×1`, `3×3`, `1×5`, and the 37-tile circle
+- **a multi-delta case whose frames have different extents**, asserting the selected frame's cells — every other golden uses a single delta, so taking the first frame or unioning all of them would pass them all. The union must differ from the expected winning frame
 - two masks differing only in canvas padding are equal after `normaliseMask` and unequal before
-- **`extractWebpFrames` on a committed animated WebP returns the expected frame count and each frame's `x`/`y` offset** — a wrong offset shifts every mask with the same signature as the original bug, and nothing else would catch it
+- **`extractWebpFrames` on a committed animated WebP returns the expected frame count and each frame's `x`/`y` offset.** Two requirements, or it is vacuous. The fixture must be a **real image fetched from the wiki**, not synthesised by `make-golden-frames.ts` — a synthesised container encodes the same hand-written offset convention on both sides and can agree on a wrong answer, the exact failure this bullet exists to catch (`Berserk1.gif` is 3.6 KB and its deltas carry offsets; CC BY-SA attribution is already in the server notice). And the asserted offsets must be **non-zero on both axes**, since an extractor hardcoding zero passes otherwise — with one classification case whose expected cells change if offsets are ignored
 - `renderSpellShape` throws on a non-binary cell and on a length mismatch
-- `tsconfig.json` `include` covers `scripts/**/*.ts` — asserted by `pnpm typecheck` failing if the new files have a type error, which it silently would not today
+- **a test reads `tsconfig.json` and asserts `include` contains `scripts/**/*.ts`** — durable, and failing against the current value `["src/**/*.ts","test/**/*.ts","scripts/**/*.mjs"]`. `test/plugin.test.ts` already parses `.mcp.json` this way. A hand-introduced type error verifies once and leaves nothing behind
 
 ---
 
@@ -163,15 +169,26 @@ Generate at minimum: a 7×7 canvas, 32px tiles, one background plate and one del
 
 **Behavior:**
 - **Spell keys are the page title exactly as the index holds it**, validated against the supplied index with `collate nocase`. The spike's informal names do not match: `Mass Heal` does not exist.
-- **Candidate completeness is a precondition, not an outcome.** The script builds its candidate inventory first, then decodes. If any known candidate image fails to fetch or decode, it **fails** rather than silently treating the spell as unanimous — losing a disagreeing candidate would turn `Great Energy Beam` from excluded into servable while every count still looked healthy.
+- **Candidate completeness is a precondition, not an outcome.** The inventory derives from the **spell pages' own `[[File:…]]` references**, filtered to 32px-tile-aligned, multi-tile, non-`(Outfit)` images — the same derivation recorded in `docs/superpowers/spikes/2026-09-12-spell-areas-measured.json`, so a divergent inventory surfaces as a stats mismatch against `scripts/spell-area-facts.mjs`. Built first, then decoded. If any known candidate image fails to fetch or decode, it **fails** rather than silently treating the spell as unanimous — losing a disagreeing candidate would turn `Great Energy Beam` from excluded into servable while every count still looked healthy.
 - Excludes a spell whose available images disagree after `normaliseMask`, recording both shapes.
 - `corroborated` is true only where two or more images of that spell agreed.
 - Refuses to write if fewer than **20** spells are served, or if any spell key is unmatched.
 - `package.json` `files` gains `data/spell-areas.json`; without it, `files: ["dist"]` means no installed copy can build an index.
 
-**Tests to write:** the committed JSON parses; every entry has strictly binary cells and `cells.length === width * height` and `affectedTiles === count of 1s`; `Avalanche` present with 37 tiles in 7×7; **`Great Energy Beam` excluded with both shapes recorded**; **`Energy Beam` served** — the draft-1 false-conflict regression; `stats.served + stats.excluded === stats.spells`; `stats` equal what the file actually contains, recomputed by the test rather than copied from this plan; `stats.corroborated + familyCorroborated + uncorroborated === served`; `package.json` `files` includes the JSON.
+**Tests to write — the runner's decision logic, not only its output.** Inspecting an
+already-correct JSON cannot detect a runner that stopped comparing masks or silently
+dropped a failed candidate, and exclusion is this plan's load-bearing safety property.
+With a fake fetcher: two images agreeing **after normalisation but differing in canvas
+padding** produce one served entry, not an exclusion; two genuinely disagreeing images
+produce an exclusion recording both shapes; **a known candidate that fails to fetch or
+decode fails the run and leaves `data/spell-areas.json` byte-identical**, rather than
+treating the surviving image as unanimous. Then, against the committed artefact: it parses; every entry has strictly binary cells and `cells.length === width * height` and `affectedTiles === count of 1s`; `Avalanche` present with 37 tiles in 7×7; **`Great Energy Beam` excluded with both shapes recorded**; **`Energy Beam` served** — the draft-1 false-conflict regression; `stats.served + stats.excluded === stats.spells`; `stats` equal what the file actually contains, recomputed by the test rather than copied from this plan; `stats.corroborated + familyCorroborated + uncorroborated === served`; `package.json` `files` includes the JSON.
 
-**Acceptance:** the script runs and its `stats` match `scripts/spell-area-facts.mjs`. Record both outputs in the commit.
+**Acceptance:** the script runs and its `stats` match `scripts/spell-area-facts.mjs`.
+Additionally **each regenerated normalised mask must equal the corresponding mask in
+`docs/superpowers/spikes/2026-09-12-spell-areas-measured.json`** — aggregate totals can
+hold while individual cells drift, and that artefact is the only regression oracle the
+new decoder has. Record both outputs in the commit.
 
 ---
 
@@ -191,6 +208,9 @@ export type Enricher = (
 
 **Schema:**
 ```sql
+-- enrich.ts's DDL drops every mcp_* table before recreating it, so no stale row
+-- survives a rebuild. This one joins that list or it is the only table without it.
+drop table if exists mcp_spell_area;
 create table mcp_spell_area (
   article_id   integer not null primary key,
   width        integer not null,
@@ -221,7 +241,7 @@ create table mcp_spell_area (
 
 **Behavior:**
 - The **spell** branch only gains `areaShape: SpellShape | null`, fetched with its own prepared statement.
-- **The caveat ships in `src/server.ts` instructions**, which travel at `initialize` and are outside the `tools/list` budget. It must state that spell shapes are **derived from the wiki's animations**, cover a minority of spells, **do not distinguish caster or target tiles**, and are **not caster-relative** — `AREA_LEGEND` says `'@' the caster`, `'*' the target` and "as the caster faces", and an agent applying that vocabulary to a normalised spell mask would infer both a caster position and a facing that the decode cannot establish.
+- **The caveat ships in `src/server.ts` instructions**, which travel at `initialize` and are outside the `tools/list` budget. It must state that spell shapes are **derived from the wiki's animations**, cover a minority of spells, **do not distinguish caster or target tiles**, and are **not caster-relative** — `AREA_LEGEND` says `'@' the caster`, `'*' the target` and "as the caster faces", and an agent applying that vocabulary to a normalised spell mask would infer both a caster position and a facing the decode cannot establish. It must also define **`corroborated`**: a second image *of the same spell* agrees. Without that, an agent reads `corroborated: false` as "no support at all", which is wrong for 14 of the 24 — their shape is independently produced by other images, just not by a second image of that spell. The 6/14/4 distinction does not fit the schema's byte budget; instructions are outside it and cost nothing.
 - `derivedFrom` is `z.literal('animation')`, emitting `{"type":"string","const":"animation"}`, so the marker is enforced in the wire schema.
 
 **Tests to write:** `Avalanche` returns a 7×7 `areaShape` whose `ascii` matches the expected circle exactly, `affectedTiles` 37, `derivedFrom` `'animation'`, `sourceImage` naming the file; **`Great Energy Beam` returns `null`**; **`Energy Beam` returns a shape**; a spell with no entry returns `null`; **one test asserts a creature's `abilities[].area` and a spell's `areaShape` are structurally distinct**; the instructions assert the new sentences including the caster/target **and** facing caveats; `tools/list` under 30,000 with the figure recorded.
@@ -231,7 +251,7 @@ create table mcp_spell_area (
 ## Completion Criteria
 
 - [ ] `pnpm test` green, **0 skipped**, including all 215 pre-existing tests.
-- [ ] `pnpm typecheck` covers `scripts/**/*.ts` — verified by introducing a deliberate type error there and seeing it fail.
+- [ ] A test asserts `tsconfig.json` `include` covers `scripts/**/*.ts`, failing against its current value.
 - [ ] Exactly five tools; `tools/list` under **30,000**, figure recorded (projected ≈29,880).
 - [ ] Restoring the opacity classifier **fails a test**, against a fixture whose delta frames are fully opaque.
 - [ ] `extractWebpFrames` has an offset assertion against a committed animated WebP.
@@ -240,7 +260,7 @@ create table mcp_spell_area (
 - [ ] `Avalanche` serves a 37-tile circle; `Great Energy Beam` serves `null`; **`Energy Beam` serves a shape**.
 - [ ] A creature ability's `area` and a spell's `areaShape` are asserted structurally distinct.
 - [ ] `derivedFrom: "animation"` appears in the emitted JSON Schema.
-- [ ] `src/server.ts` instructions state the derivation, the missing caster/target distinction, **and** that shapes are not caster-relative.
+- [ ] `src/server.ts` instructions state the derivation, the missing caster/target distinction, that shapes are not caster-relative, **and** what `corroborated` means.
 - [ ] `MCP_SCHEMA_VERSION` is 3 in both files; a version-2 index is rejected.
 - [ ] No test compares a decoded spell shape against a creature-ability pattern.
 ## Review 1 — first draft (2026-09-12)
@@ -299,3 +319,57 @@ derives counts across four overlapping sets of near-equal size. A draft 3 should
 ### Gate cap reached
 
 This is the second of at most two gate invocations. A third requires the user's say-so.
+
+## Review 3 — third draft (2026-09-12)
+
+- **Verdict: Ready**
+- Reviewers: plan-final-reviewer (**Ready with small improvements**, no blocking issues); codex-consult (high, 35s, 25765 tokens — **Needs revision**, two test-contract gaps); grok-consult — on request only, not run
+- Third gate invocation, above the two-round cap, authorised by the user.
+
+### Closure on draft 2's three — both reviewers agree all are closed
+
+1. **Corroboration arithmetic.** Both reviewers **ran `scripts/spell-area-facts.mjs`** and reproduced the plan's cited output exactly: 30 / 32 / 25 / 1 excluded / **24 served**, split **6 / 14 / 4** with the same four named spells. One re-derived the underlying sets independently from the artefact and confirmed all 25 spell keys match `spell.title` exactly.
+2. **`SpellShape` + unstorable fields.** Defined with an exact field list; `sources` plural in JSON, single on the wire. The byte projection was reproduced independently against the installed Zod 4: **29,879** against this plan's ≈29,880, and the `+49` for `corroborated` matched exactly.
+3. **Golden-frame recipe.** The opaque-delta invariant is what makes the guard non-vacuous, and it is now enforced by a generator rather than left to care.
+
+### Disagreement, and how it was decided
+
+codex raised two blockers the internal reviewer did not: the Task 2 tests inspected the
+committed JSON rather than the runner's exclusion logic, and the offset fixture could be
+vacuous with all-zero offsets. **Both are correct and both were adopted**, along with
+every improvement from the internal review. They are narrow test-contract gaps that
+tighten in a sentence each, not design faults — which is why the verdict is `Ready`
+with them applied rather than a fourth round.
+
+### Adopted (12)
+
+`Mask` moved to `src/area.ts` — declaring it under `scripts/` and importing it into
+`src/area.ts` is **TS6059 and fails `pnpm build`**, reproduced by review, and relaxing
+`rootDir` to "fix" it would destroy the isolation this architecture exists for · the
+opacity-regression seam named: `classify(…, { tolerance: -1 })` reproduces the original
+bug exactly, **verified on the real Fire Wave frames** (40 → cone, −1 → filled bounding
+box), with an explicit instruction not to add a predicate option · the WebP offset
+fixture must be a **real fetched image** with **non-zero offsets on both axes**, since a
+synthesised container would encode the same convention on both sides · a multi-delta
+case, since every other golden uses one frame and first-frame or union would pass them
+all · runner-level exclusion tests: padding-agreeing, genuinely disagreeing, and a
+failed candidate that **fails the run leaving the artefact byte-identical** ·
+per-mask drift comparison against the committed artefact, since aggregate stats can hold
+while cells move · a durable `tsconfig.json` assertion replacing a hand-introduced type
+error · the candidate inventory's derivation named · `drop table if exists` added to the
+DDL · `corroborated` defined in the server instructions, because on the wire it is
+`false` for 18 spells while only 4 are genuinely uncorroborated.
+
+### Not adopted
+
+- Sweeping `.pathname` → `fileURLToPath` across the test suite. Scoped to the one packaged read path, which is where it matters.
+- Collapsing the duplicated `MCP_SCHEMA_VERSION` declaration. A pre-existing wart; expanding scope here is not this plan's job.
+
+### Residual risk, carried into execution
+
+All 24 served shapes rest on 30 masks in a committed spike artefact produced by
+prototype code that is **not** in the repo. Task 2's acceptance makes the new decoder
+reproduce them exactly — a strong regression gate, not a correctness proof. A residual
+prototype bug would be locked in rather than detected, and no external oracle exists.
+Budget headroom after this feature is **~121 bytes**; the existing `tools/list`
+assertions will catch an overflow loudly.

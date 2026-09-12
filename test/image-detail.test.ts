@@ -76,7 +76,12 @@ test('a resolved image also travels as a resource_link for the human', async () 
   assert.ok(link, 'a resolved image must produce a resource_link');
   assert.equal(link['uri'], (res.structuredContent as { image: Image }).image!.url);
   assert.equal(link['mimeType'], 'image/gif');
-  assert.ok(String(link['name']).length > 0, 'resource_link requires a name');
+  // Pinned to the stored canonical name, not merely non-empty: the previous
+  // URL-derived value was also non-empty but disagreed on 401 of 648 fixture rows
+  // (underscores from the CDN path instead of the real spaces).
+  const img = (res.structuredContent as { image: Image & { fileName: string } }).image;
+  assert.equal(link['name'], img.fileName);
+  assert.equal(img.fileName, 'Dragon.gif');
   assert.deepEqual((link['annotations'] as { audience: string[] }).audience, ['user']);
 }));
 
@@ -101,6 +106,18 @@ test('an entity without an image keeps all of its child data', async () => withS
   assert.ok(dragon.image, 'Dragon has an image');
   assert.ok((dragon.loot ?? []).length > 0, 'loot must survive the image lookup');
   assert.ok((dragon.abilities ?? []).length > 0, 'abilities must survive the image lookup');
+}));
+
+test('a spaced canonical file name is not replaced by its CDN spelling', async () => withServer(async (h) => {
+  // The CDN path encodes spaces as underscores, so re-deriving the name from the
+  // URL silently renames the file. Anchored on a title that actually has a space.
+  const res = await get(h, 'Baby Dragon (Creature)');
+  const img = (res.structuredContent as { image: (Image & { fileName: string }) | null }).image;
+  assert.ok(img, 'Baby Dragon (Creature) must carry an image');
+  assert.equal(img.fileName, 'Baby Dragon (Creature).gif');
+  assert.ok(img.url.includes('Baby_Dragon'), 'the URL itself does use underscores');
+  const link = res.content.find((c) => c['type'] === 'resource_link');
+  assert.equal(link?.['name'], 'Baby Dragon (Creature).gif');
 }));
 
 test('the instructions state that images are linked, not redistributed', async () => withServer(async (h) => {

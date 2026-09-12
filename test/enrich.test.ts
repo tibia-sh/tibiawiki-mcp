@@ -4,7 +4,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { copyFileSync, mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { enrich, eligibleScenes, MCP_SCHEMA_VERSION } from '../src/indexer/enrich.ts';
+import { enrich, eligibleScenes, MCP_SCHEMA_VERSION, IMAGE_TYPES } from '../src/indexer/enrich.ts';
 import type { WikiApi } from '../src/indexer/wiki-api.ts';
 import { FIXTURE } from './harness.ts';
 
@@ -75,6 +75,15 @@ test('enrichment creates all three tables and stores the pattern by name', async
   assert.equal(stats.stored, 2);
   assert.equal(stats.ambiguous, 0);
   assert.equal(stats.danglingKey, 0);
+});
+
+test('IMAGE_TYPES lists exactly the seven image-bearing types', () => {
+  // The build gate iterates this same constant, so a type deleted from it vanishes
+  // from both the work and its own policing without any test noticing.
+  assert.deepEqual(
+    IMAGE_TYPES.map((t) => t.entityType).sort(),
+    ['charm', 'creature', 'imbuement', 'item', 'mount', 'npc', 'spell'],
+  );
 });
 
 test('enrichment writes image rows, named per type', async () => {

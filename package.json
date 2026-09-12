@@ -1,6 +1,6 @@
 {
   "name": "@tibia.sh/tibiawiki-mcp",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Offline MCP server for TibiaWiki: attribute queries over creatures, items, NPCs, quests and spells",
   "type": "module",
   "license": "MIT",
@@ -37,6 +37,7 @@
   },
   "dependencies": {
     "@modelcontextprotocol/server": "2.0.0",
+    "@tibia.sh/tibiawiki-data": "^3",
     "zod": "4.5.4"
   },
   "devDependencies": {

@@ -11,6 +11,9 @@ importers:
       '@modelcontextprotocol/server':
         specifier: 2.0.0
         version: 2.0.0
+      '@tibia.sh/tibiawiki-data':
+        specifier: ^3
+        version: 3.0.0
       zod:
         specifier: 4.5.4
         version: 4.5.4
@@ -38,6 +41,9 @@ packages:
   '@modelcontextprotocol/server@2.0.0':
     resolution: {integrity: sha512-YhHWdHfpFMQfd0prsEnxKeS3Qz3ytIGmsS0sth4KDjnacIT7hxk6hXHkJ9KysxlkvTM+WZAtQbbcUhdoP4Hvtw==}
     engines: {node: '>=20'}
+
+  '@tibia.sh/tibiawiki-data@3.0.0':
+    resolution: {integrity: sha512-Ko3L2zns1WTqU7W39Jrqa/TmTh/AN8aiH3PWRJw5ddGGwcXb3TkFxzhc3d3TOdAUswKO8z+oaZdfbsrc9iQWmQ==}
 
   '@types/node@24.13.3':
     resolution: {integrity: sha512-Dh8vAsV36ig5wa9OX4pXvMc9D3Veibfw2wix0CUwYODLD8nkj9UsLjASr49nPg+2eKzxhBV+v7L8pXvT4e639Q==}
@@ -232,6 +238,8 @@ snapshots:
     dependencies:
       '@modelcontextprotocol/core': 2.0.0
       zod: 4.5.4
+
+  '@tibia.sh/tibiawiki-data@3.0.0': {}
 
   '@types/node@24.13.3':
     dependencies:

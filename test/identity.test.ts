@@ -15,9 +15,9 @@ type Server = {
   name: string;
   version: string;
   repository: { url: string; source: string };
-  packages: Array<{ identifier: string }>;
+  packages: Array<{ identifier: string; version: string }>;
 };
-type Plugin = { repository: string };
+type Plugin = { repository: string; version: string };
 
 const read = <T>(rel: string): T =>
   JSON.parse(readFileSync(fileURLToPath(new URL(rel, import.meta.url)), 'utf8')) as T;
@@ -75,10 +75,15 @@ test('server.json points at the package that is actually published', () => {
   // unscoped `tibiawiki-mcp` identifier in place and still pass.
   assert.equal(server.packages[0]!.identifier, pkg.name);
   assert.equal(server.repository.url, 'https://github.com/tibia-sh/tibiawiki-mcp');
-  // The two agree at 0.1.0 today and drift at the first release otherwise.
+  // server.json carries the version twice, and the MCP registry reads packages[0].
   assert.equal(server.version, pkg.version);
+  assert.equal(server.packages[0]!.version, pkg.version);
 });
 
 test('the plugin manifest points at the new org', () => {
   assert.equal(plugin.repository, 'https://github.com/tibia-sh/tibiawiki-mcp');
+});
+
+test('the plugin manifest carries the package version', () => {
+  assert.equal(plugin.version, pkg.version);
 });

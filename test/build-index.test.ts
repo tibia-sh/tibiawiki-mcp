@@ -290,9 +290,14 @@ test('an unmatched spell area key warns by name without bricking the build', asy
   }
   // A wiki rename must not stop every user building an index over one derived shape.
   assert.ok(existsSync(target), 'the index still installs');
-  const warning = written.join('');
+
+  // Isolate the WARNING. buildIndex also writes formatStats to stderr, and that
+  // block now lists the titles too - so matching /Mass Heal/ over all of stderr
+  // passes even if the warning degrades to a bare count. Proven by mutation.
+  const warning = written.join('').split('\n').find((l) => l.startsWith('warning:')) ?? '';
+  assert.ok(warning, 'a warning line must be emitted');
   assert.match(warning, /spell area key/);
-  assert.match(warning, /Mass Heal/, 'the failing key is named, not just counted');
+  assert.match(warning, /Mass Heal/, 'the warning itself names the key, not just the stats block');
 });
 
 test('too few spell area shapes fails the build', async () => {

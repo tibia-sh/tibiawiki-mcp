@@ -39,6 +39,13 @@ const MIN_IMAGE_COVERAGE = 0.95;
  */
 const MIN_SPELL_SHAPES = 20;
 
+/** Truncates loudly: a silently shortened list under-reports what was skipped. */
+function listTitles(titles: readonly string[], limit = 10): string {
+  return titles.length <= limit
+    ? titles.join(', ')
+    : `${titles.slice(0, limit).join(', ')} and ${titles.length - limit} more`;
+}
+
 export type Runner = (
   cmd: string,
   args: string[],
@@ -149,7 +156,7 @@ export async function buildIndex(
     if (stats.spellShapes.unmatched > 0) {
       process.stderr.write(
         `warning: ${stats.spellShapes.unmatched} spell area key(s) matched no row in the ` +
-          `index and were skipped: ${stats.spellShapes.unmatchedTitles.join(', ')}. ` +
+          `index and were skipped: ${listTitles(stats.spellShapes.unmatchedTitles)}. ` +
           'The wiki has likely renamed a spell page; re-run `pnpm decode-spell-areas`.\n',
       );
     }

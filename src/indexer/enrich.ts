@@ -264,7 +264,7 @@ export async function enrich(
         stats.spellShapes.unmatched += 1;
         // Named, not just counted: a bare count leaves the maintainer with no way
         // to tell which key drifted from the index's titles.
-        if (stats.spellShapes.unmatchedTitles.length < 10) stats.spellShapes.unmatchedTitles.push(title);
+        stats.spellShapes.unmatchedTitles.push(title);
         continue;
       }
       const { width, height, cells } = entry;

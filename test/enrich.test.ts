@@ -4,7 +4,8 @@ import { DatabaseSync } from 'node:sqlite';
 import { copyFileSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { enrich, eligibleScenes, MCP_SCHEMA_VERSION, IMAGE_TYPES } from '../src/indexer/enrich.ts';
+import { enrich, eligibleScenes, formatStats, MCP_SCHEMA_VERSION, IMAGE_TYPES } from '../src/indexer/enrich.ts';
+import type { EnrichStats } from '../src/indexer/enrich.ts';
 import type { WikiApi } from '../src/indexer/wiki-api.ts';
 import { FIXTURE } from './harness.ts';
 
@@ -261,6 +262,24 @@ test('two members claiming one ability row are reported, not silently ordered', 
   assert.equal(count(db, 'mcp_ability_area'), 1);
   assert.equal(stats.stored, count(db, 'mcp_ability_area'), 'stored must equal real rows');
   db.close();
+});
+
+test('formatStats names unmatched spell keys, and says when it truncates', () => {
+  // formatStats had no test at all, and it is what a maintainer reads to find a
+  // renamed spell among 24.
+  const make = (spellShapes: EnrichStats['spellShapes']): EnrichStats => ({
+    scenes: 0, joined: 0, ambiguous: 0, noRow: 0,
+    discardedKind: 0, discardedNoSpell: 0, discardedRotate: 0, unparsedMember: 0,
+    patterns: 0, rejectedPatterns: [], stored: 0, images: {},
+    danglingKey: 0, pagesNotInIndex: 0, missingPages: 0, conflictingKey: 0,
+    spellShapes,
+  });
+  const clean = formatStats(make({ served: 24, unmatched: 0, unmatchedTitles: [] }));
+  assert.match(clean, /spell shapes {4}24 served, 0 unmatched/);
+  assert.ok(!/unmatched \(/.test(clean), 'no empty parenthetical when nothing is unmatched');
+
+  const two = formatStats(make({ served: 22, unmatched: 2, unmatchedTitles: ['Mass Heal', 'Old Name'] }));
+  assert.match(two, /Mass Heal, Old Name/);
 });
 
 test('eligibleScenes excludes intentional discards only', () => {

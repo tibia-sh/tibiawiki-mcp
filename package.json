@@ -13,12 +13,14 @@
     "tibiawiki-mcp": "dist/index.js"
   },
   "files": [
-    "dist"
+    "dist",
+    "data/spell-areas.json"
   ],
   "scripts": {
     "typecheck": "tsc --noEmit",
     "build": "tsc -p tsconfig.build.json",
-    "test": "pnpm typecheck && pnpm build && node --test test/*.test.ts"
+    "test": "pnpm typecheck && pnpm build && node --test test/*.test.ts",
+    "decode-spell-areas": "node scripts/decode-spell-areas.ts"
   },
   "dependencies": {
     "@modelcontextprotocol/server": "2.0.0",

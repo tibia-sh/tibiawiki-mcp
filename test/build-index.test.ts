@@ -32,7 +32,7 @@ const stats = (over: Partial<EnrichStats> = {}): EnrichStats => ({
   scenes: 10, joined: 10, ambiguous: 0, noRow: 0,
   discardedKind: 0, discardedNoSpell: 0, discardedRotate: 0, unparsedMember: 0,
   patterns: 114, rejectedPatterns: [], stored: 10, danglingKey: 0, pagesNotInIndex: 0,
-  missingPages: 0, conflictingKey: 0, images: allTypesResolved(),
+  missingPages: 0, conflictingKey: 0, images: allTypesResolved(), spellShapes: { served: 24, unmatched: 0 },
   ...over,
 });
 const noopEnrich = async () => stats();
@@ -136,7 +136,7 @@ test('enrichment runs before validation, not after', async () => {
   const bare = join(dir, 'bare.db');
   copyFileSync(FIXTURE, bare);
   const strip = new DatabaseSync(bare);
-  strip.exec('drop table mcp_ability_area; drop table mcp_area_pattern; drop table mcp_schema_version; drop table mcp_image');
+  strip.exec('drop table mcp_ability_area; drop table mcp_area_pattern; drop table mcp_schema_version; drop table mcp_image; drop table mcp_spell_area');
   strip.close();
 
   await buildIndex({
@@ -151,6 +151,9 @@ test('enrichment runs before validation, not after', async () => {
                  pattern_key text not null references mcp_area_pattern(key), effect_on_caster integer not null,
                  primary key (creature_id, ability_name, ability_effect, ability_element));
                create table mcp_schema_version (version integer not null);
+               create table mcp_spell_area (article_id integer not null primary key,
+                 width integer not null, height integer not null, cells text not null,
+                 source_image text not null, source_url text not null, corroborated integer not null);
                create table mcp_image (entity_type text not null, article_id integer not null,
                  file_name text not null, url text not null, description_url text not null,
                  width integer not null, height integer not null, mime_type text not null,
@@ -268,6 +271,35 @@ test('missing images alone do not fail the build', async () => {
     run: (_cmd, args) => { copyFileSync(FIXTURE, args[args.length - 1]!); return { status: 0, stderr: '' }; },
   });
   assert.ok(existsSync(target));
+});
+
+test('an unmatched spell area key fails the build, naming the cause', async () => {
+  const dir = scratch();
+  const target = join(dir, 'tibiawiki.db');
+  await assert.rejects(
+    buildIndex({
+      targetPath: target, api,
+      enrich: async () => stats({ spellShapes: { served: 23, unmatched: 1 } }),
+      run: (_cmd, args) => { copyFileSync(FIXTURE, args[args.length - 1]!); return { status: 0, stderr: '' }; },
+    }),
+    /matched no row in the index/,
+  );
+  assert.equal(existsSync(target), false, 'a failed gate must not install');
+});
+
+test('too few spell area shapes fails the build', async () => {
+  const dir = scratch();
+  const target = join(dir, 'tibiawiki.db');
+  // A missing or truncated data file, not a wiki gap: these are committed data.
+  await assert.rejects(
+    buildIndex({
+      targetPath: target, api,
+      enrich: async () => stats({ spellShapes: { served: 3, unmatched: 0 } }),
+      run: (_cmd, args) => { copyFileSync(FIXTURE, args[args.length - 1]!); return { status: 0, stderr: '' }; },
+    }),
+    /below the floor of 20/,
+  );
+  assert.equal(existsSync(target), false);
 });
 
 test('no build-index case reaches the network', () => {

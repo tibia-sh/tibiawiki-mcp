@@ -194,8 +194,10 @@ for (const t of allTables) {
   if (USED.has(t)) continue;
   if (keepByType.has(t)) {
     db.exec(`delete from "${t}" where article_id not in (${list(kept(t))})`);
-  } else if (t === 'mcp_image') {
+  } else if (t === 'mcp_image' || t === 'mcp_spell_area') {
     // Deferred: pruned after the orphan sweep, once parents have stopped changing.
+    // Without this exemption they fall into the default `delete from` branch below
+    // and the later pruning runs on an already-empty table.
   } else if (t === 'mcp_ability_area') {
     // Keyed by creature_id, so it cannot ride on keepByType (which prunes by
     // article_id) nor on the foreign-key sweep (whose FK points at the pattern
@@ -231,6 +233,13 @@ for (const table of IMAGE_PARENTS) {
        and article_id not in (select article_id from "${table}")`,
   );
 }
+db.exec(`delete from mcp_spell_area
+   where article_id not in (select article_id from spell)`);
+const orphanShapes = Number(
+  db.prepare('select count(*) c from mcp_spell_area m where m.article_id not in (select article_id from spell)').get()?.c ?? 0,
+);
+if (orphanShapes > 0) throw new Error(`mcp_spell_area still holds ${orphanShapes} orphaned rows`);
+
 const orphanImages = Number(
   db.prepare(`select count(*) c from mcp_image m where not exists (
        select 1 from creature c where c.article_id = m.article_id and m.entity_type = 'creature')

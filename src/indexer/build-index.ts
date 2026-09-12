@@ -32,6 +32,13 @@ const MAX_UNPARSED_SHARE = 0.02;
  */
 const MIN_IMAGE_COVERAGE = 0.95;
 
+/**
+ * Spell area shapes are read from committed data, so a shortfall means the file is
+ * missing, truncated, or its keys stopped matching index titles - never a wiki gap.
+ * Measured: 24 served.
+ */
+const MIN_SPELL_SHAPES = 20;
+
 export type Runner = (
   cmd: string,
   args: string[],
@@ -131,6 +138,22 @@ export async function buildIndex(
             'The naming convention has likely changed.',
         );
       }
+    }
+
+    // Spell shapes: unmatched is gated at zero rather than absorbed by the floor.
+    // Three or four casing misses would otherwise pass while serving null for real
+    // spells - the charm-shaped failure this project already shipped once.
+    if (stats.spellShapes.unmatched > 0) {
+      throw new Error(
+        `${stats.spellShapes.unmatched} spell area key(s) matched no row in the index. ` +
+          'Keys must be spell page titles as the index holds them; refusing to install.',
+      );
+    }
+    if (stats.spellShapes.served < MIN_SPELL_SHAPES) {
+      throw new Error(
+        `Only ${stats.spellShapes.served} spell area shapes stored, below the floor of ` +
+          `${MIN_SPELL_SHAPES}. data/spell-areas.json is missing or truncated; refusing to install.`,
+      );
     }
 
     const eligible = eligibleScenes(stats);

@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { renderArea, AREA_LEGEND } from '../area.ts';
+import { renderArea, renderSpellShape, AREA_LEGEND } from '../area.ts';
 import type { McpServer } from '@modelcontextprotocol/server';
 import type { Provenance, TibiaDb } from '../db.ts';
 import {
@@ -146,8 +146,22 @@ const questOut = z.object({
   rewards: z.array(z.string()),
   detail, source: sourceSchema,
 });
+/** Derived from the wiki's animations, not from its tile data. Different from `area`. */
+const spellShapeSchema = z.object({
+  width: z.number(),
+  height: z.number(),
+  cells: z.array(z.number()),
+  ascii: z.string(),
+  affectedTiles: z.number(),
+  derivedFrom: z.literal('animation'),
+  sourceImage: z.string(),
+  sourceUrl: z.string(),
+  corroborated: z.boolean(),
+}).nullable().describe('Tiles a spell covers, read from its wiki animation.');
+
 const spellOut = z.object({
   type: z.literal('spell'),
+  areaShape: spellShapeSchema,
   image: imageSchema,
   title: z.string(),
   words: z.string().nullable(),
@@ -349,6 +363,12 @@ export function registerGet(server: McpServer, handle: TibiaDb): void {
   // entity lookup is load-bearing (withDetail reads row[f], modifiers read
   // row['modifier_' + e]), and on a LEFT JOIN miss the later duplicate wins, so
   // row.article_id becomes NULL and every child query silently returns nothing.
+  // A separate statement, like every other one-row child here. Spell shapes are
+  // DERIVED from animations; creature abilities' `area` is the wiki's own tile data.
+  // They are deliberately different fields with different types.
+  const spellShapeRow = db.prepare(
+    `select width, height, cells, source_image, source_url, corroborated
+       from mcp_spell_area where article_id = ?`);
   const imageRow = db.prepare(
     `select file_name, url, description_url, width, height, mime_type
        from mcp_image where entity_type = ? and article_id = ?`);
@@ -405,6 +425,16 @@ export function registerGet(server: McpServer, handle: TibiaDb): void {
 
   const shape = (type: EntityType, row: Row, verbosity: 'concise' | 'detailed') => {
     const title = String(row.title);
+    const spellShapeFor = (r: Row) => {
+      const row = spellShapeRow.get(r.article_id as number) as Row | undefined;
+      if (!row) return null;
+      return renderSpellShape({
+        width: Number(row.width), height: Number(row.height),
+        cells: JSON.parse(String(row.cells)) as number[],
+        sourceImage: String(row.source_image), sourceUrl: String(row.source_url),
+        corroborated: Number(row.corroborated) === 1,
+      });
+    };
     const imageFor = (entityType: string, r: Row) => {
       const img = imageRow.get(entityType, r.article_id as number) as Row | undefined;
       return img
@@ -517,7 +547,7 @@ export function registerGet(server: McpServer, handle: TibiaDb): void {
         };
       case 'spell':
         return {
-          type: 'spell' as const, image: imageFor('spell', row), title, words: str(row.words),
+          type: 'spell' as const, image: imageFor('spell', row), areaShape: spellShapeFor(row), title, words: str(row.words),
           spellType: str(row.spell_type), element: str(row.element),
           mana: num(row.mana), level: num(row.level), soul: num(row.soul),
           isPremium: row.is_premium === null ? null : Boolean(row.is_premium),

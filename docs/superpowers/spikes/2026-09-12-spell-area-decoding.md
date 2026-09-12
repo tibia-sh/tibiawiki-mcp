@@ -203,3 +203,39 @@ Caveats that remain and belong in the plan, unchanged from before:
 - `sips` is macOS-only, making this the first build step that cannot run on Linux
 - provenance should be explicit in the data (`derivedFrom: "animation"`), so an agent
   can tell a decoded shape from the wiki's own tile data
+
+## Corroboration, measured precisely (2026-09-12)
+
+Three successive hand-derived counts of this were wrong in the plan drafts, so the
+figures are recorded here once, derived rather than asserted. The confusion each time
+was between **images**, **spell–image associations**, **spells**, and **shape families**.
+
+| quantity | value |
+|---|---:|
+| unique area images | 30 |
+| spell–image associations | 32 |
+| spells covered | 25 |
+| images shared by two spells | 2 (`Berserk1.gif`, `Flame strike1(after…)`) |
+| spells with >1 image | 7 |
+| excluded (images disagree) | 1 — `Great Energy Beam` (1×7 vs 1×8) |
+| **served** | **24** |
+
+Corroboration of the 24 served, by how the shape is supported:
+
+| support | count | |
+|---|---:|---|
+| a second image **of the same spell** agrees | **6** | strongest |
+| single image, but the shape is **independently produced by other images** | **14** | family-corroborated |
+| single image **and** a shape no other image produces | **4** | `Eternal Winter`, `Front Sweep`, `Hell's Core`, `Rage of the Skies` |
+
+So **4 of 24**, not 6 and not 18, rest on a wholly un-cross-checked decode. Earlier
+drafts said 6 (importing the spike's "6 further shapes", which counts shapes) and then
+18 (counting single-image spells, ignoring family corroboration). Both were wrong.
+
+**`Energy Beam` is not a conflict.** Its two images decode to a cell-identical `1×5`;
+only canvas padding differs (3×8 vs 3×9). Comparisons between images must use
+**normalised** masks cropped to the affected bounding box.
+
+**Lesson for any future plan here:** derive these numbers with a script rather than by
+hand. Four overlapping sets with near-equal cardinalities is not a counting problem
+worth doing in prose.

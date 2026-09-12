@@ -248,3 +248,30 @@ Record every contributing image with its own `?cb=` revision, plus a corroborati
 ### Rejected
 
 - **"Serve the newest image with a flag" instead of excluding.** `?cb=` is a file's last-edit timestamp, not a claim about which art depicts the current game, so re-uploaded old art sorts newest. Exclusion stands.
+
+## Review 2 — second draft (2026-09-12)
+
+- **Verdict: Needs revision before implementation**
+- Reviewers: plan-final-reviewer; codex-consult (high, 57s, 32719 tokens); grok-consult — on request only, not run
+- Adopted: none. `Needs revision` leaves the body untouched.
+- **Closure on draft 1's eight:** 5 fully closed (false conflict, packaging, name matching, enrich seam, agree/disagree rule). 3 partial.
+
+### Remaining blocking findings
+
+1. **My corroboration row was wrong for a third time.** Draft 1 said 6 uncorroborated (importing the spike's "6 further shapes", which counts *shapes*); draft 2 repeated 6 while listing four spells plus both `Great Energy Beam` candidates — which are *excluded* and so not among the 24 at all. Measured precisely and recorded in the spike: **6** corroborated by a second image of the same spell, **14** family-corroborated, **4** wholly uncorroborated. A completion criterion depended on the wrong figure.
+2. **`SpellShape` is never defined**, yet four Task 4 assertions and the whole 494/587-byte budget argument depend on its exact field list. Separately, the completion criteria require per-image revisions and a `corroborated` flag that the `mcp_spell_area` schema cannot store — both cannot be true.
+3. **The golden-frame recipe omits the property that makes the guard non-vacuous.** "Restoring the opacity classifier turns the input into a bounding box" holds only if the committed delta frame **redraws the opaque plate across the canvas** — the real-world condition, and precisely what `Berserk1.gif` lacked. An implementer given only "a delta containing a cone" can build a transparent-background fixture, get a green test, and ship a guard that proves nothing. `classify` also has no predicate seam, so the guard is delivered by the fixture alone.
+
+### Also raised
+
+`extractWebpFrames` is exported with no test and no fixture, and a wrong frame offset shifts every mask with the same signature as the original bug; `scripts/**/*.ts` is outside `tsconfig.json`'s `include`, so the new script would never be typechecked while the suite reports green; `src/indexer/spell-decode.ts` is imported by nothing under `src/` yet ships in `dist`, making the isolation criterion true by accident; `toAscii` duplicates rendering that File Structure assigns to `src/area.ts`; the post-change budget is **29,831**, not "near 29,950"; `EnrichStats.spellShapes.skipped` is declared and never defined; the packaged read path should use `fileURLToPath`, not `.pathname`, which breaks on install paths containing spaces; Task 2 has no invocation contract.
+
+### Root cause worth fixing before a draft 3
+
+Three arithmetic errors in one facts table is a pattern, not bad luck. The table
+derives counts across four overlapping sets of near-equal size. A draft 3 should
+**generate** those rows from a committed script rather than assert them in prose.
+
+### Gate cap reached
+
+This is the second of at most two gate invocations. A third requires the user's say-so.

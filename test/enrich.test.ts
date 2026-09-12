@@ -1,20 +1,21 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { DatabaseSync } from 'node:sqlite';
-import { copyFileSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { copyFileSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { enrich, eligibleScenes, formatStats, MCP_SCHEMA_VERSION, IMAGE_TYPES } from '../src/indexer/enrich.ts';
 import type { EnrichStats } from '../src/indexer/enrich.ts';
 import type { WikiApi } from '../src/indexer/wiki-api.ts';
-import { FIXTURE } from './harness.ts';
+import { FIXTURE, tempDirs } from './harness.ts';
 
 const LUA = readFileSync(new URL('./fixtures/scene-data.lua', import.meta.url), 'utf8');
-const scratch = () => join(mkdtempSync(join(tmpdir(), 'twmcp-en-')), 'index.db');
+const scratchDir = tempDirs('twmcp-en-');
+const spellAreasDir = tempDirs('twmcp-sa-');
+const scratch = () => join(scratchDir(), 'index.db');
 const copy = () => { const p = scratch(); copyFileSync(FIXTURE, p); return p; };
 /** A temp JSON beside a scratch index: scratch() returns a file, not a directory. */
 const tempJson = (name: string, body: unknown): string => {
-  const p = join(mkdtempSync(join(tmpdir(), 'twmcp-sa-')), name);
+  const p = join(spellAreasDir(), name);
   writeFileSync(p, JSON.stringify(body));
   return p;
 };

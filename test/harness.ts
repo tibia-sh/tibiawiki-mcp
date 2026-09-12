@@ -1,9 +1,36 @@
+import { after } from 'node:test';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { InMemoryTransport } from '@modelcontextprotocol/server';
 import { Client } from '@modelcontextprotocol/client';
 import { openDb } from '../src/db.ts';
 import { createServer } from '../src/server.ts';
 
 export const FIXTURE = new URL('./fixtures/tibiawiki-fixture.db', import.meta.url).pathname;
+
+/**
+ * A source of temp directories that are removed when the calling file's tests finish.
+ *
+ * Call it once per prefix at module scope and use the returned factory wherever a
+ * scratch directory is needed; it registers the `after` hook itself, so no call site
+ * has to remember the cleanup. The hook runs even when a test fails, which is the
+ * point: a bare `mkdtempSync` left 8,000+ `twmcp-*` directories in $TMPDIR, one per
+ * scratch database ever built. `scripts/decode-spell-areas.ts` pairs its own
+ * `mkdtempSync` with `rmSync` in a `finally` for the same reason - this is that
+ * pairing, hoisted to where a whole file's worth of directories can share it.
+ */
+export function tempDirs(prefix: string): () => string {
+  const created: string[] = [];
+  after(() => {
+    for (const dir of created.splice(0)) rmSync(dir, { recursive: true, force: true });
+  });
+  return () => {
+    const dir = mkdtempSync(join(tmpdir(), prefix));
+    created.push(dir);
+    return dir;
+  };
+}
 
 /**
  * A real MCP client wired to a real server over the SDK's in-memory transport.

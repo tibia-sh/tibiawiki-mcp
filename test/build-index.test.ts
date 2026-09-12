@@ -1,15 +1,14 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { copyFileSync, existsSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { buildIndex } from '../src/indexer/build-index.ts';
 import { eligibleScenes, MCP_SCHEMA_VERSION, type EnrichStats } from '../src/indexer/enrich.ts';
-import { FIXTURE } from './harness.ts';
+import { FIXTURE, tempDirs } from './harness.ts';
 
-const scratch = () => mkdtempSync(join(tmpdir(), 'twmcp-bi-'));
+const scratch = tempDirs('twmcp-bi-');
 const sha = (p: string) => createHash('sha256').update(readFileSync(p)).digest('hex');
 
 /**

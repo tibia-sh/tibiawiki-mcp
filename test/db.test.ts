@@ -1,13 +1,14 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { DatabaseSync } from 'node:sqlite';
-import { mkdtempSync, copyFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { copyFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { resolveDbPath, openDb, SchemaError, MCP_SCHEMA_VERSION } from '../src/db.ts';
+import { tempDirs } from './harness.ts';
 
 const FIXTURE = new URL('./fixtures/tibiawiki-fixture.db', import.meta.url).pathname;
-const scratch = () => mkdtempSync(join(tmpdir(), 'twmcp-'));
+const scratch = tempDirs('twmcp-');
+const probeScratch = tempDirs('twmcp-probe-');
 
 test('resolveDbPath prefers the explicit env override', () => {
   assert.equal(
@@ -166,7 +167,7 @@ test('the probe rejects an index missing any column a tool reads', () => {
     ['game_update', 'changes'],
   ];
   for (const [table, column] of cases) {
-    const dir = mkdtempSync(join(tmpdir(), 'twmcp-probe-'));
+    const dir = probeScratch();
     const path = join(dir, 'partial.db');
     const db = new DatabaseSync(path);
     const src = new DatabaseSync(FIXTURE, { readOnly: true });

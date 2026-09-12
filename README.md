@@ -7,7 +7,7 @@ An offline MCP server for TibiaWiki. It answers the questions the wiki itself ca
 - *Where do I buy a Steel Helmet, and for how much?*
 
 **The server makes no network calls.** Every answer comes from a local SQLite snapshot
-you build yourself, so queries return in milliseconds and work offline.
+that installs with it, so queries return in milliseconds and work offline.
 
 ## Why it exists
 
@@ -15,7 +15,7 @@ TibiaWiki runs on Fandom without Cargo, Semantic MediaWiki or CirrusSearch, so t
 no way to query it by attribute — every structured value is trapped inside Infobox
 wikitext, and the built-in search returns *Dragon Necklace* for `fire resistant dragon`.
 The public REST API over the same wiki exposes exactly one query parameter. Building a
-local index is the only way to ask a real question, and it costs about three minutes.
+local index is the only way to ask a real question.
 
 ## Requirements
 
@@ -23,14 +23,17 @@ local index is the only way to ask a real question, and it costs about three min
 - **Node ≥ 22.18 to develop it** — the test suite runs TypeScript directly, and
   type-stripping is only on by default from 22.18. Consumers are unaffected: the
   published package ships compiled JavaScript.
-- [`uv`](https://docs.astral.sh/uv/) to build the index.
+- [`uv`](https://docs.astral.sh/uv/) only if you build your own index.
 
 ## Install
 
 ```bash
 pnpm add -g @tibia.sh/tibiawiki-mcp
-tibiawiki-mcp build-index      # ~3 minutes, ~14 MB
 ```
+
+The index comes with it as
+[`@tibia.sh/tibiawiki-data`](https://github.com/tibia-sh/tibiawiki-data), an 18 MB
+dependency. You don't build anything first.
 
 ## Use with Claude Code
 
@@ -94,11 +97,28 @@ Deprecated, event-only and unavailable pages are excluded by default; pass
 
 ## Refreshing
 
-Re-run `tibiawiki-mcp build-index`. A failed rebuild never replaces a working index —
-the new one is validated before it is installed. Every tool response reports
-`indexGeneratedAt`, so staleness is always visible to whoever is asking.
+A fresh install resolves the newest data release this server can read. An existing
+install keeps its release until you update it. For data fresher than the last release,
+build your own index:
 
-The index lives at `$TIBIAWIKI_MCP_DB`, or `${XDG_CACHE_HOME:-~/.cache}/tibiawiki-mcp/tibiawiki.db`.
+```bash
+tibiawiki-mcp build-index      # about 6 minutes
+```
+
+It writes to `$TIBIAWIKI_MCP_DB` if you set it, and to
+`${XDG_CACHE_HOME:-~/.cache}/tibiawiki-mcp/tibiawiki.db` otherwise. A failed build
+never replaces a working index, because the new one is validated before it is
+installed. Every answer reports `indexGeneratedAt`, so staleness is always visible to
+whoever is asking.
+
+The server reads the first index it finds:
+
+1. `$TIBIAWIKI_MCP_DB` => an explicit path always wins
+2. `${XDG_CACHE_HOME:-~/.cache}/tibiawiki-mcp/tibiawiki.db` => an index you built
+3. `@tibia.sh/tibiawiki-data` => the data release installed with the server
+
+A built index keeps winning over every later data release. If the server cannot read
+it, you get an error, not a fallback. Delete it to go back to the packaged one.
 
 ### Checking for upstream drift
 
@@ -117,9 +137,16 @@ run on a schedule. Re-run without `--check` to regenerate.
 
 Releases go to npm as `@tibia.sh/tibiawiki-mcp`, starting at `0.1.0`.
 
-The version number describes the server, not the data. The index it serves is a local
-snapshot you build yourself, so upgrading the package never refreshes it — see
-[Refreshing](#refreshing).
+The version number describes the server, not the data. The index ships separately as
+[`@tibia.sh/tibiawiki-data`](https://github.com/tibia-sh/tibiawiki-data), and its major
+version is the index schema version. The server depends on `^3`, the schema it reads.
+`test/data-package.test.ts` keeps that range in step with `MCP_SCHEMA_VERSION`, so npm
+refuses to install an index the server cannot read.
+
+The caret is a deliberate exception to this repository's exact pins. An exact `3.0.0`
+would keep major 4 out just as well, so the caret is not what guards the schema. It lets
+an install, a hosted instance included, pick up each compatible data release without a
+server release. `pnpm add` does not write `^3`, so edit the range by hand.
 
 The tarball ships exactly `dist/` and `data/spell-areas.json`, plus the `package.json`,
 `README.md` and `LICENSE` npm always adds; `test/packaging.test.ts` runs

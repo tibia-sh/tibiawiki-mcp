@@ -71,5 +71,7 @@ test('every tool answers with an actionable error instead of vanishing', () => w
     assert.equal(res.isError, true, `${name} should report an error`);
     const text = (res.content as Array<{ text: string }>)[0]!.text;
     assert.match(text, /build-index/, `${name} should name the fix`);
+    // An old built index shadows the packaged one, so deleting it is a fix too.
+    assert.match(text, /falls back to the packaged index/, `${name} should name the fallback`);
   }
 }));

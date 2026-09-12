@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync } from 'node:fs';
+import { DB_PATH } from '@tibia.sh/tibiawiki-data';
 import { connect } from './harness.ts';
 import { coerceAttribute } from '../src/domain.ts';
 
@@ -74,16 +74,16 @@ test('tibia_how_to_obtain leaves the note empty for a normal active item', async
 });
 
 // Durable guard against value-shape drift in the source wiki: sweep the whole real
-// index through the tools when it is present locally. Skipped in CI, where only the
-// curated fixture exists.
-const FULL_DB = new URL('../data/tibiawiki.db', import.meta.url).pathname;
-test('every item in the full index satisfies the output schema', { skip: !existsSync(FULL_DB) }, async () => {
+// index through the tools. It opens the packaged index directly rather than through the
+// read resolution, so a stale index in a developer's cache cannot turn it red. In CI,
+// where nothing is built, the read resolution names this same file.
+test('every item in the full index satisfies the output schema', async () => {
   const { openDb } = await import('../src/db.ts');
   const { createServer } = await import('../src/server.ts');
   const { InMemoryTransport } = await import('@modelcontextprotocol/server');
   const { Client } = await import('@modelcontextprotocol/client');
 
-  const handle = openDb(FULL_DB);
+  const handle = openDb(DB_PATH);
   const server = createServer(handle);
   const [ct, st] = InMemoryTransport.createLinkedPair();
   await server.connect(st);

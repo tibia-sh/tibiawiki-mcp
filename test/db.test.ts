@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { DatabaseSync } from 'node:sqlite';
 import { copyFileSync, mkdirSync, realpathSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { DB_PATH } from '@tibia.sh/tibiawiki-data';
 import {
   cacheDbPath, packagedDbPath, resolveDbPath, openDb, SchemaError, MCP_SCHEMA_VERSION,
 } from '../src/db.ts';
@@ -20,9 +21,8 @@ test('resolveDbPath prefers the explicit env override', () => {
 });
 
 // Nothing is built at either cache path below, so resolution goes on to the packaged
-// step. The explicit `() => null` keeps these about the cache fallback: the default
-// locator returns null only until the data package is installed, and a real
-// node_modules path after that.
+// step. The explicit `() => null` keeps these about the cache fallback, since the
+// default locator finds the data package this server depends on.
 test('resolveDbPath falls back to the cache directory', () => {
   assert.equal(
     resolveDbPath({ HOME: '/home/u' } as NodeJS.ProcessEnv, () => null),
@@ -40,7 +40,8 @@ test('resolveDbPath honours XDG_CACHE_HOME over HOME', () => {
 /**
  * The read order: an explicit path, then a built index, then the packaged one, then the
  * cache path again so the "run build-index" error names where a built index would go.
- * The locator is injected, so every step is reachable without the data package installed.
+ * The locator is injected, so every step is reachable whether or not a data package is
+ * installed.
  */
 const PACKAGED = '/srv/app/node_modules/@tibia.sh/tibiawiki-data/index.db';
 
@@ -127,6 +128,20 @@ test('packagedDbPath fails loudly when the data package does not export ./index.
   assert.throws(
     () => resolveDbPath({ XDG_CACHE_HOME: scratch() } as NodeJS.ProcessEnv, () => packagedDbPath(from)),
     notExported,
+  );
+});
+
+/**
+ * The default wiring, against the data package this server really depends on. Every case
+ * above injects its locator, calls it directly, or returns before consulting it, so a
+ * default of `() => null` would leave them all green while the packaged step went
+ * silently dead. The cache here is empty, so only the real locator can produce this answer.
+ */
+test('resolveDbPath reads the installed data package by default', () => {
+  assert.equal(
+    resolveDbPath({ XDG_CACHE_HOME: scratch() } as NodeJS.ProcessEnv),
+    // Node's resolver answers with the real path, and pnpm installs packages behind symlinks.
+    realpathSync(DB_PATH),
   );
 });
 

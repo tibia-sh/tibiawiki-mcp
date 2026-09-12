@@ -1,5 +1,13 @@
 savePrefix: ''
 minimumReleaseAge: 10080
+# First-party packages skip the 7-day cooldown. The dependency on
+# @tibia.sh/tibiawiki-data is installed minutes after each data release, and
+# pnpm 10.33.0 fails such an install with ERR_PNPM_NO_MATURE_MATCHING_VERSION
+# rather than waiting. The cooldown exists to let the ecosystem catch a
+# compromised upstream release. A first-party publish is gated by its own release
+# procedure instead.
+minimumReleaseAgeExclude:
+  - '@tibia.sh/*'
 trustPolicy: no-downgrade
 blockExoticSubdeps: true
 strictDepBuilds: true

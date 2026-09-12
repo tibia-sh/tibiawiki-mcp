@@ -101,8 +101,10 @@ export function createUnavailableServer(reason: string): McpServer {
           type: 'text',
           text:
             `${name} is unavailable: ${reason} ` +
-            'Build the index with `tibiawiki-mcp build-index` (about three minutes), then ' +
-            'restart this MCP server. Tell the user this rather than retrying.',
+            'Build the index with `tibiawiki-mcp build-index`, then restart this MCP server. ' +
+            'If the unusable index is an old one you built, deleting it works too: unless ' +
+            'TIBIAWIKI_MCP_DB is set, the server then falls back to the packaged index. ' +
+            'Tell the user this rather than retrying.',
         }],
       }),
     );

@@ -8,35 +8,53 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
+/** @typedef {{ w: number, h: number, mask: number[][] }} Decoded */
+
 const path = fileURLToPath(new URL('../docs/superpowers/spikes/2026-09-12-spell-areas-measured.json', import.meta.url));
+/** @type {{ images: Record<string, Decoded>, spellImages: Record<string, string[]> }} */
 const { images, spellImages } = JSON.parse(readFileSync(path, 'utf8'));
 
 /** Crop to the affected bounding box: raw canvases differ by padding alone. */
+/** @type {(d: Decoded) => string | null} */
 const normalise = ({ mask }) => {
-  const ys = mask.flatMap((row, y) => row.some(Boolean) ? [y] : []);
-  const xs = [...mask[0].keys()].filter((x) => mask.some((row) => row[x]));
-  if (!ys.length) return null;
-  return JSON.stringify(
-    mask.slice(ys[0], ys.at(-1) + 1).map((row) => row.slice(xs[0], xs.at(-1) + 1)),
-  );
+  /** @type {number[]} */ const ys = [];
+  /** @type {number[]} */ const xs = [];
+  for (let y = 0; y < mask.length; y += 1) {
+    const row = mask[y] ?? [];
+    for (let x = 0; x < row.length; x += 1) {
+      if (row[x]) { ys.push(y); xs.push(x); }
+    }
+  }
+  if (ys.length === 0) return null;
+  const [y0, y1] = [Math.min(...ys), Math.max(...ys)];
+  const [x0, x1] = [Math.min(...xs), Math.max(...xs)];
+  return JSON.stringify(mask.slice(y0, y1 + 1).map((row) => row.slice(x0, x1 + 1)));
 };
 
+/** @type {Record<string, string | null>} */
 const shapeOf = Object.fromEntries(Object.entries(images).map(([k, v]) => [k, normalise(v)]));
+/** @type {Record<string, string[]>} */
 const imagesByShape = {};
-for (const [img, s] of Object.entries(shapeOf)) (imagesByShape[s] ??= []).push(img);
+for (const [img, s] of Object.entries(shapeOf)) {
+  if (s !== null) (imagesByShape[s] ??= []).push(img);
+}
 
 const assoc = Object.values(spellImages).reduce((n, f) => n + f.length, 0);
-const shared = Object.entries(
-  Object.values(spellImages).flat().reduce((m, f) => ((m[f] = (m[f] ?? 0) + 1), m), {}),
-).filter(([, n]) => n > 1);
+/** @type {Record<string, number>} */
+const useCount = {};
+for (const f of Object.values(spellImages).flat()) useCount[f] = (useCount[f] ?? 0) + 1;
+const shared = Object.entries(useCount).filter(([, n]) => n > 1);
 
-let excluded = [], sameSpell = [], family = [], alone = [];
+/** @type {string[]} */ const excluded = [];
+/** @type {string[]} */ const sameSpell = [];
+/** @type {string[]} */ const family = [];
+/** @type {string[]} */ const alone = [];
 for (const [spell, imgs] of Object.entries(spellImages)) {
-  const shapes = new Set(imgs.map((i) => shapeOf[i]).filter(Boolean));
+  const shapes = new Set(imgs.map((/** @type {string} */ i) => shapeOf[i]).filter((x) => x !== null));
   if (shapes.size !== 1) { excluded.push(spell); continue; }
   const [s] = [...shapes];
   if (imgs.length > 1) sameSpell.push(spell);
-  else if (imagesByShape[s].length > 1) family.push(spell);
+  else if ((imagesByShape[s ?? ''] ?? []).length > 1) family.push(spell);
   else alone.push(spell);
 }
 

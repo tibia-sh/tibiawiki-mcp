@@ -100,6 +100,29 @@ the new one is validated before it is installed. Every tool response reports
 
 The index lives at `$TIBIAWIKI_MCP_DB`, or `${XDG_CACHE_HOME:-~/.cache}/tibiawiki-mcp/tibiawiki.db`.
 
+### Checking for upstream drift
+
+Spell area shapes are decoded once and committed to `data/spell-areas.json`. To find
+out whether TibiaWiki has re-uploaded any of the source animations since:
+
+```bash
+pnpm decode-spell-areas <path-to-index.db> --check
+```
+
+It fetches metadata only, prints any image whose revision moved (and any new
+candidate the file has never seen), and exits non-zero if there is drift — so it can
+run on a schedule. Re-run without `--check` to regenerate.
+
+## Releases
+
+There are none, deliberately. The package is not published to npm and the version
+stays at `0.1.0`; install it from source (see above). The index it serves is a local
+snapshot a maintainer regenerates, so a published version number would imply a
+freshness guarantee the package cannot make on its own.
+
+If that changes, `files` already ships exactly `dist/` and `data/spell-areas.json`,
+and `npm pack --dry-run` is the check that nothing else leaks in.
+
 ## Attribution
 
 Data from TibiaWiki (https://tibia.fandom.com), licensed CC BY-SA. Tibia is made by

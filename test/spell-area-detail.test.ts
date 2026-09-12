@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { connect } from './harness.ts';
+import { connect, TOOLS_LIST_BUDGET } from './harness.ts';
 
 type Shape = {
   width: number; height: number; cells: number[]; ascii: string;
@@ -146,6 +146,6 @@ test('the stated attribution convention reconstructs the real wiki page', async 
 test('tools/list stays within its budget', async () => withServer(async (h) => {
   const { tools } = await h.client.listTools();
   const bytes = Buffer.byteLength(JSON.stringify(tools), 'utf8');
-  assert.ok(bytes < 30_000, `tools/list is ${bytes} bytes`);
+  assert.ok(bytes < TOOLS_LIST_BUDGET, `tools/list is ${bytes} bytes, over the ${TOOLS_LIST_BUDGET} budget`);
   assert.equal(tools.length, 5);
 }));

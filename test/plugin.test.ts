@@ -6,7 +6,7 @@ import { Client } from '@modelcontextprotocol/client';
 import { openDb } from '../src/db.ts';
 import { createServer } from '../src/server.ts';
 import { ENTITY_TYPES } from '../src/domain.ts';
-import { FIXTURE } from './harness.ts';
+import { FIXTURE, TOOLS_LIST_BUDGET } from './harness.ts';
 
 const root = new URL('..', import.meta.url).pathname;
 
@@ -50,7 +50,7 @@ test('tools/list stays within the stated byte budget', async () => {
   await client.close();
   await server.close();
   handle.close();
-  assert.ok(bytes < 30_000, `tools/list is ${bytes} bytes, over the 30,000 budget`);
+  assert.ok(bytes < TOOLS_LIST_BUDGET, `tools/list is ${bytes} bytes, over the ${TOOLS_LIST_BUDGET} budget`);
 });
 
 // A description that still named five types would send a client looking for houses

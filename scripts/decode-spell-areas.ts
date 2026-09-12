@@ -14,7 +14,13 @@ import { normaliseMask, type Mask } from '../src/area.ts';
  * Maintainer-run, macOS only. Decodes the wiki's spell-area animations and writes
  * data/spell-areas.json, which the build then reads without any network or decoding.
  *
- *   pnpm decode-spell-areas <path-to-index.db>
+ *   pnpm decode-spell-areas <path-to-index.db>          rewrite the data file
+ *   pnpm decode-spell-areas <path-to-index.db> --check  report drift, write nothing
+ *
+ * --check answers the only question that matters between runs: has the upstream art
+ * moved? Each source image's ?cb= revision is recorded per entry, so a changed
+ * revision means the wiki re-uploaded that animation and the committed shape may no
+ * longer describe it. Without this the data ages silently.
  *
  * The index path is an argument because every spell key is validated against it and
  * data/tibiawiki.db is gitignored, so no default can be assumed.
@@ -115,8 +121,10 @@ async function decodeImage(name: string, sized: Sized): Promise<Mask> {
   }
 }
 
-const indexPath = process.argv[2];
-if (!indexPath) throw new Error('usage: pnpm decode-spell-areas <path-to-index.db>');
+const args = process.argv.slice(2);
+const checkOnly = args.includes('--check');
+const indexPath = args.find((a) => !a.startsWith('--'));
+if (!indexPath) throw new Error('usage: pnpm decode-spell-areas <path-to-index.db> [--check]');
 
 const db = new DatabaseSync(indexPath, { readOnly: true });
 const spellTitles = db.prepare('select title from spell').all().map((r) => String(r['title']));
@@ -131,6 +139,42 @@ const candidates = new Map(
   [...refs].map(([spell, files]) => [spell, files.filter(isCandidate)] as const).filter(([, f]) => f.length > 0),
 );
 const allFiles = [...new Set([...candidates.values()].flat())].sort();
+
+// --check compares revisions only: no image is fetched beyond its metadata, so it is
+// cheap enough to run on a schedule.
+if (checkOnly) {
+  const target = fileURLToPath(new URL('../data/spell-areas.json', import.meta.url));
+  const committed = JSON.parse(readFileSync(target, 'utf8')) as {
+    spells: Record<string, { sources: Array<{ image: string; revision: string }> }>;
+    excluded: Record<string, { sources: Array<{ image: string; revision: string }> }>;
+  };
+  const moved: string[] = [];
+  const gone: string[] = [];
+  const known = new Set<string>();
+  for (const [spell, entry] of [...Object.entries(committed.spells), ...Object.entries(committed.excluded)]) {
+    for (const src of entry.sources) {
+      known.add(src.image);
+      const now = sized.get(src.image);
+      if (!now) { gone.push(`${spell}: ${src.image} no longer resolves`); continue; }
+      if (now.revision !== src.revision) {
+        moved.push(`${spell}: ${src.image} ${src.revision} -> ${now.revision}`);
+      }
+    }
+  }
+  // A new candidate the committed file has never seen is also drift.
+  const added = allFiles.filter((f) => !known.has(f));
+
+  for (const line of moved) process.stdout.write(`changed  ${line}\n`);
+  for (const line of gone) process.stdout.write(`missing  ${line}\n`);
+  for (const f of added) process.stdout.write(`new      ${f} is a candidate but is in no committed entry\n`);
+  const drift = moved.length + gone.length + added.length;
+  process.stdout.write(
+    drift === 0
+      ? `up to date: ${known.size} source images, no revisions moved\n`
+      : `${drift} change(s); re-run without --check to regenerate\n`,
+  );
+  process.exit(drift === 0 ? 0 : 1);
+}
 
 // Completeness is a precondition. If a known candidate cannot be decoded we fail,
 // rather than treating the surviving image of a pair as unanimous - losing a

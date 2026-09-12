@@ -101,7 +101,9 @@ const REQUIRED_INFO_KEYS = ['version', 'generate_time'] as const;
 export function cacheDbPath(env: NodeJS.ProcessEnv = process.env): string {
   const override = env.TIBIAWIKI_MCP_DB;
   if (override) return override;
-  const cache = env.XDG_CACHE_HOME ?? join(env.HOME ?? '', '.cache');
+  // `||`, not `??`: the XDG spec treats an empty value as unset, and taken literally it
+  // makes this path relative, so build-index would write into the working directory.
+  const cache = env.XDG_CACHE_HOME || join(env.HOME ?? '', '.cache');
   return join(cache, 'tibiawiki-mcp', 'tibiawiki.db');
 }
 

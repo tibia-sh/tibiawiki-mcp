@@ -15,7 +15,16 @@ export const ATTRIBUTION =
   'Data from TibiaWiki (https://tibia.fandom.com), licensed CC BY-SA. ' +
   'Tibia is made by CipSoft; game content and images are copyright CipSoft GmbH. ' +
     'Images are linked from TibiaWiki, not stored or redistributed by this server; '+
-    'each image carries a descriptionUrl, the wiki page holding its licence and author.';
+    'each image carries a descriptionUrl, the wiki page holding its licence and author. ' +
+    'A spell may carry areaShape: the tiles it covers, DERIVED by decoding the wiki\'s ' +
+    'own animation rather than read from tile data, and present for a minority of spells. ' +
+    'It marks affected tiles only - it does not distinguish the caster or target tile, and ' +
+    'is not caster-relative, so the glyph vocabulary of a creature ability area does not ' +
+    'apply to it. The wiki page carrying that image\'s licence and author is ' +
+    'https://tibia.fandom.com/wiki/File: followed by sourceImage with spaces ' +
+    'replaced by underscores. ' +
+    'corroborated means a second image of the same spell agreed; false does ' +
+    'not mean unsupported, since most uncorroborated shapes match other spells\' images.';
 
 export const TOOL_NAMES = [GET, SEARCH, FIND_CREATURES, FIND_ITEMS, HOW_TO_OBTAIN] as const;
 

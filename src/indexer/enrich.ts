@@ -2,6 +2,8 @@ import { DatabaseSync } from 'node:sqlite';
 import { parseSceneData } from './scene-data.ts';
 import { extractSceneRefs, type AbilityRow, type ExtractStats } from './ability-scenes.ts';
 import { resolveImages, type Subject, type TypeStats } from './images.ts';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import type { EntityType } from '../domain.ts';
 import type { WikiApi } from './wiki-api.ts';
 
@@ -18,7 +20,7 @@ const SCENE_DATA_PAGE = 'Module:SceneBuilder/data';
 const CREATURE_CATEGORY = 'Category:Creatures';
 
 /** Bumped only when the shape below changes, so a stale index fails loudly. */
-export const MCP_SCHEMA_VERSION = 2;
+export const MCP_SCHEMA_VERSION = 3;
 
 /**
  * The tables carrying an entity image. Every row is a subject, including
@@ -46,15 +48,33 @@ export type EnrichStats = ExtractStats & {
   missingPages: number;
   /** Two members resolving to one ability row but naming different patterns. */
   conflictingKey: number;
+  spellShapes: { served: number; unmatched: number; unmatchedTitles: string[] };
 };
 
-export type Enricher = (dbPath: string, api: WikiApi) => Promise<EnrichStats>;
+/**
+ * fileURLToPath, not .pathname: this is the packaged read path, and .pathname leaves
+ * percent-escapes in place, so an install under a directory containing a space
+ * resolves to a file that does not exist. Resolves identically from src/indexer/ and
+ * dist/indexer/ - rootDir is src, so dist mirrors the same depth.
+ */
+export const SPELL_AREAS_PATH = fileURLToPath(new URL('../../data/spell-areas.json', import.meta.url));
+
+type SpellAreaEntry = {
+  width: number; height: number; cells: number[];
+  corroborated: boolean;
+  sources: Array<{ image: string; url: string }>;
+};
+
+export type Enricher = (
+  dbPath: string, api: WikiApi, opts?: { spellAreasPath?: string },
+) => Promise<EnrichStats>;
 
 const DDL = `
 drop table if exists mcp_ability_area;
 drop table if exists mcp_area_pattern;
 drop table if exists mcp_schema_version;
 drop table if exists mcp_image;
+drop table if exists mcp_spell_area;
 
 create table mcp_area_pattern (
   key   text    primary key,
@@ -74,6 +94,16 @@ create table mcp_ability_area (
 
 create table mcp_schema_version (version integer not null);
 
+create table mcp_spell_area (
+  article_id   integer not null primary key,
+  width        integer not null,
+  height       integer not null,
+  cells        text    not null,
+  source_image text    not null,
+  source_url   text    not null,
+  corroborated integer not null
+);
+
 create table mcp_image (
   entity_type     text    not null,
   article_id      integer not null,
@@ -87,7 +117,9 @@ create table mcp_image (
 );
 `;
 
-export async function enrich(dbPath: string, api: WikiApi): Promise<EnrichStats> {
+export async function enrich(
+  dbPath: string, api: WikiApi, opts: { spellAreasPath?: string } = {},
+): Promise<EnrichStats> {
   const lua = await api.moduleSource(SCENE_DATA_PAGE);
   const { patterns, rejected } = parseSceneData(lua);
   const known = new Set(patterns.map((p) => p.key));
@@ -123,6 +155,7 @@ export async function enrich(dbPath: string, api: WikiApi): Promise<EnrichStats>
       discardedKind: 0, discardedNoSpell: 0, discardedRotate: 0, unparsedMember: 0,
       patterns: patterns.length, rejectedPatterns: rejected,
       stored: 0, images: {}, danglingKey: 0, pagesNotInIndex: 0, missingPages: 0, conflictingKey: 0,
+      spellShapes: { served: 0, unmatched: 0, unmatchedTitles: [] },
     };
 
     const insertArea = db.prepare(
@@ -207,6 +240,47 @@ export async function enrich(dbPath: string, api: WikiApi): Promise<EnrichStats>
       );
     }
 
+    // Spell area shapes: read from committed data, never fetched or decoded here.
+    // These are DERIVED from the wiki's animations, unlike creature ability grids,
+    // which come from Module:SceneBuilder's own tile data.
+    const spellPath = opts.spellAreasPath ?? SPELL_AREAS_PATH;
+    const spellData = JSON.parse(readFileSync(spellPath, 'utf8')) as {
+      spells: Record<string, SpellAreaEntry>;
+    };
+    const spellIds = new Map<string, number>();
+    for (const r of db.prepare('select article_id, title from spell').all()) {
+      spellIds.set(String(r['title']).toLowerCase(), Number(r['article_id']));
+    }
+    const insertShape = db.prepare(
+      `insert into mcp_spell_area
+         (article_id, width, height, cells, source_image, source_url, corroborated)
+       values (?, ?, ?, ?, ?, ?, ?)`,
+    );
+    for (const [title, entry] of Object.entries(spellData.spells)) {
+      // Matched case-insensitively: spell.title is plain TEXT UNIQUE with no
+      // COLLATE NOCASE, and the wiki's own casing varies.
+      const id = spellIds.get(title.toLowerCase());
+      if (id === undefined) {
+        stats.spellShapes.unmatched += 1;
+        // Named, not just counted: a bare count leaves the maintainer with no way
+        // to tell which key drifted from the index's titles.
+        stats.spellShapes.unmatchedTitles.push(title);
+        continue;
+      }
+      const { width, height, cells } = entry;
+      if (!Number.isInteger(width) || width <= 0 || !Number.isInteger(height) || height <= 0
+        || cells.length !== width * height || cells.some((c) => c !== 0 && c !== 1)) {
+        throw new Error(`Spell area for "${title}" is not a well-formed binary mask.`);
+      }
+      const source = entry.sources[0];
+      if (!source) throw new Error(`Spell area for "${title}" records no source image.`);
+      insertShape.run(
+        id, width, height, JSON.stringify(cells),
+        source.image, source.url, entry.corroborated ? 1 : 0,
+      );
+      stats.spellShapes.served += 1;
+    }
+
     db.prepare('insert into mcp_schema_version (version) values (?)').run(MCP_SCHEMA_VERSION);
     return stats;
   } finally {
@@ -230,6 +304,7 @@ export function formatStats(stats: EnrichStats): string {
   const eligible = eligibleScenes(stats);
   const pct = eligible > 0 ? ((100 * stats.stored) / eligible).toFixed(1) : 'n/a';
   return [
+    `  spell shapes    ${stats.spellShapes.served} served, ${stats.spellShapes.unmatched} unmatched` + (stats.spellShapes.unmatched > 0 ? ` (${stats.spellShapes.unmatchedTitles.join(', ')})` : ''),
     `  patterns        ${stats.patterns}${stats.rejectedPatterns.length > 0 ? ` (${stats.rejectedPatterns.length} rejected)` : ''}`,
     `  scenes          ${stats.scenes}`,
     `    stored        ${stats.stored}`,

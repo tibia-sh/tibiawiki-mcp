@@ -1,16 +1,23 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { DatabaseSync } from 'node:sqlite';
-import { copyFileSync, mkdtempSync, readFileSync } from 'node:fs';
+import { copyFileSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { enrich, eligibleScenes, MCP_SCHEMA_VERSION, IMAGE_TYPES } from '../src/indexer/enrich.ts';
+import { enrich, eligibleScenes, formatStats, MCP_SCHEMA_VERSION, IMAGE_TYPES } from '../src/indexer/enrich.ts';
+import type { EnrichStats } from '../src/indexer/enrich.ts';
 import type { WikiApi } from '../src/indexer/wiki-api.ts';
 import { FIXTURE } from './harness.ts';
 
 const LUA = readFileSync(new URL('./fixtures/scene-data.lua', import.meta.url), 'utf8');
 const scratch = () => join(mkdtempSync(join(tmpdir(), 'twmcp-en-')), 'index.db');
 const copy = () => { const p = scratch(); copyFileSync(FIXTURE, p); return p; };
+/** A temp JSON beside a scratch index: scratch() returns a file, not a directory. */
+const tempJson = (name: string, body: unknown): string => {
+  const p = join(mkdtempSync(join(tmpdir(), 'twmcp-sa-')), name);
+  writeFileSync(p, JSON.stringify(body));
+  return p;
+};
 
 /** Ability members lifted from the live Dragon page, newlines and all. */
 const DRAGON_WIKITEXT = `{{Infobox Creature
@@ -84,6 +91,63 @@ test('IMAGE_TYPES lists exactly the seven image-bearing types', () => {
     IMAGE_TYPES.map((t) => t.entityType).sort(),
     ['charm', 'creature', 'imbuement', 'item', 'mount', 'npc', 'spell'],
   );
+});
+
+test('enrichment writes spell area shapes, Avalanche by name', async () => {
+  const path = copy();
+  await enrich(path, fakeApi({ Dragon: DRAGON_WIKITEXT }));
+  const db = open(path);
+  const row = db.prepare(
+    `select m.width, m.height, m.cells, m.source_image, m.corroborated
+       from mcp_spell_area m join spell s on s.article_id = m.article_id
+      where s.title = ?`,
+  ).get('Avalanche') as { width: number; height: number; cells: string; source_image: string } | undefined;
+  assert.ok(row, 'Avalanche must have a shape row');
+  assert.equal(row.width, 7);
+  assert.equal(row.height, 7);
+  assert.equal((JSON.parse(row.cells) as number[]).filter((c) => c === 1).length, 37);
+  assert.equal(row.source_image, 'Avalanche1.gif');
+  assert.equal(count(db, 'mcp_spell_area'), 24);
+  db.close();
+});
+
+test('a spell key matching no index row is counted, not stored', async () => {
+  const path = copy();
+  const bad = tempJson('bad-areas.json', {
+    spells: {
+      Avalanche: { width: 1, height: 1, cells: [1], corroborated: false,
+        sources: [{ image: 'A.gif', url: 'https://example.invalid/A.gif' }] },
+      'Mass Heal': { width: 1, height: 1, cells: [1], corroborated: false,
+        sources: [{ image: 'B.gif', url: 'https://example.invalid/B.gif' }] },
+    },
+  });
+  // 'Mass Heal' does not exist; the index says 'Mass Healing'. Left ungated, three
+  // or four such misses serve null for real spells with nothing failing.
+  const stats = await enrich(path, fakeApi({ Dragon: DRAGON_WIKITEXT }), { spellAreasPath: bad });
+  assert.equal(stats.spellShapes.served, 1);
+  assert.equal(stats.spellShapes.unmatched, 1);
+  // Named, not merely counted: build-index reports these so a maintainer can see
+  // which key drifted. A bare count leaves them guessing among 24 spells.
+  assert.deepEqual(stats.spellShapes.unmatchedTitles, ['Mass Heal']);
+});
+
+test('a malformed spell mask is rejected before it is stored', async () => {
+  const path = copy();
+  for (const [label, entry] of [
+    ['non-binary cell', { width: 2, height: 1, cells: [0, 3] }],
+    ['length mismatch', { width: 2, height: 2, cells: [0, 1, 0] }],
+    ['zero width', { width: 0, height: 1, cells: [] }],
+  ] as const) {
+    const bad = tempJson(`bad-${label.replace(/ /g, '-')}.json`, {
+      spells: { Avalanche: { ...entry, corroborated: false,
+        sources: [{ image: 'A.gif', url: 'https://example.invalid/A.gif' }] } },
+    });
+    await assert.rejects(
+      () => enrich(copy(), fakeApi({ Dragon: DRAGON_WIKITEXT }), { spellAreasPath: bad }),
+      /well-formed binary mask/, label,
+    );
+  }
+  assert.ok(path);
 });
 
 test('enrichment writes image rows, named per type', async () => {
@@ -200,12 +264,30 @@ test('two members claiming one ability row are reported, not silently ordered', 
   db.close();
 });
 
+test('formatStats names unmatched spell keys, and says when it truncates', () => {
+  // formatStats had no test at all, and it is what a maintainer reads to find a
+  // renamed spell among 24.
+  const make = (spellShapes: EnrichStats['spellShapes']): EnrichStats => ({
+    scenes: 0, joined: 0, ambiguous: 0, noRow: 0,
+    discardedKind: 0, discardedNoSpell: 0, discardedRotate: 0, unparsedMember: 0,
+    patterns: 0, rejectedPatterns: [], stored: 0, images: {},
+    danglingKey: 0, pagesNotInIndex: 0, missingPages: 0, conflictingKey: 0,
+    spellShapes,
+  });
+  const clean = formatStats(make({ served: 24, unmatched: 0, unmatchedTitles: [] }));
+  assert.match(clean, /spell shapes {4}24 served, 0 unmatched/);
+  assert.ok(!/unmatched \(/.test(clean), 'no empty parenthetical when nothing is unmatched');
+
+  const two = formatStats(make({ served: 22, unmatched: 2, unmatchedTitles: ['Mass Heal', 'Old Name'] }));
+  assert.match(two, /Mass Heal, Old Name/);
+});
+
 test('eligibleScenes excludes intentional discards only', () => {
   const base = {
     scenes: 100, joined: 80, ambiguous: 1, noRow: 4,
     discardedKind: 10, discardedNoSpell: 2, discardedRotate: 1, unparsedMember: 2,
     patterns: 114, rejectedPatterns: [], stored: 80, danglingKey: 0, pagesNotInIndex: 0,
-    missingPages: 0, conflictingKey: 0, images: allTypesResolved(),
+    missingPages: 0, conflictingKey: 0, images: allTypesResolved(), spellShapes: { served: 24, unmatched: 0, unmatchedTitles: [] },
   };
   // 100 - (10 + 2 + 1 + 2) = 85. ambiguous and noRow are failures, not discards,
   // so they stay in the denominator.

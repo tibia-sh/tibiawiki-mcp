@@ -83,6 +83,22 @@ test('openDb validates database_info by KEY, not by column', () => {
   });
 });
 
+test('openDb rejects an index that has no mcp_spell_area table', () => {
+  const bad = join(scratch(), 'noshapes.db');
+  copyFileSync(FIXTURE, bad);
+  const db = new DatabaseSync(bad);
+  db.exec('drop table mcp_spell_area');
+  db.close();
+  assert.throws(() => openDb(bad), (e: unknown) => {
+    assert.ok(e instanceof SchemaError);
+    // Named specifically: every SchemaError ends with the same build-index remedy,
+    // so matching that alone passes on any other probe failure.
+    assert.match((e as Error).message, /mcp_spell_area/);
+    assert.match((e as Error).message, /tibiawiki-mcp build-index/);
+    return true;
+  });
+});
+
 test('openDb rejects an index that has no mcp_image table', () => {
   const bad = join(scratch(), 'noimages.db');
   copyFileSync(FIXTURE, bad);

@@ -32,6 +32,20 @@ const MAX_UNPARSED_SHARE = 0.02;
  */
 const MIN_IMAGE_COVERAGE = 0.95;
 
+/**
+ * Spell area shapes are read from committed data, so a shortfall means the file is
+ * missing, truncated, or its keys stopped matching index titles - never a wiki gap.
+ * Measured: 24 served.
+ */
+const MIN_SPELL_SHAPES = 20;
+
+/** Truncates loudly: a silently shortened list under-reports what was skipped. */
+function listTitles(titles: readonly string[], limit = 10): string {
+  return titles.length <= limit
+    ? titles.join(', ')
+    : `${titles.slice(0, limit).join(', ')} and ${titles.length - limit} more`;
+}
+
 export type Runner = (
   cmd: string,
   args: string[],
@@ -131,6 +145,26 @@ export async function buildIndex(
             'The naming convention has likely changed.',
         );
       }
+    }
+
+    // An unmatched key is reported loudly but does NOT fail the build. The keys are
+    // validated against the index at authoring time - scripts/decode-spell-areas.ts
+    // throws on any unmatched title - so a mismatch here means the wiki renamed a
+    // page since. Failing would brick `tibiawiki-mcp build-index` for every user,
+    // including a fresh install with no index at all, over one cosmetic derived
+    // shape. The floor below still catches a wholesale mismatch.
+    if (stats.spellShapes.unmatched > 0) {
+      process.stderr.write(
+        `warning: ${stats.spellShapes.unmatched} spell area key(s) matched no row in the ` +
+          `index and were skipped: ${listTitles(stats.spellShapes.unmatchedTitles)}. ` +
+          'The wiki has likely renamed a spell page; re-run `pnpm decode-spell-areas`.\n',
+      );
+    }
+    if (stats.spellShapes.served < MIN_SPELL_SHAPES) {
+      throw new Error(
+        `Only ${stats.spellShapes.served} spell area shapes stored, below the floor of ` +
+          `${MIN_SPELL_SHAPES}. data/spell-areas.json is missing or truncated; refusing to install.`,
+      );
     }
 
     const eligible = eligibleScenes(stats);

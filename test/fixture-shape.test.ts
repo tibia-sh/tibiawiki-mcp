@@ -58,7 +58,7 @@ const REQUIRED_NON_EMPTY = [
   'creature_ability', 'creature_max_damage', 'creature_sound',
   'item_key', 'item_sound', 'item_store_offer', 'item_proficiency_perk',
   'npc_job', 'npc_race', 'npc_destination', 'quest_danger',
-  'mcp_area_pattern', 'mcp_ability_area', 'mcp_schema_version', 'mcp_image',
+  'mcp_area_pattern', 'mcp_ability_area', 'mcp_schema_version', 'mcp_image', 'mcp_spell_area',
 ] as const;
 
 test('every table the tools read has at least one fixture row', () => {
@@ -94,6 +94,11 @@ const ANCHOR_CHILDREN: ReadonlyArray<readonly [string, string, string]> = [
   ['Powerful Reap image', 'Powerful Reap',
    `select count(*) c from mcp_image m join imbuement e on e.article_id = m.article_id
       where m.entity_type = 'imbuement' and e.title = ?`],
+  // Per-spell, because REQUIRED_NON_EMPTY stays green on any surviving shape row
+  // while Avalanche's is pruned away - the quest_danger scar.
+  ['Avalanche area shape', 'Avalanche',
+   `select count(*) c from mcp_spell_area m join spell s on s.article_id = m.article_id
+      where s.title = ?`],
   ['Dragon max damage', 'Dragon',
    `select count(*) c from creature_max_damage m join creature c on c.article_id = m.creature_id where c.title = ?`],
   ['Golden Key keys', 'Golden Key',

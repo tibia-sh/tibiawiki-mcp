@@ -123,6 +123,47 @@ test('creates the parent directory when it does not exist', async () => {
 });
 
 /**
+ * The write target must never follow the read resolution, which can land on the
+ * packaged index: a fresh install's build would then rename 18 MB into node_modules,
+ * where the next install wipes it and a read-only node_modules refuses it outright.
+ *
+ * A regression guard, not a red-green test. buildIndex has no packaged-index seam and
+ * must not grow one - that would reopen the very coupling this guards - so while the
+ * data package is absent it is the source check that catches a regression. Once the
+ * package is installed, the install location check catches it as well.
+ */
+test('the default install target is the cache path, never the packaged index', async () => {
+  // Checked before building: with the package installed, a regressed build would
+  // install over the packaged index before the location check below could fail.
+  const uses = readFileSync(new URL('../src/indexer/build-index.ts', import.meta.url), 'utf8')
+    .split('\n')
+    .filter((line) => /\bresolveDbPath\b/.test(line));
+  assert.deepEqual(uses, [],
+    'build-index must not use the read resolution, which can name the packaged index');
+
+  const cache = scratch();
+  const saved = { override: process.env.TIBIAWIKI_MCP_DB, xdg: process.env.XDG_CACHE_HOME };
+  // Unset, not just ignored: a developer's own override would aim this build at their index.
+  delete process.env.TIBIAWIKI_MCP_DB;
+  process.env.XDG_CACHE_HOME = cache;
+  try {
+    const installed = await buildIndex({
+      enrich: noopEnrich,
+      api,
+      run: (_cmd, args) => { copyFileSync(FIXTURE, args[args.length - 1]!); return { status: 0, stderr: '' }; },
+    });
+    const expected = join(cache, 'tibiawiki-mcp', 'tibiawiki.db');
+    assert.equal(installed, expected);
+    assert.ok(existsSync(expected), 'the index must be installed in the cache');
+  } finally {
+    if (saved.override === undefined) delete process.env.TIBIAWIKI_MCP_DB;
+    else process.env.TIBIAWIKI_MCP_DB = saved.override;
+    if (saved.xdg === undefined) delete process.env.XDG_CACHE_HOME;
+    else process.env.XDG_CACHE_HOME = saved.xdg;
+  }
+});
+
+/**
  * The ordering invariant, which nothing else covers: every other case feeds an
  * already-enriched fixture as generator output, so validation would pass whether it
  * ran before or after enrichment. Real generator output has no mcp_* tables, so a

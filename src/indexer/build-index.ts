@@ -2,7 +2,7 @@ import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, renameSync, rmSync } from 'node:fs';
 import { randomBytes } from 'node:crypto';
 import { dirname, join } from 'node:path';
-import { openDb, resolveDbPath } from '../db.ts';
+import { cacheDbPath, openDb } from '../db.ts';
 import { createWikiApi, type WikiApi } from './wiki-api.ts';
 import { enrich, eligibleScenes, formatStats, IMAGE_TYPES, type Enricher } from './enrich.ts';
 
@@ -71,7 +71,8 @@ export async function buildIndex(
     minCoverage?: number;
   } = {},
 ): Promise<string> {
-  const target = opts.targetPath ?? resolveDbPath();
+  // Never the read resolution, which can name the packaged index inside node_modules.
+  const target = opts.targetPath ?? cacheDbPath();
   const run = opts.run ?? defaultRunner;
   const enrichIndex = opts.enrich ?? enrich;
   const api = opts.api ?? createWikiApi();

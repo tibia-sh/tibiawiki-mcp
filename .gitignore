@@ -6,3 +6,4 @@ data/*.db
 scripts/*.js
 scripts/*.js.map
 docs/superpowers/
+CLAUDE.md

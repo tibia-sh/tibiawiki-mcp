@@ -120,7 +120,27 @@ test('the instructions explain the derivation and its limits', async () => withS
   // references, but areaShape carries a bare CDN sourceUrl. Assert the clause that
   // resolves it - NOT /descriptionUrl/, which already appears in the older image
   // sentence and so would match against unmodified code.
-  assert.match(instructions, /wiki\/File: followed by the sourceImage/);
+  assert.match(instructions, /wiki\/File: followed by sourceImage with spaces/);
+  assert.match(instructions, /replaced by underscores/);
+}));
+
+/**
+ * Asserting the instruction's WORDING is not asserting that it is true. The wiki's
+ * own description URLs use underscores: File:Force_strike1.gif, not
+ * "File:Force strike1.gif". Three of six sampled images have a space, so a
+ * convention stated without the substitution is wrong for them.
+ */
+test('the stated attribution convention reconstructs the real wiki page', async () => withServer(async (h) => {
+  const shape = (await shapeOf(h, 'Avalanche'))!;
+  const derive = (image: string) =>
+    `https://tibia.fandom.com/wiki/File:${image.replace(/ /g, '_')}`;
+  assert.equal(derive(shape.sourceImage), 'https://tibia.fandom.com/wiki/File:Avalanche1.gif');
+
+  // A spaced name is the case the convention has to get right.
+  const spaced = (await shapeOf(h, 'Divine Caldera'))!;
+  assert.ok(spaced.sourceImage.includes(' '), 'Divine caldera1.gif has a space');
+  assert.equal(derive(spaced.sourceImage), 'https://tibia.fandom.com/wiki/File:Divine_caldera1.gif');
+  assert.ok(!derive(spaced.sourceImage).includes(' '), 'no spaces survive into the page URL');
 }));
 
 test('tools/list stays within its budget', async () => withServer(async (h) => {

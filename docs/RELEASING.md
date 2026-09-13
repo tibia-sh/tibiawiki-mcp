@@ -16,7 +16,7 @@
    gh api -X POST repos/tibia-sh/tibiawiki-mcp/actions/runs/RUN_ID/approve
    ```
 
-3. Merging the release PR publishes. The merge's push run creates the tag `vX.Y.Z` and the GitHub release at the merge commit, and relabels the PR `autorelease: tagged`. Then it checks out that commit, runs `pnpm install --frozen-lockfile` and `pnpm test`, and runs `npm publish` through npm trusted publishing. npm adds provenance for that commit when it confirms that the repository and the package are public. Once npm accepts the publish, the run's `registry` job checks out the tag, checks that `server.json` carries its version, and publishes `server.json` to the MCP registry.
+3. Merging the release PR publishes. The merge's push run creates the tag `vX.Y.Z` and the GitHub release at the merge commit, and relabels the PR `autorelease: tagged`. Then it checks out that commit, runs `pnpm install --frozen-lockfile` and `pnpm test`, and runs `npm publish` through npm trusted publishing. npm adds provenance for that commit when it confirms that the repository and the package are public. Once npm accepts the publish, the run's `registry` job checks out the tag, checks that `server.json` carries its version, waits until npm serves that version, and publishes `server.json` to the MCP registry.
 4. The release is done when that run is green, its `npm publish` and `Publish to the MCP registry` steps ran, and both npm and the MCP registry list the version.
 
 Only the run triggered at the merge commit publishes, because npm provenance names the commit that triggered the run. A run triggered at any other commit that creates the release fails red instead, at the step `Release tagged at another commit, not published`.
@@ -133,7 +133,17 @@ If the re-run itself fails after release-please created the release, you are als
 
 ### Publish by hand
 
-A publish from your machine carries no provenance. Never add an npm token to CI to get around that. `0.1.0` and `0.2.0` were published from a tarball like this.
+A publish from your machine carries no provenance and no trusted publisher. Never add an npm token to CI to get around that. `0.1.0` and `0.2.0` were published from a tarball like this. Where [the re-run](#re-run-the-merge-commits-run) applies, use it instead, because it keeps trusted publishing.
+
+`0.3.0` came through trusted publishing, and the data repository's `pnpm-workspace.yaml` sets `trustPolicy: no-downgrade`. That setting makes pnpm refuse a version with weaker trust evidence than any version published before it. So the data repository can take a version you publish by hand as its devDependency only after it adds `trustPolicyExclude` for exactly `@tibia.sh/tibiawiki-mcp@X.Y.Z` to that file. Without the exclude, its install fails with `ERR_PNPM_TRUST_DOWNGRADE`.
+
+```yaml
+# @tibia.sh/tibiawiki-mcp X.Y.Z was published by hand, so it has no trusted publisher.
+trustPolicyExclude:
+  - '@tibia.sh/tibiawiki-mcp@X.Y.Z'
+```
+
+pnpm reads only the first entry that names a package, so keep one entry for it. Remove the exclude in the pull request that moves the devDependency to a later version released through the pipeline. Without the exclude, a lockfile still on the version you published by hand fails the next `pnpm dedupe`.
 
 1. Clone the tag fresh, outside any working tree, and check that it is the release commit. The last two commands must print the same commit:
 
@@ -213,10 +223,13 @@ curl -sS "https://registry.modelcontextprotocol.io/v0.1/servers/sh.tibia%2Ftibia
 
 The registry lacks the version when `curl` prints `"detail":"Server not found"`. When it has the version, `curl` prints its entry, with `"version":"X.Y.Z"` under `server`. For a version npm does not list, start at [A release npm does not have](#a-release-npm-does-not-have).
 
+The registry reads the version from npm once and does not retry, so the `registry` job waits for npm to serve a new version before it logs in. A version npm is slow to serve still lands here when that wait runs out, or when the registry's own read of npm misses a version the wait saw.
+
 | How it happened | What you see |
 |---|---|
 | The key is missing from the `mcp-registry` environment, or the TXT record on `tibia.sh` is missing or holds another key. | The release run is red at `Log in to the MCP registry`, with `private key (hex) is required`, `no MCP public key found in DNS TXT records` or `signature verification failed`. When the key is set, the step prints the TXT record it expects. |
-| npm had not served the new version to the registry yet. | The release run is red at `Publish to the MCP registry`, with `NPM package '@tibia.sh/tibiawiki-mcp' exists, but version 'X.Y.Z' was not found`. |
+| npm did not serve the version with `mcpName` `sh.tibia/tibiawiki-mcp` in 40 tries, 15 seconds apart. | The release run is red at `Wait for npm to serve the tag's version`, and its error names the version. |
+| The registry failed or was down, or its own read of npm failed. | The release run is red at `Publish to the MCP registry`, with the registry's error, such as `Likely transient, retry later` for a failed read of npm. |
 | The version reached npm through [Publish by hand](#publish-by-hand). | No `registry` job ran for the version. |
 
 Dispatch the release workflow on `main` with the version's tag. It waits its turn behind any release run in progress.
@@ -227,7 +240,7 @@ gh workflow run release.yml --ref main -f tag="v$VERSION"
 
 `gh` prints the URL of the run it started. Follow the run there, or with `gh run watch <run-id>`, where the run ID is the number at the end of the URL. If `gh` prints no URL, `gh run list --workflow release.yml --event workflow_dispatch` lists dispatched runs, newest first. Yours is the one created when you dispatched.
 
-A dispatched run's release job skips release-please, so it releases nothing and publishes nothing to npm. Only its `registry` job acts. It checks out the tag, checks that `server.json` carries the version, and publishes it.
+A dispatched run's release job skips release-please, so it releases nothing and publishes nothing to npm. Only its `registry` job acts. It checks out the tag, checks that `server.json` carries the version, waits until npm serves that version, and publishes it. A version npm already serves passes the wait on the first try.
 
 Dispatch on `main` only. The key is a secret of the `mcp-registry` environment, which admits runs on `main` alone. The `registry` job of a run dispatched on any other branch or tag fails before its first step. The tag reaches the job as the input, never as the ref.
 
@@ -236,6 +249,14 @@ If the registry has the version already, `Publish to the MCP registry` fails wit
 The recovery is done when the run is green and the `curl` above prints the version.
 
 If `Check that server.json carries the tag's version` fails, or the registry rejects the tag's `server.json`, the workflow cannot register that version. Leave it out of the registry, and fix `server.json` in the next release.
+
+The same goes for a version npm serves with another `mcpName`, or none, because `Wait for npm to serve the tag's version` never passes for it. Before you dispatch again after that step failed, check what npm serves. This must print `sh.tibia/tibiawiki-mcp`:
+
+```bash
+curl -sS "https://registry.npmjs.org/@tibia.sh%2Ftibiawiki-mcp/$VERSION" | jq -r .mcpName
+```
+
+If it prints anything else, or `null`, leave the version out of the registry, and fix `mcpName` in `package.json` in the next release.
 
 ## A bad release
 

@@ -149,6 +149,23 @@ const DIVERGED = '${{ steps.release.outputs.release_created && steps.release.out
 const isAlarm = (step: string): boolean =>
   stepIf(step) === DIVERGED && !/\bnpm publish\b/.test(step) && !/^ *(?:- +)?uses:/m.test(step);
 
+/** A push run that created no release, the only run that can leave a merged release PR unreleased. */
+const UNRELEASED = "${{ github.event_name == 'push' && !steps.release.outputs.release_created }}";
+
+/**
+ * The step that fails a run while a merged release PR is left unreleased: on the unreleased
+ * condition, with no publish and no action.
+ */
+const isReleaseCheck = (step: string): boolean =>
+  stepIf(step) === UNRELEASED && !/\bnpm publish\b/.test(step) && !/^ *(?:- +)?uses:/m.test(step);
+
+/** The release job's one step on the unreleased condition. */
+const releaseCheckStep = (): string => {
+  const checks = releaseJobSteps().filter((step) => stepIf(step) === UNRELEASED);
+  assert.equal(checks.length, 1, 'expected exactly one release job step on the unreleased condition');
+  return checks[0]!;
+};
+
 /**
  * Every `run:` script in the raw workflow text, block scalars included. Comments stay in,
  * because GitHub substitutes `${{ }}` inside a block scalar's comment lines too.
@@ -308,10 +325,10 @@ test('only a run triggered at the tagged commit builds and publishes', () => {
   // npm provenance names the commit that triggered the run, whatever is checked out. A run
   // triggered at any other commit would publish under an attestation naming the wrong one,
   // on a version npm never lets be reused, so every step after release-please needs both
-  // conditions. The alarm below is the only step exempt.
+  // conditions. The alarm and the merged release PR check below are the only steps exempt.
   const after = stepsAfterReleasePlease();
   assert.ok(after.some((step) => /\bnpm publish\b/.test(step)), 'no step after release-please runs npm publish');
-  for (const step of after.filter((step) => !isAlarm(step))) {
+  for (const step of after.filter((step) => !isAlarm(step) && !isReleaseCheck(step))) {
     assert.equal(stepIf(step), PUBLISH_GATE, `${stepName(step)} is not gated on both conditions`);
   }
 });
@@ -326,6 +343,26 @@ test('a run that cannot publish the release it created fails loudly', () => {
   assert.match(alarm, /^ *exit 1$/m, 'the alarm does not exit 1');
   assert.doesNotMatch(alarm, /\bnpm publish\b/, 'the alarm runs npm publish');
   assert.doesNotMatch(alarm, /^ *(?:- +)?uses:/m, 'the alarm runs an action');
+});
+
+test('a push run that creates no release checks for a merged release PR left unreleased', () => {
+  // release-please moves a release PR from autorelease: pending to autorelease: tagged right after
+  // it creates the release. A merged PR still pending was never released, and without this check
+  // that run and every run after it end green with nothing tagged or published.
+  const check = releaseCheckStep();
+  assert.ok(stepsAfterReleasePlease().includes(check), 'the check runs before release-please');
+  // A failure let through leaves the run green, the outcome the check exists to prevent.
+  assert.equal(scalar(stepBody(check), 'continue-on-error'), undefined, 'the check lets its own failure through');
+  // The checks below run the script under `bash -e`, as a runner does only while no shell is chosen.
+  assert.equal(scalar(stepBody(check), 'shell'), undefined, 'the check sets its own shell');
+  assert.equal(scalar(releaseJob(), 'defaults'), undefined, 'the release job sets defaults for its steps');
+  assert.doesNotMatch(check, /^ *(?:- +)?uses:/m, 'the check runs an action');
+  assert.equal(scalar(under(stepBody(check), 'env'), 'GH_TOKEN'), '${{ github.token }}', 'gh gets no token from the step env');
+  const script = stepScript(check) ?? '';
+  assert.match(script, /\bgh +api +graphql\b/, 'the check does not query through gh api graphql');
+  // gh pr list --label goes through the search API, and search lags behind a relabel.
+  assert.doesNotMatch(script, /\bgh +pr +list\b/, 'the check runs gh pr list');
+  assert.doesNotMatch(script, /\bsearch\b/i, 'the check uses search');
 });
 
 test('the released output is true only once npm accepted the publish', () => {
@@ -623,8 +660,42 @@ printf '%s\\n' "$*" >> "$NPM_WAIT_RUN/sleeps"
 `;
 
 /**
- * The directory holding the fake curl and sleep, written once for the file. macOS scans a new
- * executable the first time it runs, which costs a fresh pair about 400 ms on every run.
+ * A stand-in for gh, reading and writing a run's files in $GH_RUN. It takes only `api graphql` with
+ * string fields, given as `-f key=value` or `--raw-field key=value`, and writes each value to
+ * `field-KEY`. A changed command, a typed field or a second call fails, so none passes on a guess.
+ * It prints `response` and exits with `exit`, as gh prints the body even when it exits 1 for a
+ * GraphQL error.
+ */
+const FAKE_GH = `#!/usr/bin/env bash
+here="$GH_RUN"
+if [ "$#" -lt 2 ] || [ "$1" != api ] || [ "$2" != graphql ]; then
+  echo "fake gh: unsupported command: $*" >&2
+  exit 2
+fi
+shift 2
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    -f | --raw-field) field="$2"; shift ;;
+    *) echo "fake gh: unsupported argument $1" >&2; exit 2 ;;
+  esac
+  shift
+  key="\${field%%=*}"
+  case "$key" in
+    '' | *[!a-zA-Z]*) echo "fake gh: unsupported field $field" >&2; exit 2 ;;
+  esac
+  if [ "$key" = "$field" ] || [ -e "$here/field-$key" ]; then
+    echo "fake gh: unsupported field $field" >&2
+    exit 2
+  fi
+  printf '%s' "\${field#*=}" > "$here/field-$key"
+done
+cat "$here/response"
+exit "$(cat "$here/exit")"
+`;
+
+/**
+ * The directory holding the fake curl, sleep and gh, written once for the file. macOS scans a new
+ * executable the first time it runs, which costs a fresh set about 400 ms on every run.
  */
 let fakes: string | undefined;
 const fakeBin = (): string => {
@@ -632,6 +703,7 @@ const fakeBin = (): string => {
     fakes = scratch();
     writeFileSync(join(fakes, 'curl'), FAKE_CURL, { mode: 0o755 });
     writeFileSync(join(fakes, 'sleep'), FAKE_SLEEP, { mode: 0o755 });
+    writeFileSync(join(fakes, 'gh'), FAKE_GH, { mode: 0o755 });
   }
   return fakes;
 };
@@ -794,4 +866,87 @@ test('every registry job step runs, and any failure stops the job', () => {
 test('no step traces the commands it runs', () => {
   // A trace prints each command with its variables expanded, and the login command carries the key.
   assert.doesNotMatch(workflowCode(), /\bset +-[a-z]*x|\bxtrace\b|\bbash +-[a-z]*x/);
+});
+
+/**
+ * The query the merged release PR check must send: the merged pull requests that still carry
+ * release-please's pending label, read from the repository itself rather than through search.
+ */
+const RELEASE_CHECK_QUERY =
+  'query($owner: String!, $name: String!) { repository(owner: $owner, name: $name) { pullRequests(states: MERGED, labels: ["autorelease: pending"], first: 100) { totalCount nodes { number } } } }';
+
+/** GitHub's answer to that query when the given pull requests are merged and still pending. */
+const pendingPullRequests = (...numbers: number[]): string =>
+  JSON.stringify({
+    data: { repository: { pullRequests: { totalCount: numbers.length, nodes: numbers.map((number) => ({ number })) } } },
+  });
+
+/**
+ * Runs the merged release PR check as a push run of octo-org/octo-repo, with the fake gh first on
+ * PATH answering `response` and exiting with `exit`. jq and everything else is real.
+ */
+const runReleaseCheck = (response: string, exit = 0) => {
+  const dir = scratch();
+  writeFileSync(join(dir, 'response'), response);
+  writeFileSync(join(dir, 'exit'), `${exit}\n`);
+  const env = { GITHUB_REPOSITORY: 'octo-org/octo-repo', PATH: `${fakeBin()}:${process.env['PATH'] ?? ''}`, GH_RUN: dir };
+  const run = bash(stepScript(releaseCheckStep())!, env, dir);
+  const fields = Object.fromEntries(
+    readdirSync(dir)
+      .filter((file) => file.startsWith('field-'))
+      .map((file) => [file.slice('field-'.length), readFileSync(join(dir, file), 'utf8')]),
+  );
+  return {
+    status: run.status,
+    output: `${run.stdout}${run.stderr}`,
+    errors: run.stdout.split('\n').filter((line) => line.startsWith('::error::')),
+    fields,
+  };
+};
+
+test('the merged release PR check passes when no merged PR still carries autorelease: pending', () => {
+  // The job checks nothing out unless it releases, so gh has no repository to infer. The run's own
+  // repository reaches the query as its variables.
+  const run = runReleaseCheck(pendingPullRequests());
+  assert.equal(run.status, 0, run.output);
+  assert.deepEqual(run.fields, { query: RELEASE_CHECK_QUERY, owner: 'octo-org', name: 'octo-repo' });
+});
+
+test('the merged release PR check fails and names every merged PR still carrying autorelease: pending', () => {
+  // The one annotation names the PRs and the section of the runbook that recovers them.
+  for (const numbers of [[8], [8, 12]]) {
+    const run = runReleaseCheck(pendingPullRequests(...numbers));
+    assert.equal(run.status, 1, run.output);
+    assert.equal(run.errors.length, 1, `expected exactly one ::error::: ${run.output}`);
+    const error = run.errors[0]!;
+    for (const number of numbers) assert.match(error, new RegExp(`#${number}\\b`), `the error does not name #${number}`);
+    const section = /"([^"]+)" in docs\/RELEASING\.md/.exec(error)?.[1];
+    assert.ok(section, `the error names no section of docs/RELEASING.md: ${error}`);
+    assert.ok(read('docs/RELEASING.md').split('\n').includes(`## ${section}`), `docs/RELEASING.md has no section "${section}"`);
+  }
+});
+
+test('the merged release PR check fails closed on an answer it cannot read', () => {
+  // A check that passed without a readable answer would turn the stall green again.
+  const passing = JSON.parse(pendingPullRequests()) as Record<string, unknown>;
+  const unreadable: Array<[string, string, number]> = [
+    // gh exits 1 on a GraphQL error even though it prints the body.
+    ['gh exiting non-zero', pendingPullRequests(), 1],
+    ['no output', '', 0],
+    ['output that is not JSON', 'Service Unavailable', 0],
+    // jq reads every document in its input, and the last one would decide.
+    ['a second JSON document', `${pendingPullRequests(8)}\n${pendingPullRequests()}`, 0],
+    ['no repository', JSON.stringify({ data: {} }), 0],
+    ['a null repository', JSON.stringify({ data: { repository: null } }), 0],
+    ['no totalCount', JSON.stringify({ data: { repository: { pullRequests: { nodes: [] } } } }), 0],
+    ['a totalCount that is not a number', JSON.stringify({ data: { repository: { pullRequests: { totalCount: '0', nodes: [] } } } }), 0],
+    ['GraphQL errors', JSON.stringify({ ...passing, errors: [{ message: 'Something went wrong while executing your query.' }] }), 0],
+  ];
+  for (const [what, response, exit] of unreadable) {
+    const run = runReleaseCheck(response, exit);
+    assert.equal(run.status, 1, `${what} does not fail the check with exit 1: ${run.output}`);
+    assert.equal(run.errors.length, 1, `${what} fails without exactly one ::error::: ${run.output}`);
+    // Such a failure says nothing about the release PRs, so it must not send you to the stall's recovery.
+    assert.doesNotMatch(run.errors[0]!, / in docs\/RELEASING\.md/, `${what} is reported as a PR left unreleased: ${run.output}`);
+  }
 });

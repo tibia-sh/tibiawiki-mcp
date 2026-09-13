@@ -290,7 +290,7 @@ Until the patch is on npm, `.mcp.json` on `main` pins the bad version. When npm 
 
 ## Setting up the MCP registry publish
 
-**Not yet done.** Until it is, the `registry` job fails at `Log in to the MCP registry`, and every release lands in [A version the MCP registry does not have](#a-version-the-mcp-registry-does-not-have).
+**Done 2026-09-13.** `v0.3.0` was registered that day through [A version the MCP registry does not have](#a-version-the-mcp-registry-does-not-have). If the key or the TXT record goes away, the `registry` job fails at `Log in to the MCP registry`, and every release lands in that section again.
 
 The registry lets only the owner of `tibia.sh` publish `sh.tibia/tibiawiki-mcp`. The `registry` job proves ownership with an Ed25519 key. Its public key sits in a TXT record on `tibia.sh`, and its private key is the `MCP_PRIVATE_KEY` secret of the `mcp-registry` environment. You set this up once.
 
@@ -338,7 +338,7 @@ The registry lets only the owner of `tibia.sh` publish `sh.tibia/tibiawiki-mcp`.
 
 7. Delete `key.pem`, or keep it where only you can read it, such as a password manager. GitHub never shows the secret again. Without `key.pem`, replacing the secret means a new key, and a new TXT record in place of the old one.
 
-8. Publish the current release to the registry, as in [A version the MCP registry does not have](#a-version-the-mcp-registry-does-not-have). If `Log in to the MCP registry` fails with `signature verification failed`, compare the TXT record that step prints with the output of step 5. Once the run is green, replace **Not yet done.** above with the date.
+8. Publish the current release to the registry, as in [A version the MCP registry does not have](#a-version-the-mcp-registry-does-not-have). If `Log in to the MCP registry` fails with `signature verification failed`, compare the TXT record that step prints with the output of step 5. Once the run is green, record the date at the top of this section.
 
 ## Known future break
 

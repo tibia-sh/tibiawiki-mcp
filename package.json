@@ -31,7 +31,7 @@
   "scripts": {
     "typecheck": "tsc --noEmit",
     "build": "tsc -p tsconfig.build.json",
-    "test": "pnpm typecheck && pnpm build && node --test test/*.test.ts",
+    "test": "pnpm typecheck && pnpm build && node --test --test-reporter=spec --test-reporter-destination=stdout --test-reporter=./test/min-tests.ts --test-reporter-destination=stderr test/*.test.ts",
     "decode-spell-areas": "node scripts/decode-spell-areas.ts",
     "lock-generator": "node scripts/lock-generator.ts",
     "smoke": "node scripts/smoke.mjs",

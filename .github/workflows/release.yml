@@ -168,9 +168,58 @@ jobs:
           done
           echo "::error::npm did not serve @tibia.sh/tibiawiki-mcp@${TAG#v} with mcpName sh.tibia/tibiawiki-mcp in 40 tries, 15 seconds apart. Follow \"A version the MCP registry does not have\" in docs/RELEASING.md."
           exit 1
-      - name: Log in to the MCP registry
+      # mcp-publisher sends each request once, and nothing limits how long it waits for the answer.
+      # One TCP timeout at the login lost the push-path registration of 0.3.1. So this step makes up
+      # to 3 attempts, 30 seconds apart, and timeout stops each command after 120 seconds, or kills it
+      # 10 seconds later if it ignores that. Each attempt runs its own login, because the login's
+      # token lasts 5 minutes and the publish never renews it. An attempt first looks the version up. A
+      # version the registry already has ends the step green without a login. A lookup that misses
+      # or fails goes on to the login, and pipefail keeps a transfer that fails after the entry
+      # arrived from passing as a match. A publish the registry rejects as a duplicate ends the step
+      # green too. After the third failed attempt, one last lookup decides. The step takes about 15
+      # minutes at worst, inside its 20-minute bound.
+      - name: Publish to the MCP registry
+        timeout-minutes: 20
         env:
           MCP_PRIVATE_KEY: ${{ secrets.MCP_PRIVATE_KEY }}
-        run: ./mcp-publisher login dns --domain tibia.sh --private-key "$MCP_PRIVATE_KEY"
-      - name: Publish to the MCP registry
-        run: ./mcp-publisher publish
+        run: |
+          set -o pipefail
+          version="${TAG#v}"
+          registered() {
+            if curl -fsS --max-time 10 "https://registry.modelcontextprotocol.io/v0.1/servers/sh.tibia%2Ftibiawiki-mcp/versions/$version" |
+              jq -e --arg version "$version" '.server.version == $version' > /dev/null; then
+              echo "The MCP registry already has sh.tibia/tibiawiki-mcp@$version."
+            else
+              return 1
+            fi
+          }
+          for attempt in 1 2 3; do
+            if [ "$attempt" -gt 1 ]; then
+              sleep 30
+            fi
+            echo "Attempt $attempt of 3"
+            if registered; then
+              exit 0
+            fi
+            if timeout --kill-after=10 120 ./mcp-publisher login dns --domain tibia.sh --private-key "$MCP_PRIVATE_KEY"; then
+              if output="$(timeout --kill-after=10 120 ./mcp-publisher publish 2>&1)"; then
+                printf '%s\n' "$output"
+                exit 0
+              else
+                failure="the publish exited $?"
+                printf '%s\n' "$output"
+              fi
+              if [[ "$output" == *"cannot publish duplicate version"* ]]; then
+                echo "The MCP registry rejected the publish as a duplicate, so it already has sh.tibia/tibiawiki-mcp@$version."
+                exit 0
+              fi
+            else
+              failure="the login exited $?"
+            fi
+            echo "In attempt $attempt, $failure."
+          done
+          if registered; then
+            exit 0
+          fi
+          echo "::error::The MCP registry does not have sh.tibia/tibiawiki-mcp@$version after 3 attempts, 30 seconds apart. In the last attempt, $failure. Follow \"A version the MCP registry does not have\" in docs/RELEASING.md."
+          exit 1

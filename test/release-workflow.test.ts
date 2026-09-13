@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { PACKAGE_VERSION, tempDirs } from './harness.ts';
@@ -756,18 +756,28 @@ test('mcp-publisher is an exact release, checked against a pinned sha256 before 
 const npmWaitSteps = (): string[] =>
   registryJobSteps().filter((step) => (stepScript(step) ?? '').includes('https://registry.npmjs.org/'));
 
+/** The registry job's one step that runs mcp-publisher, which logs in and publishes. */
+const registryPublishStep = (): string => {
+  const steps = registryJobSteps().filter((step) => /\bmcp-publisher +(?:login|publish)\b/.test(stepScript(step) ?? ''));
+  assert.equal(steps.length, 1, 'expected exactly one registry job step that runs mcp-publisher');
+  return steps[0]!;
+};
+
 /**
- * A stand-in for curl, reading and writing a run's files in $NPM_WAIT_RUN. Call N answers with
- * line N of `responses`, and the last line repeats once they run out. `STATUS FILE` is an HTTP
- * response with that body, and `exit CODE` is a transfer that failed with no response, such as a
- * timeout. It follows real curl where the wait relies on it: with -f an HTTP error fails the call
- * and writes no body, and --write-out still prints the status, or 000 when no response came. Each
- * call's arguments go to `calls`, one call per line. An option it does not know fails the call,
- * so a changed command cannot pass on a guess.
+ * A stand-in for curl, reading and writing a run's files in $FAKE_RUN. Call N answers with line N
+ * of `responses`, and the last line repeats once they run out. `STATUS FILE` is an HTTP response
+ * with that body, and `exit CODE` is a transfer that failed with no response, such as a timeout.
+ * `STATUS FILE CODE` is a transfer that failed with exit CODE after the body arrived, as curl exits
+ * 18 when the connection closes early. It follows real curl where the steps rely on it: with -f an
+ * HTTP error fails the call and writes no body, and --write-out still prints the status, or 000 when
+ * no response came. Each call's arguments go to `calls`, one call per line, and the call goes to
+ * `events` as `curl`. An option it does not know fails the call, so a changed command cannot pass
+ * on a guess.
  */
 const FAKE_CURL = `#!/usr/bin/env bash
-here="$NPM_WAIT_RUN"
+here="$FAKE_RUN"
 printf '%s\\n' "$*" >> "$here/calls"
+echo curl >> "$here/events"
 fail='' output='' format=''
 while [ "$#" -gt 0 ]; do
   case "$1" in
@@ -808,11 +818,86 @@ if [ -n "$fail" ] && [ "$1" -ge 400 ]; then
 fi
 if [ -n "$output" ]; then cat "$here/$2" > "$output"; else cat "$here/$2"; fi
 if [ -n "$format" ]; then printf '%s' "$1"; fi
+if [ -n "$3" ]; then
+  echo "curl: ($3) the transfer failed after the body" >&2
+  exit "$3"
+fi
 `;
 
-/** A stand-in for sleep that returns at once, and records what it was asked for in the run's `sleeps`. */
+/**
+ * A stand-in for sleep that returns at once, and records what it was asked for in the run's `sleeps`,
+ * and as `sleep` and its arguments in the run's `events`.
+ */
 const FAKE_SLEEP = `#!/usr/bin/env bash
-printf '%s\\n' "$*" >> "$NPM_WAIT_RUN/sleeps"
+printf '%s\\n' "$*" >> "$FAKE_RUN/sleeps"
+printf 'sleep %s\\n' "$*" >> "$FAKE_RUN/events"
+`;
+
+/**
+ * A stand-in for GNU timeout. It takes only `--kill-after=10 120` and a command, and runs the command
+ * with BOUNDED_BY_TIMEOUT set. It exits with the command's status, or with 124 when the fake
+ * mcp-publisher hung, as timeout does once it has stopped a command that ran too long. Other
+ * arguments fail with 125, timeout's own failure, so a changed bound cannot pass on a guess.
+ */
+const FAKE_TIMEOUT = `#!/usr/bin/env bash
+if [ "$#" -lt 3 ] || [ "$1" != --kill-after=10 ] || [ "$2" != 120 ]; then
+  echo "fake timeout: unsupported arguments: $1 $2" >&2
+  exit 125
+fi
+shift 2
+BOUNDED_BY_TIMEOUT=1 "$@"
+status=$?
+if [ -e "$FAKE_RUN/hung" ]; then
+  rm "$FAKE_RUN/hung"
+  exit 124
+fi
+exit "$status"
+`;
+
+/**
+ * A stand-in for mcp-publisher, reading and writing a run's files in $FAKE_RUN. It takes only `login`
+ * and `publish`, and runs only under the fake timeout, so a command without its bound fails. Each call
+ * goes to `events` as `mcp-publisher` and its arguments. Call N answers with line N of `answers`, and
+ * a call with no line fails. `CODE TEXT` prints TEXT and exits CODE, with TEXT on stdout for 0 and on
+ * stderr otherwise, as mcp-publisher prints its errors. `hang` is a call that never returns, which the
+ * fake timeout stops.
+ */
+const FAKE_MCP_PUBLISHER = `#!/usr/bin/env bash
+here="$FAKE_RUN"
+if [ "$BOUNDED_BY_TIMEOUT" != 1 ]; then
+  echo "fake mcp-publisher: $1 run without timeout" >&2
+  exit 2
+fi
+case "$1" in
+  login | publish) ;;
+  *) echo "fake mcp-publisher: unsupported command $1" >&2; exit 2 ;;
+esac
+printf 'mcp-publisher %s\\n' "$*" >> "$here/events"
+count=0
+while IFS= read -r line; do
+  case "$line" in 'mcp-publisher '*) count=$((count + 1)) ;; esac
+done < "$here/events"
+n=0
+answer=''
+while IFS= read -r line; do
+  n=$((n + 1))
+  if [ "$n" -eq "$count" ]; then answer="$line"; break; fi
+done < "$here/answers"
+if [ -z "$answer" ]; then
+  echo "fake mcp-publisher: no answer for call $count" >&2
+  exit 2
+fi
+if [ "$answer" = hang ]; then
+  : > "$here/hung"
+  exit 143
+fi
+code="\${answer%% *}"
+if [ "$code" -eq 0 ]; then
+  printf '%s\\n' "\${answer#* }"
+else
+  printf '%s\\n' "\${answer#* }" >&2
+fi
+exit "$code"
 `;
 
 /**
@@ -850,8 +935,8 @@ exit "$(cat "$here/exit")"
 `;
 
 /**
- * The directory holding the fake curl, sleep and gh, written once for the file. macOS scans a new
- * executable the first time it runs, which costs a fresh set about 400 ms on every run.
+ * The directory holding the fake curl, sleep, timeout and gh, written once for the file. macOS scans
+ * a new executable the first time it runs, which costs a fresh set about 400 ms on every run.
  */
 let fakes: string | undefined;
 const fakeBin = (): string => {
@@ -859,38 +944,62 @@ const fakeBin = (): string => {
     fakes = scratch();
     writeFileSync(join(fakes, 'curl'), FAKE_CURL, { mode: 0o755 });
     writeFileSync(join(fakes, 'sleep'), FAKE_SLEEP, { mode: 0o755 });
+    writeFileSync(join(fakes, 'timeout'), FAKE_TIMEOUT, { mode: 0o755 });
     writeFileSync(join(fakes, 'gh'), FAKE_GH, { mode: 0o755 });
   }
   return fakes;
 };
 
-/** One try's outcome: an HTTP status with a JSON body, or the curl exit code of a failed transfer. */
-type NpmResponse = { status: number; body: unknown } | { curlExit: number };
+/**
+ * The fake mcp-publisher, written once like the fakes above but kept off PATH, because the step runs
+ * the verified binary as ./mcp-publisher. Each run links to it from its own directory.
+ */
+let publisher: string | undefined;
+const fakePublisher = (): string => {
+  if (publisher === undefined) {
+    publisher = join(scratch(), 'mcp-publisher');
+    writeFileSync(publisher, FAKE_MCP_PUBLISHER, { mode: 0o755 });
+  }
+  return publisher;
+};
+
+/** An HTTP response with a JSON body, whose transfer failed with `curlExit` after the body when one is given. */
+type HttpResponse = { status: number; body: unknown; curlExit?: number };
+
+/** One curl call's outcome: an HTTP response, or the curl exit code of a transfer that failed with no response. */
+type CurlResponse = HttpResponse | { curlExit: number };
+
+/** Writes `responses` into a run's directory, for the fake curl to answer its calls with in order. */
+const writeCurlResponses = (dir: string, responses: CurlResponse[]): void => {
+  const lines = responses.map((response, index) => {
+    if (!('status' in response)) return `exit ${response.curlExit}`;
+    writeFileSync(join(dir, `body-${index}`), JSON.stringify(response.body));
+    return `${response.status} body-${index}${response.curlExit === undefined ? '' : ` ${response.curlExit}`}`;
+  });
+  writeFileSync(join(dir, 'responses'), `${lines.join('\n')}\n`);
+};
+
+/** The lines the fakes recorded in `file` of a run's directory, or none when they wrote nothing there. */
+const recorded = (dir: string, file: string): string[] =>
+  existsSync(join(dir, file)) ? readFileSync(join(dir, file), 'utf8').split('\n').filter((line) => line !== '') : [];
 
 /**
  * Runs the registry job's npm wait for v1.2.3, as the checks above run their scripts, with the
  * fake curl and sleep first on PATH. jq and everything else is real.
  */
-const runNpmWait = (responses: NpmResponse[]) => {
+const runNpmWait = (responses: CurlResponse[]) => {
   const waits = npmWaitSteps();
   assert.equal(waits.length, 1, 'expected exactly one registry job step that polls npm');
   const dir = scratch();
-  const lines = responses.map((response, index) => {
-    if ('curlExit' in response) return `exit ${response.curlExit}`;
-    writeFileSync(join(dir, `body-${index}`), JSON.stringify(response.body));
-    return `${response.status} body-${index}`;
-  });
-  writeFileSync(join(dir, 'responses'), `${lines.join('\n')}\n`);
-  const env = { TAG: 'v1.2.3', PATH: `${fakeBin()}:${process.env['PATH'] ?? ''}`, NPM_WAIT_RUN: dir };
+  writeCurlResponses(dir, responses);
+  const env = { TAG: 'v1.2.3', PATH: `${fakeBin()}:${process.env['PATH'] ?? ''}`, FAKE_RUN: dir };
   const run = bash(stepScript(waits[0]!)!, env, dir);
-  const recorded = (file: string): string[] =>
-    existsSync(join(dir, file)) ? readFileSync(join(dir, file), 'utf8').split('\n').filter((line) => line !== '') : [];
   return {
     status: run.status,
     stdout: run.stdout,
     output: `${run.stdout}${run.stderr}`,
-    calls: recorded('calls'),
-    sleeps: recorded('sleeps'),
+    calls: recorded(dir, 'calls'),
+    sleeps: recorded(dir, 'sleeps'),
   };
 };
 
@@ -901,7 +1010,7 @@ const publishedManifest = () => {
 };
 
 /** npm's answer for a version it does not serve. */
-const NOT_FOUND: NpmResponse = { status: 404, body: 'version not found: 1.2.3' };
+const NOT_FOUND: CurlResponse = { status: 404, body: 'version not found: 1.2.3' };
 
 test('the registry job waits for npm after it checks the tag and before it logs in', () => {
   // The registry reads the version from npm once, with no retry, and the publish runs after the
@@ -913,8 +1022,8 @@ test('the registry job waits for npm after it checks the tag and before it logs 
   const wait = steps.indexOf(waits[0]!);
   const check = steps.findIndex((step) => stepScript(step)?.includes('^v[0-9]+\\.[0-9]+\\.[0-9]+$'));
   assert.ok(check !== -1 && check < wait, 'npm is polled before the tag is checked');
-  const login = steps.findIndex((step) => /^\.\/mcp-publisher login\b/m.test(stepScript(step) ?? ''));
-  assert.ok(login !== -1 && wait < login, 'npm is polled after the login, where the wait can outlast its token');
+  const login = steps.indexOf(registryPublishStep());
+  assert.ok(wait < login, 'npm is polled after the login, where the wait can outlast its token');
 });
 
 test("the npm wait passes once npm serves the tag's version with the server's mcpName", () => {
@@ -962,7 +1071,7 @@ test('the npm wait passes nothing the registry would reject', () => {
   assert.notEqual(foreign.status, 0, 'a manifest with another mcpName passes');
   assert.match(foreign.stdout, /^::error::/m, `the wait stops with no ::error::: ${foreign.output}`);
   // Each of these is only another try, so the wait passes on the try after it.
-  const rejected: Array<[string, NpmResponse]> = [
+  const rejected: Array<[string, CurlResponse]> = [
     ['a manifest for another version', { status: 200, body: { ...manifest, version: '1.2.4' } }],
     ['a status other than 200', { status: 203, body: manifest }],
     ['a body that is not a manifest', { status: 200, body: 'version not found: 1.2.3' }],
@@ -975,32 +1084,278 @@ test('the npm wait passes nothing the registry would reject', () => {
 });
 
 test("the registry key reaches only the login command, through its step's env", () => {
-  // Written into a run script, the key would be pasted into the shell as code. In a step's env
-  // it is a variable only that step's process sees.
+  // Written into a run script, the key would be pasted into the shell as code. In a step's env it is
+  // a variable only the processes of that step see, and the step's script names it only in the login.
   const references = workflowCode().split('\n').filter((line) => /\bsecrets\b/.test(line));
   assert.equal(references.length, 1, `expected one reference to a secret: ${references.join(' |')}`);
   const steps = registryJobSteps().filter((step) => /\bsecrets\b/.test(step));
   assert.equal(steps.length, 1, 'no registry job step references the secret');
   const step = steps[0]!;
+  assert.equal(step, registryPublishStep(), 'the secret reaches a step that does not run mcp-publisher');
   assert.match(
     under(stepBody(step), 'env'),
     /^ *MCP_PRIVATE_KEY: *\$\{\{ secrets\.MCP_PRIVATE_KEY \}\}$/m,
     'the secret does not reach the step through its env',
   );
-  assert.equal(
-    stepScript(step),
-    './mcp-publisher login dns --domain tibia.sh --private-key "$MCP_PRIVATE_KEY"',
-    'the step that holds the key runs something besides the login',
+  const elsewhere = workflowCode()
+    .split('\n')
+    .filter((line) => line.includes('MCP_PRIVATE_KEY') && !step.split('\n').includes(line));
+  assert.deepEqual(elsewhere, [], 'a step other than the publish names the key');
+  const uses = (stepScript(step) ?? '').split('\n').filter((line) => line.includes('MCP_PRIVATE_KEY'));
+  assert.equal(uses.length, 1, `the script names the key more than once: ${uses.length}`);
+  assert.ok(
+    uses[0]!.includes('./mcp-publisher login dns --domain tibia.sh --private-key "$MCP_PRIVATE_KEY"'),
+    'the script passes the key to something besides the login',
   );
 });
 
 test('the registry job publishes after it logs in', () => {
-  // Without the publish step the job goes green and registers nothing.
-  const scripts = registryJobSteps().map((step) => stepScript(step) ?? '');
-  const login = scripts.findIndex((script) => /^\.\/mcp-publisher login\b/m.test(script));
-  const publish = scripts.filter((script) => /^\.\/mcp-publisher publish$/m.test(script));
-  assert.equal(publish.length, 1, 'expected exactly one step that runs ./mcp-publisher publish');
-  assert.ok(login !== -1 && login < scripts.indexOf(publish[0]!), 'the publish runs before the login');
+  // Without the publish the job goes green and registers nothing.
+  const lines = (stepScript(registryPublishStep()) ?? '').split('\n');
+  const login = lines.findIndex((line) => /\.\/mcp-publisher login\b/.test(line));
+  const publish = lines.filter((line) => /\.\/mcp-publisher publish\b/.test(line));
+  assert.equal(publish.length, 1, 'expected exactly one line that runs ./mcp-publisher publish');
+  assert.ok(login !== -1 && login < lines.indexOf(publish[0]!), 'the publish runs before the login');
+});
+
+test('the registry publish makes at most 3 attempts, and timeout bounds each mcp-publisher command', () => {
+  // mcp-publisher has no retry and no timeout of its own, so a hung request would hold the job, and the
+  // key with it, until the 6-hour job limit. timeout stops a command after 120 seconds and kills it 10
+  // seconds later if it ignores that. 3 attempts of a lookup (10 s), a login and a publish, 30 seconds
+  // apart, and a final lookup take at most 880 seconds, inside the step's own 20 minutes.
+  const step = registryPublishStep();
+  assert.equal(scalar(stepBody(step), 'timeout-minutes'), '20', 'the step does not carry timeout-minutes: 20');
+  const lines = (stepScript(step) ?? '').split('\n');
+  const loops = lines.filter((line) => /^ *(?:for|while|until)\b/.test(line));
+  assert.deepEqual(loops, ['for attempt in 1 2 3; do'], 'the step does not loop over exactly 3 attempts');
+  const commands = lines.filter((line) => /\bmcp-publisher\b/.test(line));
+  assert.equal(commands.length, 2, `expected one login and one publish: ${commands.join(' |')}`);
+  for (const command of commands) {
+    assert.match(
+      command,
+      /(?:^|[\s(])timeout --kill-after=10 120 \.\/mcp-publisher (?:login|publish)\b/,
+      `not bounded by timeout --kill-after=10 120: ${command.trim()}`,
+    );
+  }
+});
+
+test('the registry publish looks the version up in each attempt and once more at the end', () => {
+  // The lookup reads the registry's entry for the tag's version, and a 404 or a failed lookup goes on to
+  // the login. mcp-publisher 1.8.1 rejects a duplicate with `invalid version: cannot publish duplicate
+  // version`, and the registry's main branch appends the name and version, so the check matches the
+  // substring. After the loop come only the final lookup, the error and exit 1. A command chained onto
+  // the loop, such as `|| true`, turns off -e for every command inside it, and a pipe runs the loop in a
+  // subshell, where exit 0 does not end the step.
+  const lines = (stepScript(registryPublishStep()) ?? '').split('\n');
+  const start = lines.indexOf('registered() {');
+  assert.notEqual(start, -1, 'the script defines no registered() lookup');
+  const lookup = lines.slice(start + 1, lines.indexOf('}', start)).join('\n');
+  assert.ok(
+    lookup.includes('curl -fsS --max-time 10 "https://registry.modelcontextprotocol.io/v0.1/servers/sh.tibia%2Ftibiawiki-mcp/versions/$version" |'),
+    `registered() does not read the version's registry entry: ${lookup}`,
+  );
+  assert.ok(
+    lookup.includes(`jq -e --arg version "$version" '.server.version == $version' > /dev/null`),
+    `registered() does not check that the entry's .server.version is the version: ${lookup}`,
+  );
+  assert.ok(
+    lines.some((line) => line.includes('"cannot publish duplicate version"')),
+    'the script does not check the publish output for cannot publish duplicate version',
+  );
+  const end = lines.indexOf('done');
+  assert.notEqual(end, -1, 'the attempts do not end on a line of their own');
+  assert.match(
+    lines.slice(end + 1).join('\n'),
+    /^if registered; then\n +exit 0\nfi\necho "::error::[^\n]*"\nexit 1$/,
+    'after its attempts the step does more than one final lookup, the error and exit 1',
+  );
+});
+
+/** The key the registry publish runs with in these checks. No fake needs a real one. */
+const REGISTRY_KEY = 'fake-registry-key';
+
+/** An mcp-publisher call that returns: its exit code and the line it prints. */
+type PublisherReply = { code: number; text: string };
+
+/** One mcp-publisher call's answer: a reply, or a call that hangs until timeout stops it. */
+type PublisherAnswer = PublisherReply | 'hang';
+
+/**
+ * Runs the registry job's publish step for v1.2.3, as the checks above run their scripts, with the fake
+ * curl, sleep and timeout first on PATH and the fake mcp-publisher linked as ./mcp-publisher. jq and
+ * everything else is real. `lookups` answer the step's curl calls in order, and `answers` its
+ * mcp-publisher calls. The step holds the key in its env, so any command that prints it, such as an
+ * environment dump or a trace, fails every run.
+ */
+const runRegistryPublish = (lookups: CurlResponse[], answers: PublisherAnswer[]) => {
+  const dir = scratch();
+  writeCurlResponses(dir, lookups);
+  const lines = answers.map((answer) => (answer === 'hang' ? 'hang\n' : `${answer.code} ${answer.text}\n`));
+  writeFileSync(join(dir, 'answers'), lines.join(''));
+  symlinkSync(fakePublisher(), join(dir, 'mcp-publisher'));
+  const env = {
+    TAG: 'v1.2.3',
+    MCP_PRIVATE_KEY: REGISTRY_KEY,
+    PATH: `${fakeBin()}:${process.env['PATH'] ?? ''}`,
+    FAKE_RUN: dir,
+  };
+  const run = bash(stepScript(registryPublishStep())!, env, dir);
+  assert.ok(!`${run.stdout}${run.stderr}`.includes(REGISTRY_KEY), 'the publish step printed the registry key');
+  return {
+    status: run.status,
+    stdout: run.stdout,
+    output: `${run.stdout}${run.stderr}`,
+    errors: run.stdout.split('\n').filter((line) => line.startsWith('::error::')),
+    events: recorded(dir, 'events'),
+    lookups: recorded(dir, 'calls'),
+  };
+};
+
+/** What the fakes record for each command the publish step runs. */
+const LOOKUP = 'curl';
+const LOGIN = `mcp-publisher login dns --domain tibia.sh --private-key ${REGISTRY_KEY}`;
+const PUBLISH = 'mcp-publisher publish';
+const PAUSE = 'sleep 30';
+
+/**
+ * The registry's answer to the lookup of a version it has: server.json at that version, with the
+ * registry's own metadata, as the registry answered for 0.3.1.
+ */
+const registryEntry = (version = '1.2.3'): HttpResponse => {
+  const server = JSON.parse(read('server.json')) as { packages: Array<Record<string, unknown>> };
+  const at = '2026-09-13T17:02:58.553533Z';
+  return {
+    status: 200,
+    body: {
+      server: { ...server, version, packages: server.packages.map((entry) => ({ ...entry, version })) },
+      _meta: {
+        'io.modelcontextprotocol.registry/official': {
+          status: 'active',
+          statusChangedAt: at,
+          publishedAt: at,
+          updatedAt: at,
+          isLatest: true,
+        },
+      },
+    },
+  };
+};
+
+/** The registry's answer to the lookup of a version it does not have. */
+const UNREGISTERED: CurlResponse = { status: 404, body: { title: 'Not Found', status: 404, detail: 'Server not found' } };
+
+/** mcp-publisher 1.8.1's replies, as it prints them. */
+const LOGGED_IN: PublisherReply = { code: 0, text: '✓ Successfully logged in' };
+const PUBLISHED: PublisherReply = { code: 0, text: '✓ Successfully published' };
+const LOGIN_UNREACHABLE: PublisherReply = {
+  code: 1,
+  text: 'Error: failed to get token: failed to exchange dns signature: failed to send request: Post "https://registry.modelcontextprotocol.io/v0/auth/dns": dial tcp 34.61.200.254:443: i/o timeout',
+};
+const PUBLISH_UNREACHABLE: PublisherReply = {
+  code: 1,
+  text: 'Error: publish failed: error sending request: Post "https://registry.modelcontextprotocol.io/v0/publish": dial tcp 34.61.200.254:443: i/o timeout',
+};
+const REGISTRY_FAILED: PublisherReply = { code: 1, text: 'Error: publish failed: server returned status 503: Service Unavailable' };
+const DUPLICATE: PublisherReply = {
+  code: 1,
+  text: 'Error: publish failed: server returned status 400: {"title":"Bad Request","status":400,"detail":"Failed to publish server","errors":[{"message":"invalid version: cannot publish duplicate version"}]}',
+};
+
+test('the registry publish logs in and publishes once when its first attempt succeeds', () => {
+  const run = runRegistryPublish([UNREGISTERED], [LOGGED_IN, PUBLISHED]);
+  assert.equal(run.status, 0, run.output);
+  assert.deepEqual(run.events, [LOOKUP, LOGIN, PUBLISH]);
+  assert.ok(run.stdout.includes(PUBLISHED.text), `the publish output is not echoed: ${run.output}`);
+});
+
+test('the registry publish tries again 30 seconds after a failure on the network', () => {
+  const run = runRegistryPublish(
+    [{ curlExit: 28 }, UNREGISTERED],
+    [LOGIN_UNREACHABLE, LOGGED_IN, PUBLISH_UNREACHABLE, LOGGED_IN, PUBLISHED],
+  );
+  assert.equal(run.status, 0, run.output);
+  assert.deepEqual(run.events, [LOOKUP, LOGIN, PAUSE, LOOKUP, LOGIN, PUBLISH, PAUSE, LOOKUP, LOGIN, PUBLISH]);
+});
+
+test('the registry publish fails after 3 attempts and a final lookup, and names the last failure', () => {
+  // The login fails, then the publish, then the third attempt's login hangs until timeout stops it with
+  // 124. The annotation names the version, that last failure and the runbook section.
+  const run = runRegistryPublish([UNREGISTERED], [LOGIN_UNREACHABLE, LOGGED_IN, REGISTRY_FAILED, 'hang']);
+  assert.equal(run.status, 1, run.output);
+  assert.deepEqual(run.events, [LOOKUP, LOGIN, PAUSE, LOOKUP, LOGIN, PUBLISH, PAUSE, LOOKUP, LOGIN, LOOKUP]);
+  // A command that timeout stops prints nothing itself, so the log says what failed in each attempt.
+  assert.deepEqual(
+    run.stdout.split('\n').filter((line) => line.startsWith('In attempt ')),
+    ['In attempt 1, the login exited 1.', 'In attempt 2, the publish exited 1.', 'In attempt 3, the login exited 124.'],
+    `the log does not say what failed in each attempt: ${run.output}`,
+  );
+  assert.equal(run.errors.length, 1, `expected exactly one ::error::: ${run.output}`);
+  const error = run.errors[0]!;
+  assert.match(error, /@1\.2\.3\b/, `the error does not name the version: ${error}`);
+  assert.match(error, /\blogin\b[^.]*\b124\b/, `the error does not name the last failure: ${error}`);
+  const section = /"([^"]+)" in docs\/RELEASING\.md/.exec(error)?.[1];
+  assert.ok(section, `the error names no section of docs/RELEASING.md: ${error}`);
+  assert.ok(read('docs/RELEASING.md').split('\n').includes(`## ${section}`), `docs/RELEASING.md has no section "${section}"`);
+  // Each lookup reads the registry's entry for the version, with the slash in the server's name escaped,
+  // and stops within 10 seconds.
+  const { name } = JSON.parse(read('server.json')) as { name: string };
+  const url = `https://registry.modelcontextprotocol.io/v0.1/servers/${encodeURIComponent(name)}/versions/1.2.3`;
+  for (const call of run.lookups) {
+    assert.equal(call.split(' ').find((arg) => arg.startsWith('https://')), url, `a lookup reads another URL: curl ${call}`);
+    assert.match(call, /(?:^| )--max-time 10(?: |$)/, `a lookup is not limited to 10 seconds: curl ${call}`);
+  }
+});
+
+test('the registry publish stops at a lookup that finds the version after a failed publish', () => {
+  // A publish that timeout stopped can still have registered the version.
+  const run = runRegistryPublish([UNREGISTERED, registryEntry()], [LOGGED_IN, 'hang']);
+  assert.equal(run.status, 0, run.output);
+  assert.deepEqual(run.events, [LOOKUP, LOGIN, PUBLISH, PAUSE, LOOKUP]);
+});
+
+test('the registry publish neither logs in nor publishes when the registry already has the version', () => {
+  const run = runRegistryPublish([registryEntry()], []);
+  assert.equal(run.status, 0, run.output);
+  assert.deepEqual(run.events, [LOOKUP]);
+});
+
+test('a login that timeout stops fails its attempt', () => {
+  const run = runRegistryPublish([UNREGISTERED], ['hang', LOGGED_IN, PUBLISHED]);
+  assert.equal(run.status, 0, run.output);
+  assert.deepEqual(run.events, [LOOKUP, LOGIN, PAUSE, LOOKUP, LOGIN, PUBLISH]);
+});
+
+test('a publish rejected as a duplicate ends the registry publish green, even when the lookups fail', () => {
+  const run = runRegistryPublish([{ curlExit: 7 }], [LOGGED_IN, DUPLICATE]);
+  assert.equal(run.status, 0, run.output);
+  assert.deepEqual(run.events, [LOOKUP, LOGIN, PUBLISH]);
+  assert.ok(run.stdout.includes(DUPLICATE.text), `the publish error is not echoed: ${run.output}`);
+});
+
+test('the final lookup passes a version the registry has after the third failed attempt', () => {
+  const run = runRegistryPublish(
+    [UNREGISTERED, UNREGISTERED, UNREGISTERED, registryEntry()],
+    [LOGGED_IN, 'hang', LOGGED_IN, 'hang', LOGGED_IN, 'hang'],
+  );
+  assert.equal(run.status, 0, run.output);
+  assert.deepEqual(run.events, [LOOKUP, LOGIN, PUBLISH, PAUSE, LOOKUP, LOGIN, PUBLISH, PAUSE, LOOKUP, LOGIN, PUBLISH, LOOKUP]);
+  assert.deepEqual(run.errors, [], `a registered version ends with an error: ${run.output}`);
+});
+
+test("the registry publish skips the login only for a lookup that fully returns the tag's version", () => {
+  // A lookup error goes on to the login even after the entry arrived, as when the connection closes
+  // before the transfer ends.
+  const misses: Array<[string, CurlResponse]> = [
+    ['an entry for another version', registryEntry('1.2.4')],
+    ['a body that is not an entry', { status: 200, body: 'Server not found' }],
+    ['a server error', { status: 503, body: 'Service Unavailable' }],
+    ['an entry whose transfer then failed', { ...registryEntry(), curlExit: 18 }],
+  ];
+  for (const [what, response] of misses) {
+    const run = runRegistryPublish([response], [LOGGED_IN, PUBLISHED]);
+    assert.equal(run.status, 0, run.output);
+    assert.deepEqual(run.events, [LOOKUP, LOGIN, PUBLISH], `${what} counts as registered`);
+  }
 });
 
 test('every registry job step runs, and any failure stops the job', () => {

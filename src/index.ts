@@ -10,8 +10,13 @@ const command = process.argv[2] ?? 'serve';
 // on a pipe, and a pipe is how a script reads this output.
 if (command === 'build-index') {
   const { buildIndex } = await import('./indexer/build-index.ts');
-  const path = await buildIndex();
-  process.stderr.write(`Index written to ${path}\n`);
+  try {
+    const path = await buildIndex();
+    process.stderr.write(`Index written to ${path}\n`);
+  } catch (error) {
+    process.stderr.write(`tibiawiki-mcp: ${(error as Error).message}\n`);
+    process.exitCode = 1;
+  }
 } else if (command === 'index-digest') {
   // Captured by the data repo's drift job, so stdout carries the digest and nothing else.
   const [path, ...extra] = process.argv.slice(3);

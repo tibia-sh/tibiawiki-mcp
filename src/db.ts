@@ -11,17 +11,19 @@ export type TibiaDb = { db: DatabaseSync; provenance: Provenance; close(): void 
 export class SchemaError extends Error {}
 
 /**
- * The shape the tools require. Probed once at startup so a generator-version drift
- * names the column it is missing instead of silently returning nulls for it.
- */
-/**
  * Enrichment schema version the runtime understands. Kept here rather than imported
  * from src/indexer/, which would pull the build-time network module into the server.
  * src/indexer/enrich.ts exports the same constant and a test asserts they agree.
  */
 export const MCP_SCHEMA_VERSION = 3;
 
-const REQUIRED_COLUMNS: Record<string, readonly string[]> = {
+/**
+ * The shape the tools require. Probed once at startup so a generator-version drift
+ * names the column it is missing instead of silently returning nulls for it.
+ * `index-digest` covers exactly these tables and columns, so the drift check watches
+ * the same shape the tools read.
+ */
+export const REQUIRED_COLUMNS: Readonly<Record<string, readonly string[]>> = {
   creature: [
     'article_id', 'title', 'name', 'hitpoints', 'experience', 'armor', 'speed',
     'bestiary_class', 'bestiary_occurrence', 'is_boss', 'location', 'spawn_type',

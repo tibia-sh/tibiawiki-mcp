@@ -15,16 +15,20 @@ import { PACKAGE_VERSION, tempDirs } from './harness.ts';
 const root = fileURLToPath(new URL('..', import.meta.url));
 const read = (rel: string): string => readFileSync(`${root}${rel}`, 'utf8');
 
-const workflow = (): string => read('.github/workflows/release.yml');
+/** Every workflow in the repository, by file name. */
+const workflowFiles = (): string[] => readdirSync(`${root}.github/workflows`).filter((name) => /\.ya?ml$/.test(name));
+
+/** A workflow's text, release.yml unless `file` names another. */
+const workflow = (file = 'release.yml'): string => read(`.github/workflows/${file}`);
 
 /**
- * The workflow without comments or blank lines. Its own prose says "this job holds
- * id-token: write", so a presence check against the raw text passes with the permission
- * deleted. A YAML comment starts at a `#` preceded by whitespace, and none of this
- * workflow's values contain one.
+ * A workflow without comments or blank lines, release.yml unless `file` names another. Its
+ * own prose says "this job holds id-token: write", so a presence check against the raw text
+ * passes with the permission deleted. A YAML comment starts at a `#` preceded by whitespace,
+ * and none of these workflows' values contain one.
  */
-const workflowCode = (): string =>
-  workflow()
+const workflowCode = (file = 'release.yml'): string =>
+  workflow(file)
     .split('\n')
     .map((line) => line.replace(/(^|\s)#.*$/, '').trimEnd())
     .filter((line) => line !== '')
@@ -76,9 +80,12 @@ const releaseJob = (): string => under(under(workflowCode(), 'jobs'), 'release')
 
 const registryJob = (): string => under(under(workflowCode(), 'jobs'), 'registry');
 
-/** Every job in the workflow as its name and the lines nested under its key. */
-const workflowJobs = (): Array<[string, string]> => {
-  const jobs = under(workflowCode(), 'jobs');
+/**
+ * Every job in a workflow, release.yml unless `file` names another, as its name and the lines
+ * nested under its key.
+ */
+const workflowJobs = (file = 'release.yml'): Array<[string, string]> => {
+  const jobs = under(workflowCode(file), 'jobs');
   const depth = depthOf(jobs);
   if (depth === undefined) return [];
   return [...jobs.matchAll(new RegExp(`^ {${depth}}(['"]?)([\\w-]+)\\1:`, 'gm'))].map(
@@ -106,6 +113,8 @@ const releaseJobSteps = (): string[] => jobSteps(releaseJob());
 const registryJobSteps = (): string[] => jobSteps(registryJob());
 
 const isCheckout = (step: string): boolean => /^ *(?:- +)?uses: *actions\/checkout@/m.test(step);
+
+const isPnpmSetup = (step: string): boolean => /^ *(?:- +)?uses: *pnpm\/setup@/m.test(step);
 
 /** A step with its list marker turned into spaces, so its first key sits at the depth of the others. */
 const stepBody = (step: string): string =>
@@ -165,6 +174,27 @@ const stepIf = (step: string): string | undefined => scalar(stepBody(step), 'if'
 
 const stepName = (step: string): string =>
   /^ *(?:- +)?(?:name|id|uses|run): *(.*)$/m.exec(step)?.[1] ?? step.trim();
+
+/**
+ * The inputs under a step's `with:`. The runner takes an input whose key is capitalised or followed
+ * by a space before its colon, and `scalar` finds neither. So each input has to be a lowercase key,
+ * plain or quoted, written once, or the calling test fails, and a check that an input is absent
+ * cannot pass on a spelling `scalar` misses.
+ */
+const stepInputs = (step: string): string => {
+  const inputs = under(stepBody(step), 'with');
+  const depth = depthOf(inputs);
+  const names = inputs
+    .split('\n')
+    .filter((line) => line.trim() !== '' && line.search(/\S/) === depth)
+    .map((line) => line.trim().replace(/:.*$/, ''));
+  for (const name of names) {
+    assert.match(name, /^(['"]?)[a-z][a-z0-9-]*\1$/, `${stepName(step)} has an input written in a form this test cannot read: ${name}`);
+  }
+  const unquoted = names.map((name) => name.replace(/^(['"])(.*)\1$/, '$2'));
+  assert.equal(new Set(unquoted).size, unquoted.length, `${stepName(step)} sets an input more than once`);
+  return inputs;
+};
 
 /**
  * Fails when a shell is chosen for `step`, a step of `job`: by the step, in the job's defaults, or
@@ -360,11 +390,74 @@ test('the workflow file has the exact name the npm trusted publisher is register
 test('pnpm is set up before npm publish runs prepublishOnly', () => {
   // prepublishOnly is `pnpm test`. Without pnpm on PATH the publish fails after the tag exists.
   const code = workflowCode();
-  const setup = code.search(/uses: *pnpm\/action-setup@/);
+  const setup = code.search(/uses: *pnpm\/setup@/);
   const publish = code.search(/\bnpm publish\b/);
   assert.notEqual(setup, -1, 'the workflow never sets up pnpm');
   assert.notEqual(publish, -1, 'the workflow never runs npm publish');
-  assert.ok(setup < publish, 'pnpm/action-setup runs after npm publish');
+  assert.ok(setup < publish, 'pnpm/setup runs after npm publish');
+});
+
+test('the release job restores no dependency cache', () => {
+  // A restored cache is input no one reviewed, in a job holding id-token: write. The pinned
+  // setup-node restores one by itself whenever package.json names a packageManager, so the input
+  // has to switch it off by name. The one cache pnpm/setup keeps here is its lockfile-verification
+  // record, which holds no package. It saves the record right after its frozen install, and its
+  // post step tries again at the end of the job only when that save does not go through.
+  const steps = releaseJobSteps();
+  const nodes = steps.filter((step) => /^ *(?:- +)?uses: *actions\/setup-node@/m.test(step));
+  assert.ok(nodes.length > 0, 'the release job never sets up node');
+  for (const step of nodes) {
+    const inputs = stepInputs(step);
+    assert.equal(scalar(inputs, 'package-manager-cache'), 'false', 'setup-node caches the package manager store');
+    assert.equal(scalar(inputs, 'cache'), undefined, 'setup-node restores a dependency cache');
+  }
+  const pnpms = steps.filter(isPnpmSetup);
+  assert.ok(pnpms.length > 0, 'the release job never sets up pnpm with pnpm/setup');
+  for (const step of pnpms) {
+    assert.notEqual(scalar(stepInputs(step), 'cache'), 'true', 'pnpm/setup restores the pnpm store');
+  }
+});
+
+/**
+ * Every pnpm/setup step in every workflow, with the file and the job it runs in. A pnpm/setup step
+ * the readers above cannot find, such as one written as a flow mapping, fails the calling test.
+ */
+const pnpmSetupSteps = (): Array<{ file: string; job: string; step: string }> => {
+  const found = workflowFiles().flatMap((file) =>
+    workflowJobs(file).flatMap(([job, body]) => jobSteps(body).filter(isPnpmSetup).map((step) => ({ file, job, step }))),
+  );
+  const written = workflowFiles().reduce((count, file) => count + workflowCode(file).split('pnpm/setup@').length - 1, 0);
+  assert.equal(found.length, written, 'a pnpm/setup step is written in a form this test cannot read, such as a flow mapping');
+  return found;
+};
+
+test('every pnpm/setup step runs a frozen install, and takes the pnpm version and Node from elsewhere', () => {
+  // With install and require-lockfile, the action runs `pnpm install --frozen-lockfile` itself and
+  // saves its lockfile-verification record right after it. With `install: false` the record is
+  // saved only at the end of the job, after the tests. A version input would be a second source
+  // for the pnpm version beside packageManager. A runtime input would put a second Node on PATH,
+  // ahead of the one setup-node installs.
+  const setups = pnpmSetupSteps();
+  assert.ok(setups.length > 0, 'no workflow sets up pnpm with pnpm/setup, so this check proves nothing');
+  for (const { file, job, step } of setups) {
+    const inputs = stepInputs(step);
+    const where = `pnpm/setup in the ${job} job of ${file}`;
+    assert.equal(scalar(inputs, 'install'), 'true', `${where} does not set install: true`);
+    assert.equal(scalar(inputs, 'require-lockfile'), 'true', `${where} does not set require-lockfile: true`);
+    assert.equal(scalar(inputs, 'version'), undefined, `${where} sets a pnpm version beside packageManager`);
+    assert.equal(scalar(inputs, 'runtime'), undefined, `${where} installs a runtime`);
+  }
+});
+
+test('only the ci.yml test job caches the pnpm store', () => {
+  // pnpm/setup saves the store at the end of the job, after everything the job ran, and restores it
+  // in every job that asks. The ci.yml test job can only read the repository and publishes nothing.
+  // In the release job a restored store would be input no one reviewed, beside id-token: write.
+  const cached = pnpmSetupSteps().flatMap(({ file, job, step }) => {
+    const cache = scalar(stepInputs(step), 'cache');
+    return cache === undefined ? [] : [`${file} ${job} cache: ${cache}`];
+  });
+  assert.deepEqual(cached, ['ci.yml test cache: true'], 'pnpm/setup caches the store somewhere other than the ci.yml test job');
 });
 
 test('the release job checks out the commit release-please tagged', () => {

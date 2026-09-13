@@ -122,6 +122,23 @@ jobs:
           curl -fsSL -o mcp-publisher_linux_amd64.tar.gz https://github.com/modelcontextprotocol/registry/releases/download/v1.8.1/mcp-publisher_linux_amd64.tar.gz
           echo "a06c9096dcb9727c13555b6be26c7effa707b01f06a4c561ba7a3635443cf2cc  mcp-publisher_linux_amd64.tar.gz" | sha256sum -c -
           tar -xzf mcp-publisher_linux_amd64.tar.gz mcp-publisher
+      # The registry reads the version from npm once, with no retry, and npm has taken about
+      # 5 minutes to serve a new one. This polls the URL the registry reads, with the slash
+      # escaped as the registry escapes it. It waits before the login, because the login's
+      # token lasts 5 minutes and the publish never renews it. A version npm already serves,
+      # as on a dispatch, passes on the first try.
+      - name: Wait for npm to serve the tag's version
+        run: |
+          url="https://registry.npmjs.org/@tibia.sh%2Ftibiawiki-mcp/${TAG#v}"
+          for _ in $(seq 40); do
+            if status="$(curl -fsS --max-time 10 -o npm-version.json -w '%{http_code}' "$url")" && [ "$status" = 200 ] &&
+              jq -e --arg version "${TAG#v}" '.version == $version and .mcpName == "sh.tibia/tibiawiki-mcp"' npm-version.json > /dev/null; then
+              exit 0
+            fi
+            sleep 15
+          done
+          echo "::error::npm did not serve @tibia.sh/tibiawiki-mcp@${TAG#v} with mcpName sh.tibia/tibiawiki-mcp in 40 tries, 15 seconds apart. Follow \"A version the MCP registry does not have\" in docs/RELEASING.md."
+          exit 1
       - name: Log in to the MCP registry
         env:
           MCP_PRIVATE_KEY: ${{ secrets.MCP_PRIVATE_KEY }}

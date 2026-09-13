@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { PACKAGE_VERSION, tempDirs } from './harness.ts';
@@ -106,10 +106,21 @@ const stepScript = (step: string): string | undefined => {
 
 /**
  * Runs a step's script the way a runner runs a `run:` step that sets no `shell:`, with
- * `bash -e`, and with nothing in its environment but PATH and `env`.
+ * `bash -e`, and with nothing in its environment but PATH and `env`. A script still running
+ * after 30 seconds is killed and fails the test, so a loop with no bound cannot hang the
+ * suite, and a script that hangs is never taken for one that failed.
  */
-const bash = (script: string, env: Record<string, string>, cwd: string) =>
-  spawnSync('bash', ['-e', '-c', script], { cwd, env: { PATH: process.env['PATH'] ?? '', ...env }, encoding: 'utf8' });
+const bash = (script: string, env: Record<string, string>, cwd: string) => {
+  const run = spawnSync('bash', ['-e', '-c', script], {
+    cwd,
+    env: { PATH: process.env['PATH'] ?? '', ...env },
+    encoding: 'utf8',
+    timeout: 30_000,
+    killSignal: 'SIGKILL',
+  });
+  assert.equal(run.signal, null, `the script was still running after 30 seconds: ${script.split('\n')[0]}`);
+  return run;
+};
 
 const scratch = tempDirs('twmcp-release-workflow-');
 
@@ -545,6 +556,193 @@ test('mcp-publisher is an exact release, checked against a pinned sha256 before 
     assert.ok(index > unpack, `mcp-publisher runs before it is verified: ${lines[index]!.trim()}`);
     // tar unpacks into the working directory. Any other path runs a binary nobody checked.
     assert.match(lines[index]!, /(?:^|[\s;&|])\.\/mcp-publisher +[a-z]/, `not the verified binary: ${lines[index]!.trim()}`);
+  }
+});
+
+/** The registry job steps that poll npm, found by the endpoint their scripts read. */
+const npmWaitSteps = (): string[] =>
+  registryJobSteps().filter((step) => (stepScript(step) ?? '').includes('https://registry.npmjs.org/'));
+
+/**
+ * A stand-in for curl, reading and writing a run's files in $NPM_WAIT_RUN. Call N answers with
+ * line N of `responses`, and the last line repeats once they run out. `STATUS FILE` is an HTTP
+ * response with that body, and `exit CODE` is a transfer that failed with no response, such as a
+ * timeout. It follows real curl where the wait relies on it: with -f an HTTP error fails the call
+ * and writes no body, and --write-out still prints the status, or 000 when no response came. Each
+ * call's arguments go to `calls`, one call per line. An option it does not know fails the call,
+ * so a changed command cannot pass on a guess.
+ */
+const FAKE_CURL = `#!/usr/bin/env bash
+here="$NPM_WAIT_RUN"
+printf '%s\\n' "$*" >> "$here/calls"
+fail='' output='' format=''
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    -o | --output) output="$2"; shift ;;
+    -w | --write-out) format="$2"; shift ;;
+    -m | --max-time) shift ;;
+    --fail) fail=1 ;;
+    --silent | --show-error | https://*) ;;
+    -*[!fsS]*) echo "fake curl: unsupported option $1" >&2; exit 2 ;;
+    -*f*) fail=1 ;;
+    -*) ;;
+    *) echo "fake curl: unexpected argument $1" >&2; exit 2 ;;
+  esac
+  shift
+done
+case "$format" in
+  '' | '%{http_code}') ;;
+  *) echo "fake curl: unsupported write-out $format" >&2; exit 2 ;;
+esac
+count=0
+while IFS= read -r line; do count=$((count + 1)); done < "$here/calls"
+n=0
+while IFS= read -r line; do
+  n=$((n + 1))
+  response="$line"
+  if [ "$n" -eq "$count" ]; then break; fi
+done < "$here/responses"
+set -- $response
+if [ "$1" = exit ]; then
+  echo "curl: ($2) the transfer failed" >&2
+  if [ -n "$format" ]; then printf 000; fi
+  exit "$2"
+fi
+if [ -n "$fail" ] && [ "$1" -ge 400 ]; then
+  echo "curl: (22) The requested URL returned error: $1" >&2
+  if [ -n "$format" ]; then printf '%s' "$1"; fi
+  exit 22
+fi
+if [ -n "$output" ]; then cat "$here/$2" > "$output"; else cat "$here/$2"; fi
+if [ -n "$format" ]; then printf '%s' "$1"; fi
+`;
+
+/** A stand-in for sleep that returns at once, and records what it was asked for in the run's `sleeps`. */
+const FAKE_SLEEP = `#!/usr/bin/env bash
+printf '%s\\n' "$*" >> "$NPM_WAIT_RUN/sleeps"
+`;
+
+/**
+ * The directory holding the fake curl and sleep, written once for the file. macOS scans a new
+ * executable the first time it runs, which costs a fresh pair about 400 ms on every run.
+ */
+let fakes: string | undefined;
+const fakeBin = (): string => {
+  if (fakes === undefined) {
+    fakes = scratch();
+    writeFileSync(join(fakes, 'curl'), FAKE_CURL, { mode: 0o755 });
+    writeFileSync(join(fakes, 'sleep'), FAKE_SLEEP, { mode: 0o755 });
+  }
+  return fakes;
+};
+
+/** One try's outcome: an HTTP status with a JSON body, or the curl exit code of a failed transfer. */
+type NpmResponse = { status: number; body: unknown } | { curlExit: number };
+
+/**
+ * Runs the registry job's npm wait for v1.2.3, as the checks above run their scripts, with the
+ * fake curl and sleep first on PATH. jq and everything else is real.
+ */
+const runNpmWait = (responses: NpmResponse[]) => {
+  const waits = npmWaitSteps();
+  assert.equal(waits.length, 1, 'expected exactly one registry job step that polls npm');
+  const dir = scratch();
+  const lines = responses.map((response, index) => {
+    if ('curlExit' in response) return `exit ${response.curlExit}`;
+    writeFileSync(join(dir, `body-${index}`), JSON.stringify(response.body));
+    return `${response.status} body-${index}`;
+  });
+  writeFileSync(join(dir, 'responses'), `${lines.join('\n')}\n`);
+  const env = { TAG: 'v1.2.3', PATH: `${fakeBin()}:${process.env['PATH'] ?? ''}`, NPM_WAIT_RUN: dir };
+  const run = bash(stepScript(waits[0]!)!, env, dir);
+  const recorded = (file: string): string[] =>
+    existsSync(join(dir, file)) ? readFileSync(join(dir, file), 'utf8').split('\n').filter((line) => line !== '') : [];
+  return {
+    status: run.status,
+    stdout: run.stdout,
+    output: `${run.stdout}${run.stderr}`,
+    calls: recorded('calls'),
+    sleeps: recorded('sleeps'),
+  };
+};
+
+/** npm's manifest for v1.2.3 of the package server.json registers, as the registry reads it. */
+const publishedManifest = () => {
+  const server = JSON.parse(read('server.json')) as { name: string; packages: { identifier: string }[] };
+  return { name: server.packages[0]!.identifier, version: '1.2.3', mcpName: server.name };
+};
+
+/** npm's answer for a version it does not serve. */
+const NOT_FOUND: NpmResponse = { status: 404, body: 'version not found: 1.2.3' };
+
+test('the registry job waits for npm after it checks the tag and before it logs in', () => {
+  // The registry reads the version from npm once, with no retry, and the publish runs after the
+  // login. The login's token lasts 5 minutes and the publish never renews it, so a wait between
+  // the two could outlast the token. The wait puts TAG in a URL, so the tag is checked first.
+  const steps = registryJobSteps();
+  const waits = npmWaitSteps();
+  assert.equal(waits.length, 1, 'expected exactly one registry job step that polls npm');
+  const wait = steps.indexOf(waits[0]!);
+  const check = steps.findIndex((step) => stepScript(step)?.includes('^v[0-9]+\\.[0-9]+\\.[0-9]+$'));
+  assert.ok(check !== -1 && check < wait, 'npm is polled before the tag is checked');
+  const login = steps.findIndex((step) => /^\.\/mcp-publisher login\b/m.test(stepScript(step) ?? ''));
+  assert.ok(login !== -1 && wait < login, 'npm is polled after the login, where the wait can outlast its token');
+});
+
+test("the npm wait passes once npm serves the tag's version with the server's mcpName", () => {
+  const manifest = publishedManifest();
+  const served = runNpmWait([{ status: 200, body: manifest }]);
+  assert.equal(served.status, 0, served.output);
+  assert.equal(served.calls.length, 1, 'a version npm already serves is polled more than once');
+  assert.deepEqual(served.sleeps, [], 'a version npm already serves is waited for');
+  const late = runNpmWait([NOT_FOUND, NOT_FOUND, { status: 200, body: manifest }]);
+  assert.equal(late.status, 0, late.output);
+  assert.equal(late.calls.length, 3, 'the wait does not poll until npm serves the version');
+  assert.deepEqual(late.sleeps, ['15', '15'], 'the tries are not 15 seconds apart');
+  // A failed transfer or a server error only means another try.
+  const flaky = runNpmWait([{ curlExit: 28 }, { status: 503, body: 'Service Unavailable' }, { status: 200, body: manifest }]);
+  assert.equal(flaky.status, 0, flaky.output);
+  assert.equal(flaky.calls.length, 3, 'a failed try ends the wait');
+  // Each try reads the URL the registry reads, which Go's url.PathEscape builds: the scope's slash
+  // escaped, its @ kept. Each try stops within the registry's own 10 seconds, so no try can
+  // stretch the bound.
+  const url = `https://registry.npmjs.org/${manifest.name.replace('/', '%2F')}/1.2.3`;
+  for (const call of [...served.calls, ...late.calls, ...flaky.calls]) {
+    assert.equal(call.split(' ').find((arg) => arg.startsWith('https://')), url, `a try reads another URL: curl ${call}`);
+    const seconds = Number(/(?:^| )(?:--max-time|-m) +(\d+)(?: |$)/.exec(call)?.[1]);
+    assert.ok(seconds >= 1 && seconds <= 10, `a try is not limited to 10 seconds or less: curl ${call}`);
+  }
+});
+
+test('the npm wait gives up after 40 tries 15 seconds apart', () => {
+  // About 10 minutes, twice the lag npm has shown. The annotation names the version and the
+  // section of the runbook that recovers it.
+  const missing = runNpmWait([NOT_FOUND]);
+  assert.notEqual(missing.status, 0, 'a version npm never serves passes');
+  assert.equal(missing.calls.length, 40, 'the wait is not 40 tries');
+  assert.deepEqual(missing.sleeps, Array<string>(40).fill('15'), 'the tries are not 15 seconds apart');
+  const section = /^::error::.*@1\.2\.3\b.*"([^"]+)" in docs\/RELEASING\.md/m.exec(missing.stdout)?.[1];
+  assert.ok(section, `no ::error:: names the version and a section of docs/RELEASING.md: ${missing.output}`);
+  assert.ok(read('docs/RELEASING.md').split('\n').includes(`## ${section}`), `docs/RELEASING.md has no section "${section}"`);
+});
+
+test('the npm wait passes nothing the registry would reject', () => {
+  // The registry needs a 200 whose mcpName is the server's name. A version with another mcpName
+  // never passes, however long npm serves it.
+  const manifest = publishedManifest();
+  const foreign = runNpmWait([{ status: 200, body: { ...manifest, mcpName: 'sh.tibia/another' } }]);
+  assert.notEqual(foreign.status, 0, 'a manifest with another mcpName passes');
+  assert.match(foreign.stdout, /^::error::/m, `the wait stops with no ::error::: ${foreign.output}`);
+  // Each of these is only another try, so the wait passes on the try after it.
+  const rejected: Array<[string, NpmResponse]> = [
+    ['a manifest for another version', { status: 200, body: { ...manifest, version: '1.2.4' } }],
+    ['a status other than 200', { status: 203, body: manifest }],
+    ['a body that is not a manifest', { status: 200, body: 'version not found: 1.2.3' }],
+  ];
+  for (const [what, response] of rejected) {
+    const run = runNpmWait([response, { status: 200, body: manifest }]);
+    assert.equal(run.status, 0, run.output);
+    assert.equal(run.calls.length, 2, `${what} passes`);
   }
 });
 

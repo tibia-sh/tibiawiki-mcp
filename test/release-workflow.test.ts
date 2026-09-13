@@ -1,7 +1,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readdirSync, readFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { PACKAGE_VERSION, tempDirs } from './harness.ts';
 
 /**
  * The release workflow cannot run inside the suite, and every property pinned here
@@ -27,19 +30,37 @@ const workflowCode = (): string =>
     .filter((line) => line !== '')
     .join('\n');
 
+/** The indentation of a block's shallowest lines, where its own keys sit. */
+const depthOf = (yaml: string): number | undefined => {
+  const indents = yaml.split('\n').filter((line) => line.trim() !== '').map((line) => line.search(/\S/));
+  return indents.length === 0 ? undefined : Math.min(...indents);
+};
+
 /**
  * The lines nested under `key:` where it is a direct child of `yaml`, a key at the block's
  * shallowest indentation, or '' when there is none. A deeper key of the same name, such as
  * a job's own `concurrency:`, does not count.
  */
 const under = (yaml: string, key: string): string => {
-  const indents = yaml.split('\n').filter((line) => line.trim() !== '').map((line) => line.search(/\S/));
-  if (indents.length === 0) return '';
-  const depth = Math.min(...indents);
+  const depth = depthOf(yaml);
+  if (depth === undefined) return '';
   return new RegExp(`^ {${depth}}${key}:\\n((?: {${depth + 1},}.*(?:\\n|$))*)`, 'm').exec(yaml)?.[1] ?? '';
 };
 
+/**
+ * What follows `key:` where it is a direct child of `yaml`, as `under` finds it: the value
+ * without the quotes YAML allows around it, '' when a nested block follows instead, or
+ * undefined when there is no such key.
+ */
+const scalar = (yaml: string, key: string): string | undefined => {
+  const depth = depthOf(yaml);
+  if (depth === undefined) return undefined;
+  return new RegExp(`^ {${depth}}${key}: *(.*)$`, 'm').exec(yaml)?.[1]?.replace(/^(['"])(.*)\1$/, '$2');
+};
+
 const releaseJob = (): string => under(under(workflowCode(), 'jobs'), 'release');
+
+const registryJob = (): string => under(under(workflowCode(), 'jobs'), 'registry');
 
 /**
  * The release job's own permissions block. It replaces the workflow-level block instead
@@ -47,12 +68,50 @@ const releaseJob = (): string => under(under(workflowCode(), 'jobs'), 'release')
  */
 const releaseJobPermissions = (): string => under(releaseJob(), 'permissions');
 
-/** The release job's steps, one string per list item. */
-const releaseJobSteps = (): string[] => {
-  const steps = under(releaseJob(), 'steps');
+/** A job's steps, one string per list item. */
+const jobSteps = (job: string): string[] => {
+  const steps = under(job, 'steps');
   const marker = /^ *- /.exec(steps)?.[0];
   return marker ? steps.split(new RegExp(`^(?=${marker})`, 'm')) : [];
 };
+
+/** The release job's steps, one string per list item. */
+const releaseJobSteps = (): string[] => jobSteps(releaseJob());
+
+/** The registry job's steps, one string per list item. */
+const registryJobSteps = (): string[] => jobSteps(registryJob());
+
+const isCheckout = (step: string): boolean => /^ *(?:- +)?uses: *actions\/checkout@/m.test(step);
+
+/** A step with its list marker turned into spaces, so its first key sits at the depth of the others. */
+const stepBody = (step: string): string =>
+  step.replace(/^( *)(- +)/, (_, indent: string, marker: string) => indent + ' '.repeat(marker.length));
+
+/**
+ * The script a step's `run:` hands to bash: the value itself, or the lines of a `run: |`
+ * block without the block's indentation. Undefined for a step that runs no script. It reads
+ * the step as `workflowCode` leaves it, so comment lines inside a block are already gone.
+ */
+const stepScript = (step: string): string | undefined => {
+  const body = stepBody(step);
+  const depth = depthOf(body);
+  if (depth === undefined) return undefined;
+  const run = new RegExp(`^ {${depth}}run: *(.*)\\n?((?: {${depth + 1},}.*(?:\\n|$))*)`, 'm').exec(body);
+  if (!run) return undefined;
+  if (!/^\|[-+]?$/.test(run[1]!)) return run[1]!;
+  const lines = run[2]!.split('\n').filter((line) => line.trim() !== '');
+  const indent = Math.min(...lines.map((line) => line.search(/\S/)));
+  return lines.map((line) => line.slice(indent)).join('\n');
+};
+
+/**
+ * Runs a step's script the way a runner runs a `run:` step that sets no `shell:`, with
+ * `bash -e`, and with nothing in its environment but PATH and `env`.
+ */
+const bash = (script: string, env: Record<string, string>, cwd: string) =>
+  spawnSync('bash', ['-e', '-c', script], { cwd, env: { PATH: process.env['PATH'] ?? '', ...env }, encoding: 'utf8' });
+
+const scratch = tempDirs('twmcp-release-workflow-');
 
 /** The steps that follow the release-please step in the release job. */
 const stepsAfterReleasePlease = (): string[] => {
@@ -222,7 +281,7 @@ test('the release job checks out the commit release-please tagged', () => {
   // Without a ref, checkout takes the commit that triggered the run, and that run can be a
   // later push creating the release for an earlier merge. The tests and the publish would
   // then use code the tag does not point at, under a version npm never lets be reused.
-  const checkouts = releaseJobSteps().filter((step) => /^ *(?:- +)?uses: *actions\/checkout@/m.test(step));
+  const checkouts = releaseJobSteps().filter(isCheckout);
   assert.ok(checkouts.length > 0, 'the release job never checks out the code it publishes');
   assert.equal(
     checkouts.length,
@@ -334,4 +393,196 @@ test('a release bumps the package version the plugin runs', () => {
   const versions = spec.match(/\d+\.\d+\.\d+(?:-[\w.]+)?(?:\+[-\w.]+)?/g) ?? [];
   assert.deepEqual(versions, [version], `.mcp.json ${pin} must hold one version, the pinned ${version}`);
   assert.equal(spec, `tibiawiki-mcp@npm:${name}@${version}`, `.mcp.json ${pin} is not the pinned package`);
+});
+
+/** The condition the registry job runs on. */
+const REGISTRY_GATE = "${{ needs.release.outputs.released == 'true' || github.event_name == 'workflow_dispatch' }}";
+
+test('the MCP registry publish is a job of its own, run once npm accepted the release', () => {
+  // `released` is 'true' or empty, and a red release job skips this one. A dispatch releases
+  // nothing, so without the second condition the retry it exists for would be skipped too.
+  const registry = registryJob();
+  assert.notEqual(registry, '', 'the workflow has no registry job');
+  assert.equal(scalar(registry, 'needs'), 'release');
+  assert.equal(scalar(registry, 'if'), REGISTRY_GATE);
+  assert.doesNotMatch(releaseJob(), /mcp-publisher/, 'the release job runs mcp-publisher');
+});
+
+test('only the registry job names the environment that holds the registry key', () => {
+  // A job gets an environment's secrets only by naming it, and naming one adds an environment
+  // claim to that job's OIDC token. npm's trusted publisher is registered with no environment,
+  // so the claim on the release job would break npm publish.
+  assert.equal(scalar(registryJob(), 'environment'), 'mcp-registry');
+  assert.equal(scalar(releaseJob(), 'environment'), undefined, 'the release job names an environment');
+});
+
+test('the registry job can only read the repository', () => {
+  // The registry authenticates the job through DNS, so it needs no OIDC token, and nothing it
+  // runs has anything to write.
+  const permissions = under(registryJob(), 'permissions')
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line !== '');
+  assert.deepEqual(permissions, ['contents: read']);
+});
+
+test('the registry job publishes the tag its run released, or the tag a dispatch names', () => {
+  // A dispatch releases nothing, so its release job has no tag to hand over.
+  assert.equal(
+    scalar(under(registryJob(), 'env'), 'TAG'),
+    "${{ github.event_name == 'workflow_dispatch' && inputs.tag || needs.release.outputs.tag }}",
+  );
+});
+
+test('the registry job checks the tag before it checks anything out', () => {
+  // A dispatch input is free text. Checked first, it can only be a release tag by the time
+  // anything is checked out.
+  const steps = registryJobSteps();
+  const check = steps.findIndex((step) => stepScript(step)?.includes('^v[0-9]+\\.[0-9]+\\.[0-9]+$'));
+  assert.notEqual(check, -1, 'no step checks the tag against ^v[0-9]+\\.[0-9]+\\.[0-9]+$');
+  const checkout = steps.findIndex(isCheckout);
+  assert.notEqual(checkout, -1, 'the registry job checks nothing out');
+  assert.ok(check < checkout, 'the tag is checked after the checkout');
+  const script = stepScript(steps[check]!)!;
+  for (const tag of ['v0.3.0', 'v10.20.300']) {
+    assert.equal(bash(script, { TAG: tag }, scratch()).status, 0, `${tag} is rejected`);
+  }
+  for (const tag of ['', '0.3.0', 'v0.3', 'v0.3.0.1', 'v0.3.0-rc.1', 'v0.3.0\n', 'refs/tags/v0.3.0', 'v0.3.0; true']) {
+    assert.notEqual(bash(script, { TAG: tag }, scratch()).status, 0, `${JSON.stringify(tag)} is accepted`);
+  }
+});
+
+test('the registry job checks out the tag it publishes', () => {
+  // Without a ref, a dispatch checks out the tip of main instead. Fully qualified, the ref
+  // cannot resolve to a branch that shares the tag's name.
+  const checkouts = registryJobSteps().filter(isCheckout);
+  assert.equal(checkouts.length, 1, 'expected exactly one checkout in the registry job');
+  assert.equal(
+    registryJob().split('actions/checkout@').length - 1,
+    1,
+    'a checkout step is written in a form this test cannot read, such as a flow mapping',
+  );
+  const inputs = under(stepBody(checkouts[0]!), 'with');
+  assert.equal(scalar(inputs, 'ref'), 'refs/tags/${{ env.TAG }}');
+  assert.equal(scalar(inputs, 'persist-credentials'), 'false');
+});
+
+test("the registry job publishes only a server.json that carries the tag's version", () => {
+  // mcp-publisher registers whatever version server.json names, and the registry never takes a
+  // version twice. A release commit with a missed bump would register the wrong one for good.
+  const steps = registryJobSteps();
+  const check = steps.findIndex((step) => /\bserver\.json\b/.test(stepScript(step) ?? ''));
+  assert.notEqual(check, -1, 'no step reads server.json');
+  const checkout = steps.findIndex(isCheckout);
+  assert.ok(checkout !== -1 && checkout < check, 'server.json is read before the tag is checked out');
+  const publisher = steps.findIndex((step) => /\bmcp-publisher +(?:login|publish)\b/.test(stepScript(step) ?? ''));
+  assert.ok(publisher !== -1 && check < publisher, 'server.json is checked after mcp-publisher runs');
+  const script = stepScript(steps[check]!)!;
+  const status = (server: unknown): number | null => {
+    const dir = scratch();
+    writeFileSync(join(dir, 'server.json'), JSON.stringify(server));
+    return bash(script, { TAG: 'v1.2.3' }, dir).status;
+  };
+  const matching = { version: '1.2.3', packages: [{ version: '1.2.3' }] };
+  assert.equal(status(matching), 0, 'a server.json that matches the tag fails');
+  assert.notEqual(status({ ...matching, version: '1.2.4' }), 0, 'a wrong .version passes');
+  assert.notEqual(status({ ...matching, packages: [{ version: '1.2.4' }] }), 0, 'a wrong .packages[0].version passes');
+  assert.notEqual(status({ version: '1.2.3' }), 0, 'a server.json with no package passes');
+  // Command substitution drops trailing newlines, so a comparison in the shell passes these.
+  assert.notEqual(status({ ...matching, version: '1.2.3\n' }), 0, 'a .version with a trailing newline passes');
+  assert.notEqual(
+    status({ ...matching, packages: [{ version: '1.2.3\n' }] }),
+    0,
+    'a .packages[0].version with a trailing newline passes',
+  );
+  const current = bash(script, { TAG: `v${PACKAGE_VERSION}` }, root);
+  assert.equal(current.status, 0, `server.json fails for v${PACKAGE_VERSION}: ${current.stdout}${current.stderr}`);
+});
+
+test('mcp-publisher is an exact release, checked against a pinned sha256 before it is unpacked', () => {
+  // This job holds the registry key. A checksums file fetched from the same release at run time
+  // proves nothing the download does not, so the sha256 sits here as a literal.
+  const urls = workflowCode().match(/https?:\/\/[^\s"']+/g) ?? [];
+  for (const url of urls) assert.doesNotMatch(url, /latest/, `${url} is not an exact release`);
+  const release = /https:\/\/github\.com\/modelcontextprotocol\/registry\/releases\/download\/v\d+\.\d+\.\d+\//;
+  const lines = registryJob().split('\n');
+  const download = lines.findIndex(
+    (line) => /\bcurl\b/.test(line) && new RegExp(`${release.source}mcp-publisher_linux_amd64\\.tar\\.gz(?: |$)`).test(line),
+  );
+  assert.notEqual(download, -1, 'no curl downloads mcp-publisher_linux_amd64.tar.gz from an exact release');
+  assert.match(lines[download]!, /\bcurl +-fsSL\b/, 'the download is not curl -fsSL, which fails on an HTTP error');
+  const archive = / -o +(\S+)/.exec(lines[download]!)?.[1];
+  assert.ok(archive, 'the download names no output file');
+  const verify = lines.findIndex((line) => /\b[0-9a-f]{64}\b/.test(line) && line.includes(archive));
+  assert.notEqual(verify, -1, `no sha256 literal is paired with ${archive}`);
+  assert.match(
+    lines[verify]!,
+    /\bsha256sum +(?:-c|--check)(?: +-)?$/,
+    'the sha256 is not checked by sha256sum -c, or a mismatch is ignored',
+  );
+  const unpack = lines.findIndex((line) => /(?:^|[;&|]) *tar +/.test(line) && line.includes(archive));
+  assert.notEqual(unpack, -1, `nothing unpacks ${archive}`);
+  assert.match(lines[unpack]!, /\btar +(?:-?[a-zA-Z]*x[a-zA-Z]*|--extract)\b/, 'the tar command does not extract');
+  assert.match(lines[unpack]!, / mcp-publisher$/, 'the unpack takes more than mcp-publisher');
+  assert.ok(download < verify && verify < unpack, 'the archive is not verified between its download and its unpacking');
+  // The commands `mcp-publisher --help` lists at 1.8.1.
+  const runs = lines.flatMap((line, index) =>
+    /\bmcp-publisher +(?:init|login|logout|publish|status|validate)\b/.test(line) ? [index] : [],
+  );
+  assert.ok(runs.length > 0, 'nothing runs mcp-publisher');
+  for (const index of runs) {
+    assert.ok(index > unpack, `mcp-publisher runs before it is verified: ${lines[index]!.trim()}`);
+    // tar unpacks into the working directory. Any other path runs a binary nobody checked.
+    assert.match(lines[index]!, /(?:^|[\s;&|])\.\/mcp-publisher +[a-z]/, `not the verified binary: ${lines[index]!.trim()}`);
+  }
+});
+
+test("the registry key reaches only the login command, through its step's env", () => {
+  // Written into a run script, the key would be pasted into the shell as code. In a step's env
+  // it is a variable only that step's process sees.
+  const references = workflowCode().split('\n').filter((line) => /\bsecrets\b/.test(line));
+  assert.equal(references.length, 1, `expected one reference to a secret: ${references.join(' |')}`);
+  const steps = registryJobSteps().filter((step) => /\bsecrets\b/.test(step));
+  assert.equal(steps.length, 1, 'no registry job step references the secret');
+  const step = steps[0]!;
+  assert.match(
+    under(stepBody(step), 'env'),
+    /^ *MCP_PRIVATE_KEY: *\$\{\{ secrets\.MCP_PRIVATE_KEY \}\}$/m,
+    'the secret does not reach the step through its env',
+  );
+  assert.equal(
+    stepScript(step),
+    './mcp-publisher login dns --domain tibia.sh --private-key "$MCP_PRIVATE_KEY"',
+    'the step that holds the key runs something besides the login',
+  );
+});
+
+test('the registry job publishes after it logs in', () => {
+  // Without the publish step the job goes green and registers nothing.
+  const scripts = registryJobSteps().map((step) => stepScript(step) ?? '');
+  const login = scripts.findIndex((script) => /^\.\/mcp-publisher login\b/m.test(script));
+  const publish = scripts.filter((script) => /^\.\/mcp-publisher publish$/m.test(script));
+  assert.equal(publish.length, 1, 'expected exactly one step that runs ./mcp-publisher publish');
+  assert.ok(login !== -1 && login < scripts.indexOf(publish[0]!), 'the publish runs before the login');
+});
+
+test('every registry job step runs, and any failure stops the job', () => {
+  // A check skipped by its own `if:`, or a failure let through by `continue-on-error`, a shell
+  // without -e or `set +e`, lets the job publish past a check that did not hold. The checks above
+  // run each script under `bash -e` for the same reason.
+  const registry = registryJob();
+  assert.equal(scalar(registry, 'continue-on-error'), undefined, 'the registry job lets its own failure through');
+  assert.equal(scalar(registry, 'defaults'), undefined, 'the registry job sets defaults for its steps');
+  assert.equal(scalar(workflowCode(), 'defaults'), undefined, 'the workflow sets defaults for its steps');
+  for (const step of registryJobSteps()) {
+    for (const key of ['if', 'continue-on-error', 'shell']) {
+      assert.equal(scalar(stepBody(step), key), undefined, `${stepName(step)} sets ${key}`);
+    }
+    assert.doesNotMatch(stepScript(step) ?? '', /\bset +\+[a-z]*e|\bset +\+o +errexit\b/, `${stepName(step)} turns off -e`);
+  }
+});
+
+test('no step traces the commands it runs', () => {
+  // A trace prints each command with its variables expanded, and the login command carries the key.
+  assert.doesNotMatch(workflowCode(), /\bset +-[a-z]*x|\bxtrace\b|\bbash +-[a-z]*x/);
 });

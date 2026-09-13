@@ -78,3 +78,49 @@ jobs:
         run: |
           npm publish
           echo "released=true" >> "$GITHUB_OUTPUT"
+
+  # A job of its own, because a job gets an environment's secrets only by naming the
+  # environment, and naming one puts an environment claim in that job's OIDC token. npm's
+  # trusted publisher is registered with no environment, so the release job must not name one.
+  registry:
+    needs: release
+    # A dispatch releases nothing, so it runs this job on its own condition.
+    if: ${{ needs.release.outputs.released == 'true' || github.event_name == 'workflow_dispatch' }}
+    runs-on: ubuntu-latest
+    environment: mcp-registry
+    permissions:
+      contents: read
+    env:
+      TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || needs.release.outputs.tag }}
+    steps:
+      - name: Check the tag
+        run: |
+          if [[ ! "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::The tag to publish must look like v1.2.3."
+            exit 1
+          fi
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8  # v5.0.0
+        with:
+          ref: refs/tags/${{ env.TAG }}
+          persist-credentials: false
+      # Compared inside jq, because command substitution would drop a trailing newline.
+      - name: Check that server.json carries the tag's version
+        run: |
+          if ! jq -e --arg version "${TAG#v}" '.version == $version and .packages[0].version == $version' server.json > /dev/null; then
+            echo "::error::server.json must carry ${TAG#v} as both .version and .packages[0].version."
+            exit 1
+          fi
+      # The sha256 was taken from the release asset when the pin was set, and it matched
+      # registry_1.8.1_checksums.txt. A checksums file fetched from the same release at run time
+      # proves nothing the download does not. Moving the pin means a new URL and a new sha256.
+      - name: Install mcp-publisher 1.8.1
+        run: |
+          curl -fsSL -o mcp-publisher_linux_amd64.tar.gz https://github.com/modelcontextprotocol/registry/releases/download/v1.8.1/mcp-publisher_linux_amd64.tar.gz
+          echo "a06c9096dcb9727c13555b6be26c7effa707b01f06a4c561ba7a3635443cf2cc  mcp-publisher_linux_amd64.tar.gz" | sha256sum -c -
+          tar -xzf mcp-publisher_linux_amd64.tar.gz mcp-publisher
+      - name: Log in to the MCP registry
+        env:
+          MCP_PRIVATE_KEY: ${{ secrets.MCP_PRIVATE_KEY }}
+        run: ./mcp-publisher login dns --domain tibia.sh --private-key "$MCP_PRIVATE_KEY"
+      - name: Publish to the MCP registry
+        run: ./mcp-publisher publish

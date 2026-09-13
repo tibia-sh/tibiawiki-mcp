@@ -22,7 +22,8 @@
   },
   "files": [
     "dist",
-    "data/spell-areas.json"
+    "data/spell-areas.json",
+    "data/tibiawikisql-requirements.txt"
   ],
   "publishConfig": {
     "access": "public"
@@ -32,6 +33,7 @@
     "build": "tsc -p tsconfig.build.json",
     "test": "pnpm typecheck && pnpm build && node --test test/*.test.ts",
     "decode-spell-areas": "node scripts/decode-spell-areas.ts",
+    "lock-generator": "node scripts/lock-generator.ts",
     "smoke": "node scripts/smoke.mjs",
     "prepublishOnly": "pnpm test"
   },

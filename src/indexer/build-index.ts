@@ -1,13 +1,41 @@
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, renameSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync } from 'node:fs';
 import { randomBytes } from 'node:crypto';
-import { dirname, join } from 'node:path';
+import { tmpdir } from 'node:os';
+import { basename, dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { cacheDbPath, openDb } from '../db.ts';
 import { createWikiApi, type WikiApi } from './wiki-api.ts';
 import { enrich, eligibleScenes, formatStats, IMAGE_TYPES, type Enricher } from './enrich.ts';
 
-/** Pinned: the schema this server probes for is this generator's output. */
-const GENERATOR = 'tibiawikisql==9.0.0';
+/**
+ * Pinned: the schema this server probes for is this generator's output. The build never
+ * names it directly. `pnpm lock-generator` locks exactly this, and the build installs
+ * that lock.
+ */
+export const GENERATOR = 'tibiawikisql==9.0.0';
+
+/**
+ * The Pythons the generator environment may be created with. The lock is compiled for
+ * the floor, and `pnpm lock-generator` checks it installs on every minor version below
+ * the cap, so the two cannot drift apart. The cap is where the lock's wheels end:
+ * mwparserfromhell 0.7.2 ships nothing past cp313, and `--no-build` forbids building it
+ * from source. Unbounded, uv would pick or download a 3.14 the lock cannot install on.
+ *
+ * CPython is named because that check proves CPython wheels, and the locked
+ * mwparserfromhell ships CPython wheels only. Unnamed, uv could take a PyPy or GraalPy it
+ * finds first, which the lock does not install on.
+ */
+export const GENERATOR_PYTHON = 'cpython>=3.10,<3.14';
+
+/**
+ * The generator and every dependency, pinned and hashed, written by `pnpm lock-generator`.
+ * Resolved like SPELL_AREAS_PATH, so it names the same file from src/indexer/ and
+ * dist/indexer/, inside a checkout and inside an install.
+ */
+export const GENERATOR_LOCK_PATH = fileURLToPath(
+  new URL('../../data/tibiawikisql-requirements.txt', import.meta.url),
+);
 
 /**
  * Floor for stored areas as a share of eligible scenes. Measured at 98.8% over the
@@ -57,10 +85,63 @@ const defaultRunner: Runner = (cmd, args) => {
 };
 
 /**
+ * Requirements in a lock `uv pip compile` wrote: each starts a line, with its `--hash`
+ * options and `# via` notes indented beneath it. Nothing here checks a hash, because
+ * `uv pip install --require-hashes` refuses an unhashed or mismatched entry itself.
+ */
+function countRequirements(lock: string): number {
+  return lock.split('\n').filter((line) => /^[^\s#]/.test(line)).length;
+}
+
+/**
+ * Runs the generator from a throwaway environment and has it write the index to `output`.
+ *
+ * The environment is a fresh directory under the OS temp directory, never beside the
+ * target: the data repo builds into its checkout root. It is removed on every exit path,
+ * as soon as the generator returns.
+ */
+function generate(run: Runner, output: string): void {
+  // Read before uv runs, so a missing lock fails before uv creates anything.
+  const requirements = countRequirements(readFileSync(GENERATOR_LOCK_PATH, 'utf8'));
+  const env = mkdtempSync(join(tmpdir(), 'tibiawiki-mcp-generator-'));
+  // A failed `uv venv` is an install failure too. The generator never runs from an
+  // environment the lock did not fully install.
+  const install = (command: string, args: string[]): void => {
+    const { status, stderr } = run('uv', args);
+    if (status !== 0) {
+      throw new Error(
+        `Could not install the generator environment (\`${command}\` exit ${status}). ` +
+          `Is \`uv\` installed? See https://docs.astral.sh/uv/\n${stderr}`,
+      );
+    }
+  };
+  try {
+    // `--python <env>` hands uv the environment itself, so no platform's bin/ or Scripts\
+    // layout is spelled out here.
+    install('uv venv', ['venv', '--python', GENERATOR_PYTHON, env]);
+    install('uv pip install', ['pip', 'install', '--python', env, '--require-hashes', '--no-build', '-r', GENERATOR_LOCK_PATH]);
+    process.stderr.write(
+      `Generator environment installed from ${basename(GENERATOR_LOCK_PATH)} ` +
+        `with ${requirements} hashed requirements.\n`,
+    );
+
+    const { status, stderr } = run('uv', [
+      'run', '--no-project', '--python', env, 'tibiawikisql', 'generate', '--skip-images', '-o', output,
+    ]);
+    if (status !== 0) throw new Error(`Index generation failed (\`uv run\` exit ${status}).\n${stderr}`);
+  } finally {
+    rmSync(env, { recursive: true, force: true });
+  }
+}
+
+/**
  * Generates the local index and installs it atomically.
  *
- * Only the `uvx` path is implemented. A Docker image exists but its entrypoint was
- * never verified, and a guessed `docker run` line would be a placeholder in disguise.
+ * The generator runs through three uv commands. `uv venv` creates a throwaway environment,
+ * `uv pip install --require-hashes` installs it from the shipped lock alone, and `uv run`
+ * runs tibiawikisql from it. `uvx` is not used, because it cannot check a hash. A Docker
+ * image exists but its entrypoint was never verified, and a guessed `docker run` line
+ * would be a placeholder in disguise.
  */
 export async function buildIndex(
   opts: {
@@ -83,15 +164,11 @@ export async function buildIndex(
   const temp = join(dirname(target), `.tibiawiki.db.${process.pid}.${randomBytes(4).toString('hex')}.tmp`);
   const discard = () => rmSync(temp, { force: true });
 
-  const args = ['--from', GENERATOR, 'tibiawikisql', 'generate', '--skip-images', '-o', temp];
-  const { status, stderr } = run('uvx', args);
-
-  if (status !== 0) {
+  try {
+    generate(run, temp);
+  } catch (error) {
     discard();
-    throw new Error(
-      `Index generation failed (exit ${status}). Is \`uv\` installed? ` +
-        `See https://docs.astral.sh/uv/\n${stderr}`,
-    );
+    throw error;
   }
   if (!existsSync(temp)) {
     discard();

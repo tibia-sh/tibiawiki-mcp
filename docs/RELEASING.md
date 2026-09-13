@@ -1,6 +1,6 @@
 # Releasing
 
-`@tibia.sh/tibiawiki-mcp` is released by [release-please](https://github.com/googleapis/release-please) and published to npm by `.github/workflows/release.yml`. Publishing to the MCP registry is not set up yet.
+`@tibia.sh/tibiawiki-mcp` is released by [release-please](https://github.com/googleapis/release-please) and published by `.github/workflows/release.yml`, first to npm and then to the [MCP registry](https://registry.modelcontextprotocol.io) as `sh.tibia/tibiawiki-mcp`. The registry publish needs [a one-time setup](#setting-up-the-mcp-registry-publish).
 
 ## A normal release
 
@@ -16,8 +16,8 @@
    gh api -X POST repos/tibia-sh/tibiawiki-mcp/actions/runs/RUN_ID/approve
    ```
 
-3. Merging the release PR publishes. The merge's push run creates the tag `vX.Y.Z` and the GitHub release at the merge commit, and relabels the PR `autorelease: tagged`. Then it checks out that commit, runs `pnpm install --frozen-lockfile` and `pnpm test`, and runs `npm publish` through npm trusted publishing. npm adds provenance for that commit when it confirms that the repository and the package are public.
-4. The release is done when that run is green, its `npm publish` step ran, and npm lists the version.
+3. Merging the release PR publishes. The merge's push run creates the tag `vX.Y.Z` and the GitHub release at the merge commit, and relabels the PR `autorelease: tagged`. Then it checks out that commit, runs `pnpm install --frozen-lockfile` and `pnpm test`, and runs `npm publish` through npm trusted publishing. npm adds provenance for that commit when it confirms that the repository and the package are public. Once npm accepts the publish, the run's `registry` job checks out the tag, checks that `server.json` carries its version, and publishes `server.json` to the MCP registry.
+4. The release is done when that run is green, its `npm publish` and `Publish to the MCP registry` steps ran, and both npm and the MCP registry list the version.
 
 Only the run triggered at the merge commit publishes, because npm provenance names the commit that triggered the run. A run triggered at any other commit that creates the release fails red instead, at the step `Release tagged at another commit, not published`.
 
@@ -28,6 +28,7 @@ Only the run triggered at the merge commit publishes, because npm provenance nam
 | Release runs | `gh run list --workflow release.yml` |
 | Earlier attempts of a run | `gh run view <run-id> --attempt <n>`, or the **Latest** menu on the run page |
 | Versions on npm | `npm view @tibia.sh/tibiawiki-mcp versions --json` |
+| Versions in the MCP registry | `curl -sS https://registry.modelcontextprotocol.io/v0.1/servers/sh.tibia%2Ftibiawiki-mcp/versions` |
 | A GitHub release and its commit | `gh release view vX.Y.Z --json targetCommitish,isImmutable` |
 | A release PR's labels and merge commit | `gh pr view <pr> --json labels,mergeCommit` |
 
@@ -40,6 +41,8 @@ Read the whole version list. `npm view @tibia.sh/tibiawiki-mcp@X.Y.Z` exits 1 bo
 Re-running a release run that failed in a later step, after release-please created the GitHub release, turns the run green and publishes nothing. The failed attempt already created the release and relabelled the PR `autorelease: tagged`, so the re-run finds no release PR left to release. `release_created` stays unset, and every step after release-please is skipped. The red attempt is then only behind the **Latest** menu.
 
 A green release run does not prove a publish. Check npm. The one re-run that publishes is [the recovery below](#re-run-the-merge-commits-run), after the release, the tag and the label are reset.
+
+The same goes for a push run whose `registry` job failed. Re-running the whole run does not retry the registry publish. Its release job does not release that version again, so `released` stays empty and the `registry` job is skipped. Publish to the registry through [a dispatch](#a-version-the-mcp-registry-does-not-have) instead.
 
 ## A release npm does not have
 
@@ -115,7 +118,7 @@ A re-run keeps the run's `GITHUB_SHA`. So when release-please creates the releas
    gh run rerun "$RUN"
    ```
 
-6. Check the result. The run is green with its `npm publish` step run, `gh release view "v$VERSION" --json targetCommitish` names `$SHA`, and the PR is back to `autorelease: tagged`. Once npm lists the version, run `pnpm smoke "@tibia.sh/tibiawiki-mcp@$VERSION"` in an installed checkout.
+6. Check the result. The run is green with its `npm publish` and `Publish to the MCP registry` steps run, `gh release view "v$VERSION" --json targetCommitish` names `$SHA`, and the PR is back to `autorelease: tagged`. Once npm lists the version, run `pnpm smoke "@tibia.sh/tibiawiki-mcp@$VERSION"` in an installed checkout.
 
 Any other release run that starts between steps 3 and 5 undoes this. After step 4 it creates the release itself, in a run triggered at the wrong commit, and you are back at the start. Before step 4 it opens or rewrites the release PR for a version past `$VERSION`, with the whole history as its notes. Left open, that PR can be merged while it shows the wrong version, and a later run quietly rewrites it into the next real release PR. So once the re-run has finished, find the open release PR whose title shows a version past `$VERSION`, and close it:
 
@@ -194,6 +197,46 @@ A publish from your machine carries no provenance. Never add an npm token to CI 
    gh pr edit "$PR" --remove-label "autorelease: pending" --add-label "autorelease: tagged"
    ```
 
+8. A publish by hand runs no `registry` job. Publish the version to the MCP registry as in [A version the MCP registry does not have](#a-version-the-mcp-registry-does-not-have).
+
+## A version the MCP registry does not have
+
+**Not yet exercised.** It follows the source of the registry and `mcp-publisher` at `v1.8.1`, the version `release.yml` pins.
+
+npm lists the version, and the MCP registry does not. Set `VERSION` and check both:
+
+```bash
+VERSION=X.Y.Z
+npm view @tibia.sh/tibiawiki-mcp versions --json
+curl -sS "https://registry.modelcontextprotocol.io/v0.1/servers/sh.tibia%2Ftibiawiki-mcp/versions/$VERSION"
+```
+
+The registry lacks the version when `curl` prints `"detail":"Server not found"`. When it has the version, `curl` prints its entry, with `"version":"X.Y.Z"` under `server`. For a version npm does not list, start at [A release npm does not have](#a-release-npm-does-not-have).
+
+| How it happened | What you see |
+|---|---|
+| The key is missing from the `mcp-registry` environment, or the TXT record on `tibia.sh` is missing or holds another key. | The release run is red at `Log in to the MCP registry`, with `private key (hex) is required`, `no MCP public key found in DNS TXT records` or `signature verification failed`. When the key is set, the step prints the TXT record it expects. |
+| npm had not served the new version to the registry yet. | The release run is red at `Publish to the MCP registry`, with `NPM package '@tibia.sh/tibiawiki-mcp' exists, but version 'X.Y.Z' was not found`. |
+| The version reached npm through [Publish by hand](#publish-by-hand). | No `registry` job ran for the version. |
+
+Dispatch the release workflow on `main` with the version's tag. It waits its turn behind any release run in progress.
+
+```bash
+gh workflow run release.yml --ref main -f tag="v$VERSION"
+```
+
+`gh` prints the URL of the run it started. Follow the run there, or with `gh run watch <run-id>`, where the run ID is the number at the end of the URL. If `gh` prints no URL, `gh run list --workflow release.yml --event workflow_dispatch` lists dispatched runs, newest first. Yours is the one created when you dispatched.
+
+A dispatched run's release job skips release-please, so it releases nothing and publishes nothing to npm. Only its `registry` job acts. It checks out the tag, checks that `server.json` carries the version, and publishes it.
+
+Dispatch on `main` only. The key is a secret of the `mcp-registry` environment, which admits runs on `main` alone. The `registry` job of a run dispatched on any other branch or tag fails before its first step. The tag reaches the job as the input, never as the ref.
+
+If the registry has the version already, `Publish to the MCP registry` fails with `cannot publish duplicate version`. That is expected, and nothing changed. The registry never takes a version twice. Registering an older version after a newer one is fine. The registry keeps the higher version as its latest.
+
+The recovery is done when the run is green and the `curl` above prints the version.
+
+If `Check that server.json carries the tag's version` fails, or the registry rejects the tag's `server.json`, the workflow cannot register that version. Leave it out of the registry, and fix `server.json` in the next release.
+
 ## A bad release
 
 **Not yet exercised.** It follows the source of release-please 17.6.0.
@@ -223,6 +266,58 @@ npm deprecate "@tibia.sh/tibiawiki-mcp@$VERSION" "<what is wrong>. Use the next 
    ```
 
 Until the patch is on npm, `.mcp.json` on `main` pins the bad version. When npm does not have that version, the plugin on `main` cannot start.
+
+## Setting up the MCP registry publish
+
+**Not yet done.** Until it is, the `registry` job fails at `Log in to the MCP registry`, and every release lands in [A version the MCP registry does not have](#a-version-the-mcp-registry-does-not-have).
+
+The registry lets only the owner of `tibia.sh` publish `sh.tibia/tibiawiki-mcp`. The `registry` job proves ownership with an Ed25519 key. Its public key sits in a TXT record on `tibia.sh`, and its private key is the `MCP_PRIVATE_KEY` secret of the `mcp-registry` environment. You set this up once.
+
+1. Check that the `mcp-registry` environment exists and admits runs on `main` only. The first command must print `true`, and the second `branch main` and nothing else:
+
+   ```bash
+   gh api repos/tibia-sh/tibiawiki-mcp/environments/mcp-registry --jq .deployment_branch_policy.custom_branch_policies
+   gh api repos/tibia-sh/tibiawiki-mcp/environments/mcp-registry/deployment-branch-policies --jq '.branch_policies[] | "\(.type) \(.name)"'
+   ```
+
+2. Install OpenSSL 3. The `openssl` macOS ships is LibreSSL, which fails with `Algorithm Ed25519 not found`.
+
+   ```bash
+   brew install openssl@3
+   OPENSSL="$(brew --prefix openssl@3)/bin/openssl"
+   ```
+
+3. Generate the key, in a directory outside any working tree:
+
+   ```bash
+   "$OPENSSL" genpkey -algorithm Ed25519 -out key.pem
+   ```
+
+4. Print the TXT record:
+
+   ```bash
+   echo "v=MCPv1; k=ed25519; p=$("$OPENSSL" pkey -in key.pem -pubout -outform DER | tail -c 32 | base64)"
+   ```
+
+   Add it to the DNS zone of `tibia.sh` as a TXT record on `tibia.sh` itself, next to the SPF record. The registry does not look under a subdomain such as `_mcp-auth.tibia.sh`.
+
+5. Check that the record resolves. The output must hold the line from step 4 next to the SPF record. The zone's TXT records have a 5 minute TTL, so a resolver can take that long to show it.
+
+   ```bash
+   dig +short TXT tibia.sh
+   ```
+
+6. Store the private key as the secret, in the form `mcp-publisher` takes: the hex of the key's 32-byte seed. The commands pipe it into `gh`, so it is never shown, pasted or written to your shell history. They set nothing unless the hex is 64 characters long, and `gh` confirms with `Set Actions secret MCP_PRIVATE_KEY`.
+
+   ```bash
+   PRIVATE_KEY="$("$OPENSSL" pkey -in key.pem -noout -text | grep -A3 'priv:' | tail -n +2 | tr -d ' :\n')"
+   [ "${#PRIVATE_KEY}" -eq 64 ] && printf '%s' "$PRIVATE_KEY" | gh secret set MCP_PRIVATE_KEY --env mcp-registry --repo tibia-sh/tibiawiki-mcp
+   unset PRIVATE_KEY
+   ```
+
+7. Delete `key.pem`, or keep it where only you can read it, such as a password manager. GitHub never shows the secret again. Without `key.pem`, replacing the secret means a new key, and a new TXT record in place of the old one.
+
+8. Publish the current release to the registry, as in [A version the MCP registry does not have](#a-version-the-mcp-registry-does-not-have). If `Log in to the MCP registry` fails with `signature verification failed`, compare the TXT record that step prints with the output of step 5. Once the run is green, replace **Not yet done.** above with the date.
 
 ## Known future break
 

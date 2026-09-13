@@ -26,7 +26,8 @@
  *     at an empty directory.
  *   - The packaged-index run checks the answer's indexGeneratedAt against the
  *     generate_time of the index in the installed @tibia.sh/tibiawiki-data, read through
- *     that package's DB_PATH. An answer from any other index fails.
+ *     that package's DB_PATH. An answer whose indexGeneratedAt differs from that
+ *     generate_time fails.
  *   - It CALLS a tool, not just tools/list. The unavailable-index server still
  *     advertises the full tool surface, so listing alone cannot establish the error
  *     behaviour. test/unavailable.test.ts calls tools for exactly this reason.
@@ -39,7 +40,11 @@
  *     Case is load-bearing: npm reads NPM_CONFIG_* too, and those are the operator's own
  *     registry, proxy and CA settings, which a real consumer would have as well.
  *   - Every scratch path either run needs lives inside the one scratch directory, which
- *     is removed on every exit path: pass, fail, or interrupted.
+ *     is removed on pass, on fail, and after a Ctrl-C. A Ctrl-C signals the whole process
+ *     group, which kills the running step, so the check fails and cleans up like any
+ *     other failure. A signal sent to this process alone interrupts nothing: every step
+ *     blocks in execFileSync, so the handlers below never run, and the check carries on
+ *     to its normal end.
  */
 import { execFileSync } from 'node:child_process';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
@@ -64,8 +69,10 @@ const dir = mkdtempSync(join(tmpdir(), 'twmcp-smoke-'));
 let failed = false;
 
 const clean = () => rmSync(dir, { recursive: true, force: true });
-// The try/finally below covers pass and fail. An interrupted run needs these as well, or
-// the scratch install is left behind.
+// Without these, SIGINT or SIGTERM would end this process on the spot and leave the
+// scratch install behind. With them the signal waits for the step running in
+// execFileSync, so neither body ever runs. A Ctrl-C has killed that step as well, so it
+// fails, and the finally block below removes the directory.
 for (const [signal, code] of Object.entries({ SIGINT: 130, SIGTERM: 143 })) {
   process.on(signal, () => {
     clean();
@@ -184,7 +191,7 @@ await withServer(packagedEnv, async (client) => {
   failed = true;
   process.stderr.write(`\nFAIL  ${target}\n${detail(error)}\n`);
 } finally {
-  // Cleanup on pass or fail. The signal handlers above cover an interrupted run.
+  // Cleanup on pass or fail. A Ctrl-C kills the running step, so it ends up here too.
   clean();
 }
 process.exit(failed ? 1 : 0);

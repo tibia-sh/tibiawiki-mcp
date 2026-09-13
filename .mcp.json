@@ -1,8 +1,15 @@
 {
   "mcpServers": {
     "tibiawiki": {
-      "command": "node",
-      "args": ["${CLAUDE_PLUGIN_ROOT}/dist/index.js", "serve"]
+      "command": "npx",
+      "args": [
+        "-y",
+        "tibiawiki-mcp@npm:@tibia.sh/tibiawiki-mcp@0.2.0",
+        "serve"
+      ],
+      "env": {
+        "npm_config_fetch_retries": "0"
+      }
     }
   }
 }

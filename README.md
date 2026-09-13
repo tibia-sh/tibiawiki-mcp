@@ -50,22 +50,18 @@ claude mcp add --transport stdio tibiawiki -- npx -y @tibia.sh/tibiawiki-mcp
 produce wrong answers). The plugin pieces never reach the npm tarball, because
 `package.json` has `files: ["dist", "data/spell-areas.json"]`.
 
-> **Marketplace install is not supported yet.** `.mcp.json` points at
-> `${CLAUDE_PLUGIN_ROOT}/dist/index.js`, `dist/` is deliberately not committed, and
-> Claude Code does not run a build or a `pnpm` install for a plugin it fetches. A
-> marketplace or bare `git clone` install therefore starts with no server. Use the
-> local checkout below, which builds first. Shipping `dist/` or publishing a
-> prebuilt bundle would fix this and is not done here.
-
 ```bash
 git clone https://github.com/tibia-sh/tibiawiki-mcp
-cd tibiawiki-mcp && pnpm install && pnpm build   # dist/ is gitignored, so build once
+cd tibiawiki-mcp
 claude --plugin-dir .
 ```
 
-The build step is not optional: `dist/` is deliberately not committed, and
-`.mcp.json` points at `${CLAUDE_PLUGIN_ROOT}/dist/index.js`. A freshly cloned plugin
-without it will fail to start.
+The plugin runs the published package through `npx`, at the exact version it was released
+with. A fresh clone needs no `pnpm install` and no build. The first start downloads the
+package, and later starts work offline.
+
+In a checkout, the plugin runs the published package at the pinned version, not your
+local source.
 
 ## What the skill adds
 
@@ -119,6 +115,11 @@ The server reads the first index it finds:
 
 A built index keeps winning over every later data release. If the server cannot read
 it, you get an error, not a fallback. Delete it to go back to the packaged one.
+
+`tibiawiki-mcp index-digest <path>` prints a SHA-256 over the rows and columns the tools
+read from an index. Two indexes with the same digest hold the same rows, in any stored
+order. Build stamps such as `indexGeneratedAt` are left out. The data repo's drift job
+will use it to tell new wiki content from a rebuild of the same content.
 
 ### Checking for upstream drift
 

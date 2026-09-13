@@ -117,6 +117,23 @@ const releaseBumps = (path: string, jsonpath: string): boolean =>
       typeof file !== 'string' && file.type === 'json' && file.path === path && file.jsonpath === jsonpath,
   );
 
+/**
+ * The value `jsonpath` selects in the JSON file at `path`, or undefined when it selects
+ * nothing. Each step follows an own property, as jsonpath-plus does for a `.key` or an
+ * `[index]`, the only steps walked here. Any other syntax fails the test rather than
+ * resolve differently from release-please.
+ */
+const valueAt = (path: string, jsonpath: string): unknown => {
+  assert.match(jsonpath, /^\$(?:\.\w+|\[\d+\])+$/, `${jsonpath} is not a path of .key and [index] steps`);
+  let value: unknown = JSON.parse(read(path));
+  for (const [, key, index] of jsonpath.matchAll(/\.(\w+)|\[(\d+)\]/g)) {
+    const step = key ?? index!;
+    if (typeof value !== 'object' || value === null || !Object.hasOwn(value, step)) return undefined;
+    value = (value as Record<string, unknown>)[step];
+  }
+  return value;
+};
+
 test('the release job can mint the OIDC token npm publish authenticates with', () => {
   // Without it npm publish fails ENEEDAUTH.
   assert.match(releaseJobPermissions(), /^ *id-token: *write$/m, 'the release job has no id-token: write');
@@ -300,4 +317,21 @@ test('a release bumps the plugin manifest version', () => {
     releaseBumps('.claude-plugin/plugin.json', '$.version'),
     '.claude-plugin/plugin.json $.version is not bumped',
   );
+});
+
+test('a release bumps the package version the plugin runs', () => {
+  // .mcp.json starts the server through npx as alias@npm:name@version. A pin left behind
+  // runs the previous release under a plugin manifest that names the new one.
+  const pin = '$.mcpServers.tibiawiki.args[1]';
+  assert.ok(releaseBumps('.mcp.json', pin), `.mcp.json ${pin} is not bumped`);
+  // release-please skips a path that selects nothing, a value that is not a string and a
+  // string with no version in it, and the release PR stays green.
+  const spec = valueAt('.mcp.json', pin);
+  assert.ok(typeof spec === 'string', `.mcp.json ${pin} is not a string`);
+  // In a string it rewrites the first match of its version pattern, reproduced here with
+  // the g flag, so the pin has to be the only match.
+  const { name, version } = JSON.parse(read('package.json')) as { name: string; version: string };
+  const versions = spec.match(/\d+\.\d+\.\d+(?:-[\w.]+)?(?:\+[-\w.]+)?/g) ?? [];
+  assert.deepEqual(versions, [version], `.mcp.json ${pin} must hold one version, the pinned ${version}`);
+  assert.equal(spec, `tibiawiki-mcp@npm:${name}@${version}`, `.mcp.json ${pin} is not the pinned package`);
 });

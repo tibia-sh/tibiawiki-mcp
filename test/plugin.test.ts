@@ -29,12 +29,29 @@ test('the plugin manifest and MCP config are well formed', () => {
   const mcp = JSON.parse(readFileSync(`${root}.mcp.json`, 'utf8'));
   const server = mcp.mcpServers.tibiawiki;
   assert.ok(server, '.mcp.json must define the tibiawiki server');
-  // Plugins install to different locations; a hardcoded path breaks every install
-  // that is not this checkout.
+  // The plugin runs the published package through npx, so an install needs no checkout,
+  // no build and no pnpm install.
+  assert.equal(server.command, 'npx', 'the server must start through npx');
+  // Asked for @tibia.sh/tibiawiki-mcp@<version> by name, npx takes a checkout of this repo
+  // for the installed package and runs a bin nothing linked, so the server never starts in
+  // one. Through an alias, npx fetches the published package wherever it runs.
+  const spec = server.args[1];
   assert.ok(
-    server.args.some((a: string) => a.includes('${CLAUDE_PLUGIN_ROOT}')),
-    'server path must use ${CLAUDE_PLUGIN_ROOT}, never a hardcoded path',
+    typeof spec === 'string' && spec.startsWith('tibiawiki-mcp@npm:@tibia.sh/tibiawiki-mcp@'),
+    'the server package must be requested through the tibiawiki-mcp alias',
   );
+  // Offline, npm retries its registry check for 70 s before it serves a warm cache, which is
+  // past the 30 s Claude Code gives an MCP server to start.
+  assert.equal(server.env?.npm_config_fetch_retries, '0', 'npx must not retry the registry');
+  // A range would move users who never updated the plugin onto a release nobody shipped
+  // it with, a new major included.
+  const command = [server.command, ...server.args].join(' ');
+  assert.doesNotMatch(command, /@tibia\.sh\/tibiawiki-mcp@[\^~]/, 'the server package must not be pinned to a range');
+  const pin = /@tibia\.sh\/tibiawiki-mcp@(\d+\.\d+\.\d+)(?!\S)/.exec(command);
+  assert.ok(pin, 'the server package must be pinned to an exact x.y.z');
+  // A release PR bumps package.json's version, so this fails on one whose pin did not move.
+  const { version } = JSON.parse(readFileSync(`${root}package.json`, 'utf8'));
+  assert.equal(pin[1], version, 'the pinned version must be the one package.json carries');
   assert.ok(!JSON.stringify(mcp).includes('/Users/'), 'no absolute developer paths');
 });
 

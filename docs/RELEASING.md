@@ -253,7 +253,7 @@ pnpm reads only the first entry that names a package, so keep one entry for it. 
    node -p 'Object.values(require("./pack.json"))[0].integrity'
    ```
 
-   The list must hold only `dist/`, `data/spell-areas.json`, `package.json`, `README.md` and `LICENSE`.
+   The list must hold only `dist/`, `data/spell-areas.json`, `data/tibiawikisql-requirements.txt`, `package.json`, `README.md` and `LICENSE`.
 
 4. Smoke the tarball. This is the last step you can take back.
 

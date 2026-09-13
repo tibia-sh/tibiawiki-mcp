@@ -1,9 +1,18 @@
 {
   "name": "tibiawiki-mcp",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Offline TibiaWiki knowledge base: attribute queries over creatures, items, NPCs, quests, spells and more",
   "license": "MIT",
-  "author": { "name": "tibia.sh", "url": "https://tibia.sh" },
+  "author": {
+    "name": "tibia.sh",
+    "url": "https://tibia.sh"
+  },
   "repository": "https://github.com/tibia-sh/tibiawiki-mcp",
-  "keywords": ["tibia", "tibiawiki", "mcp", "game-data", "offline"]
+  "keywords": [
+    "tibia",
+    "tibiawiki",
+    "mcp",
+    "game-data",
+    "offline"
+  ]
 }

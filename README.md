@@ -48,7 +48,7 @@ claude mcp add --transport stdio tibiawiki -- npx -y @tibia.sh/tibiawiki-mcp
 **As a plugin** — the server *plus* a skill that teaches an agent how to query it
 (name resolution, the 100-is-neutral modifier convention, the data quirks that
 produce wrong answers). The plugin pieces never reach the npm tarball, because
-`package.json` has `files: ["dist", "data/spell-areas.json"]`.
+`package.json` has `files: ["dist", "data/spell-areas.json", "data/tibiawikisql-requirements.txt"]`.
 
 ```bash
 git clone https://github.com/tibia-sh/tibiawiki-mcp
@@ -107,6 +107,19 @@ never replaces a working index, because the new one is validated before it is
 installed. Every answer reports `indexGeneratedAt`, so staleness is always visible to
 whoever is asking.
 
+The build runs the generator from a throwaway environment that uv creates in your temp
+directory. `uv pip install --require-hashes` installs it from
+`data/tibiawikisql-requirements.txt`, which pins the generator and every dependency to an
+exact version, with a hash for every file uv may download. A download that does not
+match its hash stops the build before the generator runs. The environment is deleted as
+soon as the generator exits, or as soon as a step before it fails. uv still reads your
+own settings, such as `UV_CACHE_DIR` and `UV_EXCLUDE_NEWER`.
+
+The environment runs CPython 3.10 to 3.13. uv uses one you have installed, or downloads
+one. The range stops before 3.14 because `mwparserfromhell` 0.7.2, the newest release of
+one of the generator's dependencies, ships no wheels for 3.14, and the build never
+compiles a dependency from source.
+
 The server reads the first index it finds:
 
 1. `$TIBIAWIKI_MCP_DB` => an explicit path always wins
@@ -134,6 +147,35 @@ It fetches metadata only, prints any image whose revision moved (and any new
 candidate the file has never seen), and exits non-zero if there is drift — so it can
 run on a schedule. Re-run without `--check` to regenerate.
 
+### Refreshing the generator lock
+
+To move `data/tibiawikisql-requirements.txt` to newer releases, run:
+
+```bash
+pnpm lock-generator
+```
+
+It resolves the generator and its dependencies afresh with the `uv` on your `PATH`, using
+only files uploaded at least 7 days before the run. The old lock plays no part, so its
+pins cannot hold back the new resolution. Before it writes the new lock, it runs a dry-run
+install without a build for every CPython the range admits, on every platform the header
+lists, and it refuses to write a lock that fails any of them.
+
+The range is `GENERATOR_PYTHON` in `src/indexer/build-index.ts`. To raise the cap once
+every dependency ships wheels for a newer Python, raise the constant and run
+`pnpm lock-generator`, which checks the new version too. Until the lock is regenerated,
+`pnpm test` fails on its header.
+
+The lock's header records the cutoff, the uv version, the Python range, the platforms
+checked and the command. To reproduce a lock, put the uv version named in its header
+first on your `PATH`, and pass the header's cutoff. Leave out any uv setting of your own
+that changes how uv resolves, such as a `uv.toml` or `UV_INDEX_URL`, because the header
+cannot record it:
+
+```bash
+pnpm lock-generator --cutoff <cutoff>
+```
+
 ## Releases
 
 Releases go to npm as `@tibia.sh/tibiawiki-mcp`, starting at `0.1.0`.
@@ -151,7 +193,8 @@ would keep major 4 out just as well, so the caret is not what guards the schema.
 an install, a hosted instance included, pick up each compatible data release without a
 server release. `pnpm add` does not write `^3`, so edit the range by hand.
 
-The tarball ships exactly `dist/` and `data/spell-areas.json`, plus the `package.json`,
+The tarball ships exactly `dist/`, `data/spell-areas.json` and
+`data/tibiawikisql-requirements.txt`, plus the `package.json`,
 `README.md` and `LICENSE` npm always adds; `test/packaging.test.ts` runs
 `npm pack --dry-run` as part of `pnpm test`, so anything else leaking in fails CI.
 

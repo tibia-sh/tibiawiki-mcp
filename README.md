@@ -137,6 +137,8 @@ run on a schedule. Re-run without `--check` to regenerate.
 ## Releases
 
 Releases go to npm as `@tibia.sh/tibiawiki-mcp`, starting at `0.1.0`.
+[docs/RELEASING.md](docs/RELEASING.md) covers how a release is published and what to do
+when one fails.
 
 The version number describes the server, not the data. The index ships separately as
 [`@tibia.sh/tibiawiki-data`](https://github.com/tibia-sh/tibiawiki-data), and its major

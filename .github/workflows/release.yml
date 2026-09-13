@@ -33,8 +33,12 @@ jobs:
       issues: write         # create and apply the release PR labels
       id-token: write       # OIDC for trusted publishing
     steps:
+      # A dispatch only retries the MCP registry publish, so it must not release. release-please
+      # does not check which event started the run. From a dispatch it would release a merged
+      # release PR to npm, while the registry job published the dispatched tag instead.
       - uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7  # v5.0.0
         id: release
+        if: ${{ github.event_name == 'push' }}
         with:
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json

@@ -28,9 +28,9 @@ const isPermitted = (path: string): boolean =>
 
 type PackReport = { files: Array<{ path: string }> };
 
-// `pnpm test` exports this repo's pnpm-workspace.yaml to its children as npm_config_*,
-// and npm warns it will hard-error on every one of them in a future major - which would
-// turn this test red for a reason that has nothing to do with packaging. Nothing about
+// A package manager or npx running this test can export its own config to children as
+// npm_config_*, and npm 12 rejects some of it outright (EALLOWSCRIPTS) - which would turn
+// this test red for a reason that has nothing to do with packaging. Nothing about
 // the packed file list depends on them. scripts/smoke.mjs strips the same lowercase
 // prefix for the same reason, and both keep NPM_CONFIG_* because that spelling is the
 // operator's own registry, proxy and CA. Two call sites, one predicate: a shared module

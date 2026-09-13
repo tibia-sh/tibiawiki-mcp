@@ -16,7 +16,7 @@
    gh api -X POST repos/tibia-sh/tibiawiki-mcp/actions/runs/RUN_ID/approve
    ```
 
-3. Merging the release PR publishes. The merge's push run creates the tag `vX.Y.Z` and the GitHub release at the merge commit, and relabels the PR `autorelease: tagged`. Then it checks out that commit, runs `pnpm install --frozen-lockfile` and `pnpm test`, and runs `npm publish` through npm trusted publishing. npm adds provenance for that commit when it confirms that the repository and the package are public. Once npm accepts the publish, the run's `registry` job checks out the tag, checks that `server.json` carries its version, waits until npm serves that version, and publishes `server.json` to the MCP registry.
+3. Merging the release PR publishes. The merge's push run creates the tag `vX.Y.Z` and the GitHub release at the merge commit, and relabels the PR `autorelease: tagged`. Then it checks out that commit, runs `pnpm install --frozen-lockfile` and `pnpm test`, and runs `npm publish` through npm trusted publishing. npm adds provenance for that commit when it confirms that the repository and the package are public. Once npm accepts the publish, the run's `registry` job checks out the tag, checks that `server.json` carries its version, and waits until npm serves that version. Then one step, `Publish to the MCP registry`, publishes `server.json` to the MCP registry in up to three attempts, 30 seconds apart. Each attempt runs its own login.
 4. The release is done when that run is green, its `npm publish` and `Publish to the MCP registry` steps ran, and both npm and the MCP registry list the version.
 
 Only the run triggered at the merge commit publishes, because npm provenance names the commit that triggered the run. A run triggered at any other commit that creates the release fails red instead, at the step `Release tagged at another commit, not published`.
@@ -294,7 +294,7 @@ pnpm reads only the first entry that names a package, so keep one entry for it. 
 
 ## A version the MCP registry does not have
 
-**Not yet exercised.** It follows the source of the registry and `mcp-publisher` at `v1.8.1`, the version `release.yml` pins.
+**Exercised twice.** The `0.3.0` dispatch, run [34756032998](https://github.com/tibia-sh/tibiawiki-mcp/actions/runs/34756032998), and the `0.3.1` dispatch, run [34770387551](https://github.com/tibia-sh/tibiawiki-mcp/actions/runs/34770387551), used it before the `registry` job retried its publish. It follows the source of the registry and `mcp-publisher` at `v1.8.1`, the version `release.yml` pins.
 
 npm lists the version, and the MCP registry does not. Set `VERSION` and check both:
 
@@ -306,13 +306,14 @@ curl -sS "https://registry.modelcontextprotocol.io/v0.1/servers/sh.tibia%2Ftibia
 
 The registry lacks the version when `curl` prints `"detail":"Server not found"`. When it has the version, `curl` prints its entry, with `"version":"X.Y.Z"` under `server`. For a version npm does not list, start at [A release npm does not have](#a-release-npm-does-not-have).
 
-The registry reads the version from npm once and does not retry, so the `registry` job waits for npm to serve a new version before it logs in. A version npm is slow to serve still lands here when that wait runs out, or when the registry's own read of npm misses a version the wait saw.
+The registry reads the version from npm once and does not retry, so the `registry` job waits for npm to serve a new version before it logs in. A version npm is slow to serve still lands here when that wait runs out, or when the registry's own read of npm misses a version the wait saw in all three attempts.
 
 | How it happened | What you see |
 |---|---|
-| The key is missing from the `mcp-registry` environment, or the TXT record on `tibia.sh` is missing or holds another key. | The release run is red at `Log in to the MCP registry`, with `private key (hex) is required`, `no MCP public key found in DNS TXT records` or `signature verification failed`. When the key is set, the step prints the TXT record it expects. |
+| The key is missing from the `mcp-registry` environment, or the TXT record on `tibia.sh` is missing or holds another key. | The release run is red at `Publish to the MCP registry` after three attempts, with `private key (hex) is required`, `no MCP public key found in DNS TXT records` or `signature verification failed`. When the key is set, each login prints the TXT record it expects. |
 | npm did not serve the version with `mcpName` `sh.tibia/tibiawiki-mcp` in 40 tries, 15 seconds apart. | The release run is red at `Wait for npm to serve the tag's version`, and its error names the version. |
-| The registry failed or was down, or its own read of npm failed. | The release run is red at `Publish to the MCP registry`, with the registry's error, such as `Likely transient, retry later` for a failed read of npm. |
+| The registry failed or was down, or its own read of npm failed. | The release run is red at `Publish to the MCP registry` after three attempts, the last with the registry's error, such as `Likely transient, retry later` for a failed read of npm. |
+| The registry was unreachable, or a login or publish failed on the network. | The release run is red at `Publish to the MCP registry` after three failed attempts, the last with an error such as `dial tcp ... i/o timeout`. The log says what failed in each attempt, and exit code 124 or 137 means `timeout` stopped a login or publish after 120 seconds. |
 | The version reached npm through [Publish by hand](#publish-by-hand). | No `registry` job ran for the version. |
 
 Dispatch the release workflow on `main` with the version's tag. It waits its turn behind any release run in progress.
@@ -327,7 +328,7 @@ A dispatched run's release job skips release-please, so it releases nothing and 
 
 Dispatch on `main` only. The key is a secret of the `mcp-registry` environment, which admits runs on `main` alone. The `registry` job of a run dispatched on any other branch or tag fails before its first step. The tag reaches the job as the input, never as the ref.
 
-If the registry has the version already, `Publish to the MCP registry` fails with `cannot publish duplicate version`. That is expected, and nothing changed. The registry never takes a version twice. Registering an older version after a newer one is fine. The registry keeps the higher version as its latest.
+If the registry has the version already, the dispatched run ends green without publishing. `Publish to the MCP registry` finds the version before it logs in, or the registry rejects the publish with `cannot publish duplicate version`. The registry never takes a version twice. Registering an older version after a newer one is fine. The registry keeps the higher version as its latest.
 
 The recovery is done when the run is green and the `curl` above prints the version.
 
@@ -373,7 +374,7 @@ Until the patch is on npm, `.mcp.json` on `main` pins the bad version. When npm 
 
 ## Setting up the MCP registry publish
 
-**Done 2026-09-13.** `v0.3.0` was registered that day through [A version the MCP registry does not have](#a-version-the-mcp-registry-does-not-have). If the key or the TXT record goes away, the `registry` job fails at `Log in to the MCP registry`, and every release lands in that section again.
+**Done 2026-09-13.** `v0.3.0` was registered that day through [A version the MCP registry does not have](#a-version-the-mcp-registry-does-not-have). If the key or the TXT record goes away, the `registry` job fails at `Publish to the MCP registry` after three attempts, and every release lands in that section again.
 
 The registry lets only the owner of `tibia.sh` publish `sh.tibia/tibiawiki-mcp`. The `registry` job proves ownership with an Ed25519 key. Its public key sits in a TXT record on `tibia.sh`, and its private key is the `MCP_PRIVATE_KEY` secret of the `mcp-registry` environment. You set this up once.
 
@@ -421,8 +422,8 @@ The registry lets only the owner of `tibia.sh` publish `sh.tibia/tibiawiki-mcp`.
 
 7. Delete `key.pem`, or keep it where only you can read it, such as a password manager. GitHub never shows the secret again. Without `key.pem`, replacing the secret means a new key, and a new TXT record in place of the old one.
 
-8. Publish the current release to the registry, as in [A version the MCP registry does not have](#a-version-the-mcp-registry-does-not-have). If `Log in to the MCP registry` fails with `signature verification failed`, compare the TXT record that step prints with the output of step 5. Once the run is green, record the date at the top of this section.
+8. Publish the current release to the registry, as in [A version the MCP registry does not have](#a-version-the-mcp-registry-does-not-have). If `Publish to the MCP registry` fails with `signature verification failed`, compare the TXT record its login prints with the output of step 5. The run tests the key only when its log shows `✓ Successfully logged in`. When the registry already has the current release, the step finds it and ends green without a login, so the next release is the first to log in with the key. Once the run is green, record the date at the top of this section.
 
 ## Known future break
 
-GitHub's REST API version `2026-03-10` drops `merge_commit_sha` from pull request responses, per [`data/reusables/rest-api/breaking-changes-changelog.md`](https://github.com/github/docs/blob/main/data/reusables/rest-api/breaking-changes-changelog.md) in github/docs. release-please 17.6.0 finds the release commit through that field, so without it a merged release PR creates no release. Its step still ends green. `Check that every merged release PR was released` then turns that run red, and every push run after it, until the PR is released. release-please sends no API version header, so it gets `2022-11-28`, which GitHub serves to such requests until 24 months after `2026-03-10`, around March 2028. Upgrade release-please-action to a release that handles this before then. If the check turns red first, follow [A merged release PR with no release](#a-merged-release-pr-with-no-release). Every release PR stalls the same way until the upgrade.
+GitHub's REST API version `2026-03-10` drops `merge_commit_sha` from pull request responses, per [`data/reusables/rest-api/breaking-changes-changelog.md`](https://github.com/github/docs/blob/main/data/reusables/rest-api/breaking-changes-changelog.md) in github/docs. release-please 17.6.0 finds the release commit through that field, so without it a merged release PR creates no release. Its step still ends green. `Check that every merged release PR was released` then turns that run red, and every push run after it, until the PR is released. release-please sends no API version header, so it gets `2022-11-28`, which GitHub serves to such requests until 24 months after `2026-03-10`, around March 2028. Upgrade release-please-action to a release that handles this before then. The break is reported upstream as [googleapis/release-please#2898](https://github.com/googleapis/release-please/issues/2898). If the check turns red first, follow [A merged release PR with no release](#a-merged-release-pr-with-no-release). Every release PR stalls the same way until the upgrade.

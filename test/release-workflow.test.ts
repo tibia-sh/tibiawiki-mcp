@@ -37,30 +37,54 @@ const depthOf = (yaml: string): number | undefined => {
 };
 
 /**
- * The lines nested under `key:` where it is a direct child of `yaml`, a key at the block's
- * shallowest indentation, or '' when there is none. A deeper key of the same name, such as
- * a job's own `concurrency:`, does not count.
+ * The entry for `key:` where it is a direct child of `yaml`, a key at the block's shallowest
+ * indentation, written plain or quoted: what follows the colon on its line, and the deeper
+ * lines after it as they are written. Undefined when there is none. A deeper key of the same
+ * name, such as a job's own `concurrency:`, does not count.
  */
-const under = (yaml: string, key: string): string => {
+const entryOf = (yaml: string, key: string): { value: string; nested: string } | undefined => {
   const depth = depthOf(yaml);
-  if (depth === undefined) return '';
-  return new RegExp(`^ {${depth}}${key}:\\n((?: {${depth + 1},}.*(?:\\n|$))*)`, 'm').exec(yaml)?.[1] ?? '';
+  if (depth === undefined) return undefined;
+  const entry = new RegExp(`^ {${depth}}(['"]?)${key}\\1: *(.*)\\n?((?: {${depth + 1},}.*(?:\\n|$))*)`, 'm').exec(yaml);
+  return entry ? { value: entry[2]!, nested: entry[3]! } : undefined;
 };
 
 /**
- * What follows `key:` where it is a direct child of `yaml`, as `under` finds it: the value
- * without the quotes YAML allows around it, '' when a nested block follows instead, or
- * undefined when there is no such key.
+ * The lines nested under `key:` where it is a direct child of `yaml`, as `entryOf` finds it, or
+ * '' when there are none.
+ */
+const under = (yaml: string, key: string): string => {
+  const entry = entryOf(yaml, key);
+  return entry?.value === '' ? entry.nested : '';
+};
+
+/**
+ * What follows `key:` where it is a direct child of `yaml`, as `entryOf` finds it: the value
+ * without the quotes YAML allows around it, '' when a nested block follows instead, only the
+ * indicator of a block scalar such as `|`, or undefined when there is no such key. Deeper lines
+ * continue any other value and are joined on with single spaces, as YAML folds a plain scalar,
+ * so a continuation such as `|| true` stays part of the value.
  */
 const scalar = (yaml: string, key: string): string | undefined => {
-  const depth = depthOf(yaml);
-  if (depth === undefined) return undefined;
-  return new RegExp(`^ {${depth}}${key}: *(.*)$`, 'm').exec(yaml)?.[1]?.replace(/^(['"])(.*)\1$/, '$2');
+  const entry = entryOf(yaml, key);
+  if (entry === undefined || entry.value === '' || /^[|>][-+1-9]*$/.test(entry.value)) return entry?.value;
+  const continuation = entry.nested.split('\n').filter((line) => line.trim() !== '').map((line) => line.trim());
+  return [entry.value, ...continuation].join(' ').replace(/^(['"])(.*)\1$/, '$2');
 };
 
 const releaseJob = (): string => under(under(workflowCode(), 'jobs'), 'release');
 
 const registryJob = (): string => under(under(workflowCode(), 'jobs'), 'registry');
+
+/** Every job in the workflow as its name and the lines nested under its key. */
+const workflowJobs = (): Array<[string, string]> => {
+  const jobs = under(workflowCode(), 'jobs');
+  const depth = depthOf(jobs);
+  if (depth === undefined) return [];
+  return [...jobs.matchAll(new RegExp(`^ {${depth}}(['"]?)([\\w-]+)\\1:`, 'gm'))].map(
+    (match): [string, string] => [match[2]!, under(jobs, match[2]!)],
+  );
+};
 
 /**
  * The release job's own permissions block. It replaces the workflow-level block instead
@@ -88,18 +112,16 @@ const stepBody = (step: string): string =>
   step.replace(/^( *)(- +)/, (_, indent: string, marker: string) => indent + ' '.repeat(marker.length));
 
 /**
- * The script a step's `run:` hands to bash: the value itself, or the lines of a `run: |`
- * block without the block's indentation. Undefined for a step that runs no script. It reads
- * the step as `workflowCode` leaves it, so comment lines inside a block are already gone.
+ * The script a step's `run:` hands to bash: the value as `scalar` reads it, continuation lines
+ * folded on, or the lines of a `run: |` block without the block's indentation. Undefined for a
+ * step that runs no script. It reads the step as `workflowCode` leaves it, so comment lines
+ * inside a block are already gone.
  */
 const stepScript = (step: string): string | undefined => {
   const body = stepBody(step);
-  const depth = depthOf(body);
-  if (depth === undefined) return undefined;
-  const run = new RegExp(`^ {${depth}}run: *(.*)\\n?((?: {${depth + 1},}.*(?:\\n|$))*)`, 'm').exec(body);
-  if (!run) return undefined;
-  if (!/^\|[-+]?$/.test(run[1]!)) return run[1]!;
-  const lines = run[2]!.split('\n').filter((line) => line.trim() !== '');
+  const run = entryOf(body, 'run');
+  if (run === undefined || !/^\|[-+]?$/.test(run.value)) return scalar(body, 'run');
+  const lines = run.nested.split('\n').filter((line) => line.trim() !== '');
   const indent = Math.min(...lines.map((line) => line.search(/\S/)));
   return lines.map((line) => line.slice(indent)).join('\n');
 };
@@ -134,10 +156,26 @@ const stepsAfterReleasePlease = (): string[] => {
   return steps.slice(releasePlease + 1);
 };
 
-const stepIf = (step: string): string | undefined => /^ *if: *(.*)$/m.exec(step)?.[1];
+/**
+ * A step's own condition, read as `scalar` reads a key at the depth of the step's keys. An `if:`
+ * that is the step's first key, on its `- ` line, counts like any other, and one nested deeper,
+ * such as an action input, is not the step's.
+ */
+const stepIf = (step: string): string | undefined => scalar(stepBody(step), 'if');
 
 const stepName = (step: string): string =>
   /^ *(?:- +)?(?:name|id|uses|run): *(.*)$/m.exec(step)?.[1] ?? step.trim();
+
+/**
+ * Fails when a shell is chosen for `step`, a step of `job`: by the step, in the job's defaults, or
+ * in the workflow's. Only while none is does a runner run the step's script as `bash -e {0}`.
+ */
+const assertDefaultShell = (job: string, step: string): void => {
+  const name = stepName(step);
+  assert.equal(scalar(stepBody(step), 'shell'), undefined, `${name} sets its own shell`);
+  assert.equal(scalar(job, 'defaults'), undefined, `${name} runs in a job that sets defaults for its steps`);
+  assert.equal(scalar(workflowCode(), 'defaults'), undefined, 'the workflow sets defaults for its steps');
+};
 
 /** The condition every building and publishing step carries. */
 const PUBLISH_GATE = '${{ steps.release.outputs.release_created && steps.release.outputs.sha == github.sha }}';
@@ -173,7 +211,7 @@ const releaseCheckStep = (): string => {
 const runScripts = (yaml: string): string[] => {
   const lines = yaml.split('\n');
   return lines.flatMap((line, index) => {
-    const match = /^( *(?:- +)?)run:(.*)$/.exec(line);
+    const match = /^( *(?:- +)?)(?:run|"run"|'run'):(.*)$/.exec(line);
     if (!match) return [];
     const script = [match[2]!];
     for (const next of lines.slice(index + 1)) {
@@ -226,6 +264,19 @@ test('the release job can mint the OIDC token npm publish authenticates with', (
   assert.match(releaseJobPermissions(), /^ *id-token: *write$/m, 'the release job has no id-token: write');
 });
 
+test('the release job can create the release', () => {
+  // release-please commits the release PR's changes to its branch, and creates the GitHub release
+  // and with it the tag. Both write the repository's contents, so without this grant nothing is
+  // released.
+  assert.match(releaseJobPermissions(), /^ *contents: *write$/m, 'the release job has no contents: write');
+});
+
+test('the release job can open the release PR', () => {
+  // release-please opens the release PR and updates it as commits land. Without this grant no
+  // release PR opens, and nothing is released.
+  assert.match(releaseJobPermissions(), /^ *pull-requests: *write$/m, 'the release job has no pull-requests: write');
+});
+
 test('the release job can label the release PR', () => {
   // release-please labels its PR autorelease: pending through the Issues API and finds the
   // merged PR by that label. A merged PR without it is skipped, and nothing is released.
@@ -272,16 +323,27 @@ test('release-please takes its settings from the config files, not action inputs
   assert.doesNotMatch(workflow(), /release-type/);
 });
 
-test('the npm that publishes is installed at an exact version', () => {
+/** The first npm that supports trusted publishing, as [major, minor, patch]. */
+const TRUSTED_PUBLISHING_NPM = [11, 5, 1];
+
+test('the npm that publishes is installed at an exact version that supports trusted publishing', () => {
   // The job holds id-token: write, so a floating install is the one unpinned thing in it.
   // Each global install of npm is checked, not just the first, because the last one wins.
+  // An npm too old for trusted publishing fails the publish, which runs after the tag exists.
   const specs = [...workflowCode().matchAll(/\bnpm +(?:install|i|add)\b([^\n;&|]*)/g)]
     .map((match) => match[1]!.trim().split(/ +/))
     .filter((args) => args.includes('-g') || args.includes('--global'))
     .flatMap((args) => args.filter((arg) => /^npm(@|$)/.test(arg)));
   assert.ok(specs.length > 0, 'no step installs the npm that trusted publishing needs');
   for (const spec of specs) {
-    assert.match(spec, /^npm@\d+\.\d+\.\d+$/, `${spec} is not an exact version`);
+    const version = /^npm@(\d+)\.(\d+)\.(\d+)$/.exec(spec)?.slice(1).map(Number);
+    assert.ok(version, `${spec} is not an exact version`);
+    // Part by part and as numbers, because as text 11.10.0 sorts before 11.5.1.
+    const part = version.findIndex((value, index) => value !== TRUSTED_PUBLISHING_NPM[index]);
+    assert.ok(
+      part === -1 || version[part]! > TRUSTED_PUBLISHING_NPM[part]!,
+      `${spec} is older than npm@${TRUSTED_PUBLISHING_NPM.join('.')}, the first that supports trusted publishing`,
+    );
   }
 });
 
@@ -351,11 +413,8 @@ test('a push run that creates no release checks for a merged release PR left unr
   // that run and every run after it end green with nothing tagged or published.
   const check = releaseCheckStep();
   assert.ok(stepsAfterReleasePlease().includes(check), 'the check runs before release-please');
-  // A failure let through leaves the run green, the outcome the check exists to prevent.
-  assert.equal(scalar(stepBody(check), 'continue-on-error'), undefined, 'the check lets its own failure through');
   // The checks below run the script under `bash -e`, as a runner does only while no shell is chosen.
-  assert.equal(scalar(stepBody(check), 'shell'), undefined, 'the check sets its own shell');
-  assert.equal(scalar(releaseJob(), 'defaults'), undefined, 'the release job sets defaults for its steps');
+  assertDefaultShell(releaseJob(), check);
   assert.doesNotMatch(check, /^ *(?:- +)?uses:/m, 'the check runs an action');
   assert.equal(scalar(under(stepBody(check), 'env'), 'GH_TOKEN'), '${{ github.token }}', 'gh gets no token from the step env');
   const script = stepScript(check) ?? '';
@@ -369,7 +428,8 @@ test('the released output is true only once npm accepted the publish', () => {
   // A job output is a string, so an expression that evaluates to false arrives as 'false',
   // which a bare if: treats as true. The publish step writes released=true after npm publish,
   // and the default bash -e stops the script at a failed publish, so the output is 'true'
-  // or empty.
+  // or empty. The script is pinned whole, because an edit such as `|| true` or `set +e`, or a
+  // shell chosen without -e, lets the write follow a failed publish.
   const publishing = releaseJobSteps().filter((step) => /\bnpm publish\b/.test(step));
   assert.equal(publishing.length, 1, 'expected exactly one step that runs npm publish');
   const step = publishing[0]!;
@@ -377,9 +437,12 @@ test('the released output is true only once npm accepted the publish', () => {
   assert.ok(id, 'the npm publish step has no id');
   const released = /^ *released: *(.*)$/m.exec(under(releaseJob(), 'outputs'))?.[1];
   assert.equal(released, `\${{ steps.${id}.outputs.released }}`, 'released does not read the publish step');
-  const write = step.search(/released=true.*>> *"?\$GITHUB_OUTPUT"?/);
-  assert.notEqual(write, -1, 'the publish step never writes released=true to $GITHUB_OUTPUT');
-  assert.ok(step.search(/\bnpm publish\b/) < write, 'released=true is written before npm publish runs');
+  assert.equal(
+    stepScript(step),
+    'npm publish\necho "released=true" >> "$GITHUB_OUTPUT"',
+    'the publish step runs something besides npm publish, then the released=true write',
+  );
+  assertDefaultShell(releaseJob(), step);
 });
 
 test('release runs take turns, and none is cancelled or dropped', () => {
@@ -848,18 +911,31 @@ test('the registry job publishes after it logs in', () => {
 });
 
 test('every registry job step runs, and any failure stops the job', () => {
-  // A check skipped by its own `if:`, or a failure let through by `continue-on-error`, a shell
-  // without -e or `set +e`, lets the job publish past a check that did not hold. The checks above
-  // run each script under `bash -e` for the same reason.
+  // A check skipped by its own `if:`, or a failure let through by a shell without -e or `set +e`,
+  // lets the job publish past a check that did not hold. So would `continue-on-error`, which the
+  // next test rules out for every job and step. The checks above run each script under `bash -e`
+  // for the same reason.
   const registry = registryJob();
-  assert.equal(scalar(registry, 'continue-on-error'), undefined, 'the registry job lets its own failure through');
-  assert.equal(scalar(registry, 'defaults'), undefined, 'the registry job sets defaults for its steps');
-  assert.equal(scalar(workflowCode(), 'defaults'), undefined, 'the workflow sets defaults for its steps');
   for (const step of registryJobSteps()) {
-    for (const key of ['if', 'continue-on-error', 'shell']) {
-      assert.equal(scalar(stepBody(step), key), undefined, `${stepName(step)} sets ${key}`);
-    }
+    assert.equal(stepIf(step), undefined, `${stepName(step)} sets if`);
+    assertDefaultShell(registry, step);
     assert.doesNotMatch(stepScript(step) ?? '', /\bset +\+[a-z]*e|\bset +\+o +errexit\b/, `${stepName(step)} turns off -e`);
+  }
+});
+
+test('no job or step lets its own failure through', () => {
+  // continue-on-error turns a failed step or job green. On the publish step, a failed npm publish
+  // still stops the script before released=true, so the registry job is skipped, but the release
+  // job ends green while the tag exists and npm has nothing, and the merged release PR check does
+  // not run, because release_created is set. Anywhere else it lets a run end green past a failure,
+  // or lets the registry job publish past a check that did not hold.
+  const jobs = workflowJobs();
+  assert.ok(jobs.length > 0, 'the workflow has no jobs, so this check proves nothing');
+  for (const [name, job] of jobs) {
+    assert.equal(scalar(job, 'continue-on-error'), undefined, `the ${name} job lets its own failure through`);
+    for (const step of jobSteps(job)) {
+      assert.equal(scalar(stepBody(step), 'continue-on-error'), undefined, `${stepName(step)} lets its own failure through`);
+    }
   }
 });
 

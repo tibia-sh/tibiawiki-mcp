@@ -20,8 +20,11 @@ const root = fileURLToPath(new URL('..', import.meta.url));
 // npm always adds these three regardless of `files`.
 const ALWAYS_ADDED = ['package.json', 'README.md', 'LICENSE'];
 
+// build-index reads both at run time: the spell area shapes, and the generator's lock.
+const DATA_FILES = ['data/spell-areas.json', 'data/tibiawikisql-requirements.txt'];
+
 const isPermitted = (path: string): boolean =>
-  path.startsWith('dist/') || path === 'data/spell-areas.json' || ALWAYS_ADDED.includes(path);
+  path.startsWith('dist/') || DATA_FILES.includes(path) || ALWAYS_ADDED.includes(path);
 
 type PackReport = { files: Array<{ path: string }> };
 
@@ -52,19 +55,23 @@ const packedPaths = (): string[] => {
 // One pack, read by both tests: it spawns npm and tars the tree.
 const packed = packedPaths();
 
-test('the tarball ships dist/ and the data file, and nothing else', () => {
+test('the tarball ships dist/ and the data files, and nothing else', () => {
   assert.deepEqual(
     packed.filter((p) => !isPermitted(p)),
     [],
-    'files in package.json now ships more than dist/ + data/spell-areas.json',
+    `files in package.json now ships more than dist/ + ${DATA_FILES.join(' + ')}`,
   );
 });
 
 // Without this the allowlist above would pass just as happily on an empty tarball.
-test('the binary and the data file really are in the tarball', () => {
+test('the binary and the data files really are in the tarball', () => {
   const pkg = JSON.parse(readFileSync(`${root}package.json`, 'utf8')) as { bin: Record<string, string> };
   const bin = pkg.bin['tibiawiki-mcp'];
   assert.ok(bin, 'package.json must declare the tibiawiki-mcp bin');
   assert.ok(packed.includes(bin), `${bin} is not in the tarball; the package has no server`);
   assert.ok(packed.includes('data/spell-areas.json'), 'no data file means no index can be built');
+  assert.ok(
+    packed.includes('data/tibiawikisql-requirements.txt'),
+    'no lock means build-index cannot install the generator',
+  );
 });

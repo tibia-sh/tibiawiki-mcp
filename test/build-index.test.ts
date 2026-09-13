@@ -1,17 +1,23 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import { copyFileSync, existsSync, readdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
+import { tmpdir } from 'node:os';
 import { DatabaseSync } from 'node:sqlite';
 import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { DB_PATH } from '@tibia.sh/tibiawiki-data';
 import { resolveDbPath } from '../src/db.ts';
-import { buildIndex } from '../src/indexer/build-index.ts';
+import { buildIndex, GENERATOR, GENERATOR_PYTHON, type Runner } from '../src/indexer/build-index.ts';
 import { eligibleScenes, MCP_SCHEMA_VERSION, type EnrichStats } from '../src/indexer/enrich.ts';
 import { FIXTURE, tempDirs } from './harness.ts';
 
 const scratch = tempDirs('twmcp-bi-');
 const sha = (p: string) => createHash('sha256').update(readFileSync(p)).digest('hex');
+
+/** The committed lock, located from here rather than through build-index's own constant. */
+const LOCK = fileURLToPath(new URL('../data/tibiawikisql-requirements.txt', import.meta.url));
 
 /**
  * Every case injects an enricher. Without one `buildIndex` would call the real
@@ -38,54 +44,225 @@ const stats = (over: Partial<EnrichStats> = {}): EnrichStats => ({
 });
 const noopEnrich = async () => stats();
 
-test('invokes the pinned generator with --skip-images and installs atomically', async () => {
+type Subcommand = 'venv' | 'pip install' | 'run';
+const isSubcommand = (s: string): s is Subcommand => s === 'venv' || s === 'pip install' || s === 'run';
+
+/**
+ * Stands in for uv and records every call. Only `uv run` writes a database: it hands the
+ * path after `-o` to `generate`, which copies the fixture there unless a case says
+ * otherwise, and whose result, if any, is the call's. `exit` makes a subcommand fail
+ * without running anything.
+ *
+ * Nothing else is written, and that is load-bearing. The `uvx` fakes this replaces copied
+ * the fixture to every call's last argument, which for `uv pip install` is the shipped lock.
+ */
+function fakeUv(opts: {
+  exit?: Partial<Record<Subcommand, ReturnType<Runner>>>;
+  generate?: (output: string) => ReturnType<Runner> | void;
+} = {}) {
+  const calls: Array<{ cmd: string; args: string[] }> = [];
+  const run: Runner = (cmd, args) => {
+    calls.push({ cmd, args: [...args] });
+    const subcommand = args[0] === 'pip' ? `pip ${args[1]}` : String(args[0]);
+    if (cmd !== 'uv' || !isSubcommand(subcommand)) {
+      throw new Error(`unexpected command: ${cmd} ${args.join(' ')}`);
+    }
+    const exit = opts.exit?.[subcommand];
+    if (exit) return exit;
+    const generated = subcommand === 'run'
+      ? (opts.generate ?? ((output) => copyFileSync(FIXTURE, output)))(args[args.length - 1]!)
+      : undefined;
+    return generated ?? { status: 0, stderr: '' };
+  };
+  return {
+    run,
+    calls,
+    /** The environment directory, as `uv venv` was handed it. */
+    env: (): string => {
+      const venv = calls.find((c) => c.args[0] === 'venv');
+      assert.ok(venv, 'uv venv was never called');
+      return venv.args[venv.args.length - 1]!;
+    },
+  };
+}
+type FakeUv = ReturnType<typeof fakeUv>;
+
+/** Captures stderr instead of printing it, until `restore` runs. */
+function captureStderr() {
+  const written: string[] = [];
+  const write = process.stderr.write.bind(process.stderr);
+  process.stderr.write = ((chunk: string) => { written.push(String(chunk)); return true; }) as typeof write;
+  return { text: () => written.join(''), restore: () => { process.stderr.write = write; } };
+}
+
+/**
+ * The committed lock's requirements as pip reads them: a trailing backslash continues a
+ * line and `#` starts a comment. Parsed here rather than through build-index, so a
+ * miscount there cannot pass by agreeing with itself.
+ */
+const lockEntries = (): string[] =>
+  readFileSync(LOCK, 'utf8').replace(/\\\n/g, ' ').split('\n')
+    .map((line) => line.replace(/#.*/, '').trim().replace(/\s+/g, ' '))
+    .filter(Boolean);
+
+test('runs uv venv, uv pip install and uv run in that order, then installs atomically', async () => {
   const dir = scratch();
   const target = join(dir, 'tibiawiki.db');
-  let seen: { cmd: string; args: string[] } | undefined;
+  const uv = fakeUv();
 
-  const result = await buildIndex({
-    targetPath: target,
-    enrich: noopEnrich,
-    api,
-    run: (cmd, args) => {
-      seen = { cmd, args };
-      // The generator writes to whatever path it was handed.
-      copyFileSync(FIXTURE, args[args.length - 1]!);
-      return { status: 0, stderr: '' };
-    },
-  });
+  const result = await buildIndex({ targetPath: target, enrich: noopEnrich, api, run: uv.run });
 
-  assert.equal(seen!.cmd, 'uvx');
-  assert.ok(seen!.args.includes('--skip-images'), 'images must never be fetched');
-  assert.ok(seen!.args.includes('tibiawikisql==9.0.0'), 'generator version must be pinned');
-  assert.notEqual(seen!.args.at(-1), target, 'must build to a temp path, not straight to the target');
+  const env = uv.env();
+  const output = uv.calls.at(-1)!.args.at(-1)!;
+  // Exactly these three: no uvx, which cannot check a hash, and no bin/ or Scripts\ path,
+  // which would tie the build to one platform's environment layout.
+  assert.deepEqual(uv.calls, [
+    { cmd: 'uv', args: ['venv', '--python', GENERATOR_PYTHON, env] },
+    { cmd: 'uv', args: ['pip', 'install', '--python', env, '--require-hashes', '--no-build', '-r', LOCK] },
+    { cmd: 'uv', args: ['run', '--no-project', '--python', env, 'tibiawikisql', 'generate', '--skip-images', '-o', output] },
+  ]);
+  assert.equal(dirname(output), dir, 'the temp index must sit beside its target, so the rename stays atomic');
+  assert.notEqual(output, target, 'must build to a temp path, not straight to the target');
   assert.equal(result, target);
   assert.ok(existsSync(target), 'temp file should be renamed into place');
   assert.equal(readdirSync(dir).length, 1, 'no temp file left behind');
 });
+
+/**
+ * In the data repo the target's directory is the checkout root, so an environment built
+ * beside the target would land among tracked files. And it is removed as soon as the
+ * generator returns, since nothing after that uses it.
+ */
+test('the generator environment lives under the OS temp directory and is gone before enrichment', async () => {
+  const target = join(scratch(), 'tibiawiki.db');
+  let whileGenerating: boolean | undefined;
+  let atEnrichment: boolean | undefined;
+  const uv: FakeUv = fakeUv({
+    generate: (output) => {
+      whileGenerating = existsSync(uv.env());
+      copyFileSync(FIXTURE, output);
+    },
+  });
+
+  await buildIndex({
+    targetPath: target,
+    api,
+    run: uv.run,
+    enrich: async () => {
+      atEnrichment = existsSync(uv.env());
+      return stats();
+    },
+  });
+
+  assert.equal(dirname(uv.env()), tmpdir(), 'the environment must be created directly under os.tmpdir()');
+  assert.equal(whileGenerating, true, 'the generator runs from a directory build-index created');
+  assert.equal(atEnrichment, false, 'the environment must be removed as soon as the generator returns');
+  assert.equal(existsSync(uv.env()), false);
+});
+
+test('a successful install is reported on stderr with the count of locked requirements', async () => {
+  const target = join(scratch(), 'tibiawiki.db');
+  // The data repo's weekly build logs this line, so it is matched whole.
+  const line = `Generator environment installed from tibiawikisql-requirements.txt with ${lockEntries().length} hashed requirements.\n`;
+  let beforeGenerating = '';
+  const captured = captureStderr();
+  try {
+    const uv = fakeUv({
+      generate: (output) => {
+        beforeGenerating = captured.text();
+        copyFileSync(FIXTURE, output);
+      },
+    });
+    await buildIndex({ targetPath: target, enrich: noopEnrich, api, run: uv.run });
+  } finally {
+    captured.restore();
+  }
+  assert.equal(beforeGenerating, line, 'written once the install succeeds, and before the generator runs');
+  assert.equal(captured.text().split(line).length - 1, 1, 'and never written again');
+});
+
+for (const [subcommand, stderr] of [
+  ['venv', 'No interpreter found for CPython >=3.10, <3.14 in virtual environments, managed installations, or search path'],
+  ['pip install', 'Hash mismatch for `annotated-types==0.8.0`'],
+] as const) {
+  test(`a failing uv ${subcommand} stops the build before the generator runs`, async () => {
+    const dir = scratch();
+    const target = join(dir, 'tibiawiki.db');
+    copyFileSync(FIXTURE, target);
+    const before = sha(target);
+    const uv = fakeUv({ exit: { [subcommand]: { status: 2, stderr } } });
+
+    const captured = captureStderr();
+    try {
+      await assert.rejects(
+        buildIndex({ targetPath: target, enrich: noopEnrich, api, run: uv.run }),
+        (error: Error) => {
+          assert.match(error.message, /^Could not install the generator environment/);
+          assert.ok(error.message.includes(stderr), `uv's stderr must be in the error: ${error.message}`);
+          return true;
+        },
+      );
+    } finally {
+      captured.restore();
+    }
+    assert.equal(uv.calls.some(({ args }) => args[0] === 'run'), false, 'the generator must not run');
+    assert.doesNotMatch(captured.text(), /Generator environment installed/, 'a failed install is not reported as installed');
+    assert.equal(existsSync(uv.env()), false, 'the generator environment must be removed');
+    assert.equal(sha(target), before, 'the pre-existing index must survive untouched');
+    assert.equal(readdirSync(dir).length, 1, 'no temp file left behind');
+  });
+}
 
 test('a failing generator leaves an existing good index byte-identical', async () => {
   const dir = scratch();
   const target = join(dir, 'tibiawiki.db');
   copyFileSync(FIXTURE, target);
   const before = sha(target);
+  // A crawl that dies part way leaves a partial database behind it.
+  const uv = fakeUv({
+    generate: (output) => {
+      writeFileSync(output, 'partial');
+      return { status: 1, stderr: 'boom' };
+    },
+  });
 
   await assert.rejects(
-    buildIndex({ targetPath: target, enrich: noopEnrich, api, run: () => ({ status: 1, stderr: 'boom' }) }),
+    buildIndex({ targetPath: target, enrich: noopEnrich, api, run: uv.run }),
     /boom/,
   );
   assert.equal(sha(target), before, 'the pre-existing index must survive untouched');
   assert.equal(readdirSync(dir).length, 1, 'no temp file left behind');
+  assert.equal(existsSync(uv.env()), false, 'the generator environment must be removed');
+});
+
+test('a runner that throws still removes the generator environment', async () => {
+  const dir = scratch();
+  const target = join(dir, 'tibiawiki.db');
+  const uv = fakeUv({
+    generate: (output) => {
+      writeFileSync(output, 'partial');
+      throw new Error('spawnSync uv EACCES');
+    },
+  });
+
+  await assert.rejects(
+    buildIndex({ targetPath: target, enrich: noopEnrich, api, run: uv.run }),
+    /EACCES/,
+  );
+  assert.equal(existsSync(uv.env()), false, 'the generator environment must be removed');
+  assert.deepEqual(readdirSync(dir), [], 'no temp file left behind');
 });
 
 test('a generator that succeeds but writes nothing is rejected', async () => {
   const dir = scratch();
   const target = join(dir, 'tibiawiki.db');
+  const uv = fakeUv({ generate: () => {} });
   await assert.rejects(
-    buildIndex({ targetPath: target, enrich: noopEnrich, api, run: () => ({ status: 0, stderr: '' }) }),
+    buildIndex({ targetPath: target, enrich: noopEnrich, api, run: uv.run }),
     /produced no file/,
   );
   assert.equal(existsSync(target), false);
+  assert.equal(existsSync(uv.env()), false, 'the generator environment must be removed');
 });
 
 test('a generator that writes a schema-invalid file is rejected and the target survives', async () => {
@@ -99,10 +276,7 @@ test('a generator that writes a schema-invalid file is rejected and the target s
       targetPath: target,
       enrich: noopEnrich,
       api,
-      run: (_cmd, args) => {
-        writeFileSync(args[args.length - 1]!, 'not a sqlite database');
-        return { status: 0, stderr: '' };
-      },
+      run: fakeUv({ generate: (output) => writeFileSync(output, 'not a sqlite database') }).run,
     }),
     /valid TibiaWiki index|missing required|file is not a database/i,
   );
@@ -112,15 +286,7 @@ test('a generator that writes a schema-invalid file is rejected and the target s
 
 test('creates the parent directory when it does not exist', async () => {
   const target = join(scratch(), 'nested', 'deeper', 'tibiawiki.db');
-  await buildIndex({
-    targetPath: target,
-    enrich: noopEnrich,
-    api,
-    run: (_cmd, args) => {
-      copyFileSync(FIXTURE, args[args.length - 1]!);
-      return { status: 0, stderr: '' };
-    },
-  });
+  await buildIndex({ targetPath: target, enrich: noopEnrich, api, run: fakeUv().run });
   assert.ok(existsSync(target));
 });
 
@@ -148,15 +314,15 @@ test('the default install target is the cache path, never the packaged index', a
     const installed = await buildIndex({
       enrich: noopEnrich,
       api,
-      run: (_cmd, args) => {
-        const output = args[args.length - 1]!;
-        // Checked before anything is written. The build generates beside its target, so a
-        // regressed target fails here, before its rename could put the fixture over the
-        // installed package's index.
-        assert.equal(dirname(output), dirname(expected), 'the build is not generating in the cache');
-        copyFileSync(FIXTURE, output);
-        return { status: 0, stderr: '' };
-      },
+      run: fakeUv({
+        generate: (output) => {
+          // Checked before anything is written. The build generates beside its target, so a
+          // regressed target fails here, before its rename could put the fixture over the
+          // installed package's index.
+          assert.equal(dirname(output), dirname(expected), 'the build is not generating in the cache');
+          copyFileSync(FIXTURE, output);
+        },
+      }).run,
     });
     assert.equal(installed, expected);
     assert.ok(existsSync(expected), 'the index must be installed in the cache');
@@ -208,7 +374,7 @@ test('enrichment runs before validation, not after', async () => {
       db.close();
       return stats();
     },
-    run: (_cmd, args) => { copyFileSync(bare, args[args.length - 1]!); return { status: 0, stderr: '' }; },
+    run: fakeUv({ generate: (output) => copyFileSync(bare, output) }).run,
   });
   assert.ok(existsSync(target), 'generate -> enrich -> validate must succeed on bare output');
 });
@@ -222,7 +388,7 @@ test('a partial page fetch fails the build rather than reporting full coverage',
       api,
       // Every scene it did see joined, so coverage alone reads as a perfect run.
       enrich: async () => stats({ missingPages: 3 }),
-      run: (_cmd, args) => { copyFileSync(FIXTURE, args[args.length - 1]!); return { status: 0, stderr: '' }; },
+      run: fakeUv().run,
     }),
     /returned no content|partial fetch/i,
   );
@@ -243,7 +409,7 @@ test('a surge of unrecognised member openers fails the build', async () => {
       targetPath: target,
       api,
       enrich: async () => surge,
-      run: (_cmd, args) => { copyFileSync(FIXTURE, args[args.length - 1]!); return { status: 0, stderr: '' }; },
+      run: fakeUv().run,
     }),
     /unrecognised member opener/i,
   );
@@ -263,7 +429,7 @@ test('a type that resolves no images fails the build, naming it', async () => {
       enrich: async () => stats({ images: imageStats({
         charm: { subjects: 24, resolved: 0, missing: 24, invalid: 0, skipped: 0 },
       }) }),
-      run: (_cmd, args) => { copyFileSync(FIXTURE, args[args.length - 1]!); return { status: 0, stderr: '' }; },
+      run: fakeUv().run,
     }),
     /charm.*0\.0%.*below the 95% floor/s,
   );
@@ -281,7 +447,7 @@ test('a type that was never requested fails the build', async () => {
     buildIndex({
       targetPath: target, api,
       enrich: async () => stats({ images: withoutCharm }),
-      run: (_cmd, args) => { copyFileSync(FIXTURE, args[args.length - 1]!); return { status: 0, stderr: '' }; },
+      run: fakeUv().run,
     }),
     /no subjects for "charm"/,
   );
@@ -297,7 +463,7 @@ test('an unusable image response fails the build even at full coverage', async (
       enrich: async () => stats({ images: imageStats({
         item: { subjects: 100, resolved: 100, missing: 0, invalid: 4, skipped: 0 },
       }) }),
-      run: (_cmd, args) => { copyFileSync(FIXTURE, args[args.length - 1]!); return { status: 0, stderr: '' }; },
+      run: fakeUv().run,
     }),
     /item.*4 unusable/s,
   );
@@ -313,7 +479,7 @@ test('missing images alone do not fail the build', async () => {
     enrich: async () => stats({ images: imageStats({
       spell: { subjects: 211, resolved: 209, missing: 2, invalid: 0, skipped: 0 },
     }) }),
-    run: (_cmd, args) => { copyFileSync(FIXTURE, args[args.length - 1]!); return { status: 0, stderr: '' }; },
+    run: fakeUv().run,
   });
   assert.ok(existsSync(target));
 });
@@ -328,7 +494,7 @@ test('an unmatched spell area key warns by name without bricking the build', asy
     await buildIndex({
       targetPath: target, api,
       enrich: async () => stats({ spellShapes: { served: 23, unmatched: 1, unmatchedTitles: ['Mass Heal'] } }),
-      run: (_cmd, args) => { copyFileSync(FIXTURE, args[args.length - 1]!); return { status: 0, stderr: '' }; },
+      run: fakeUv().run,
     });
   } finally {
     process.stderr.write = stderr;
@@ -353,7 +519,7 @@ test('too few spell area shapes fails the build', async () => {
     buildIndex({
       targetPath: target, api,
       enrich: async () => stats({ spellShapes: { served: 3, unmatched: 0, unmatchedTitles: [] } }),
-      run: (_cmd, args) => { copyFileSync(FIXTURE, args[args.length - 1]!); return { status: 0, stderr: '' }; },
+      run: fakeUv().run,
     }),
     /below the floor of 20/,
   );
@@ -369,18 +535,20 @@ test('a failing enricher leaves an existing good index byte-identical', async ()
   const target = join(dir, 'tibiawiki.db');
   copyFileSync(FIXTURE, target);
   const before = sha(target);
+  const uv = fakeUv();
 
   await assert.rejects(
     buildIndex({
       targetPath: target,
       api,
       enrich: async () => { throw new Error('wiki unreachable'); },
-      run: (_cmd, args) => { copyFileSync(FIXTURE, args[args.length - 1]!); return { status: 0, stderr: '' }; },
+      run: uv.run,
     }),
     /Enrichment failed.*wiki unreachable/s,
   );
   assert.equal(sha(target), before, 'the pre-existing index must survive an enrichment failure');
   assert.equal(readdirSync(dir).length, 1, 'no temp file left behind');
+  assert.equal(existsSync(uv.env()), false, 'the generator environment must be removed');
 });
 
 test('coverage below the floor fails the build', async () => {
@@ -391,7 +559,7 @@ test('coverage below the floor fails the build', async () => {
       targetPath: target,
       api,
       enrich: async () => stats({ scenes: 100, stored: 50, joined: 50 }),
-      run: (_cmd, args) => { copyFileSync(FIXTURE, args[args.length - 1]!); return { status: 0, stderr: '' }; },
+      run: fakeUv().run,
     }),
     /coverage 50\.0% is below the 95% floor/i,
   );
@@ -407,9 +575,77 @@ test('zero eligible scenes fails rather than passing on NaN', async () => {
       targetPath: target,
       api,
       enrich: async () => stats({ scenes: 0, joined: 0, stored: 0 }),
-      run: (_cmd, args) => { copyFileSync(FIXTURE, args[args.length - 1]!); return { status: 0, stderr: '' }; },
+      run: fakeUv().run,
     }),
     /no eligible scenes/i,
   );
   assert.equal(existsSync(target), false);
+});
+
+/**
+ * `uv pip install --require-hashes` is what refuses an unhashed or mismatched entry at
+ * build time. These pin the committed lock itself, so a bad refresh fails here first.
+ */
+test('the generator lock pins every requirement with == and hashes it', () => {
+  const entries = lockEntries();
+  // tibiawikisql alone would parse too, but it has dependencies, and they must be locked.
+  assert.ok(entries.length > 1, `the lock lists ${entries.length} requirement(s)`);
+  // An exact version starts with a digit and holds no `*`, so `==0.*` and `===` are refused.
+  const pinnedAndHashed =
+    /^[A-Za-z0-9][A-Za-z0-9._-]*==[0-9][0-9A-Za-z.!+_-]*(?: ; (?:(?! --hash=).)+)?(?: --hash=sha256:[0-9a-f]{64})+$/;
+  assert.deepEqual(entries.filter((entry) => !pinnedAndHashed.test(entry)), []);
+});
+
+test('the lock pins the generator build-index runs', () => {
+  const generator = lockEntries().filter((entry) => /^tibiawikisql==/i.test(entry));
+  assert.equal(generator.length, 1, 'exactly one tibiawikisql entry');
+  assert.equal(generator[0]!.split(' ')[0], GENERATOR);
+});
+
+test('the lock header records the cutoff, the uv version, the Python range, the checks and the command', () => {
+  const header = /^(?:#.*\n)+/.exec(readFileSync(LOCK, 'utf8'))?.[0] ?? '';
+  const field = (name: string) => new RegExp(`^# ${name}: (.+)$`, 'm').exec(header)?.[1];
+  const cutoff = field('cutoff');
+  assert.match(cutoff ?? '', /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/, 'an absolute cutoff, as re-running needs it');
+  assert.match(field('uv') ?? '', /^uv \d+\.\d+\.\d+ /, 'the uv --version output');
+  // The lock was checked against this range, so a changed constant needs a regenerated lock.
+  assert.equal(field('python'), GENERATOR_PYTHON, 'the lock was generated for another Python range');
+  const bounds = /^cpython>=(\d+)\.(\d+),<\d+\.(\d+)$/.exec(GENERATOR_PYTHON);
+  assert.ok(bounds, `GENERATOR_PYTHON is not a cpython>=X.Y,<X.Z range: ${GENERATOR_PYTHON}`);
+  const major = Number(bounds[1]);
+  const floorMinor = Number(bounds[2]);
+  // A check dropped from lock-generator would still write a lock, so what it checked is pinned
+  // here: every CPython minor version the range admits, on each of lock-generator's five platforms.
+  const pythons = Array.from({ length: Number(bounds[3]) - floorMinor }, (_, i) => `${major}.${floorMinor + i}`);
+  assert.equal(
+    field('checked'),
+    `CPython ${pythons.join(', ')} on x86_64-unknown-linux-gnu, aarch64-unknown-linux-gnu, ` +
+      'x86_64-apple-darwin, aarch64-apple-darwin, x86_64-pc-windows-msvc',
+    'the lock was not checked on every CPython the range admits, on every platform',
+  );
+  // The compile floor comes from the same constant the environment is created with.
+  assert.equal(
+    field('command'),
+    `echo '${GENERATOR}' | uv pip compile - --universal --generate-hashes --no-build ` +
+      `--python-version ${major}.${floorMinor} --exclude-newer ${cutoff} --no-header`,
+  );
+});
+
+test('lock-generator refuses a cutoff that is not an absolute UTC time, before it runs uv', () => {
+  const script = fileURLToPath(new URL('../scripts/lock-generator.ts', import.meta.url));
+  const before = sha(LOCK);
+  // A PATH of one empty directory has no uv on it, so a run that got as far as uv fails
+  // on that instead.
+  const noUv = scratch();
+  // uv reads a bare date in the local time zone and a duration against the clock, so
+  // neither names the same instant twice. The third date does not exist, and the fourth
+  // parses but is not the one form a cutoff is written in.
+  for (const cutoff of ['2026-09-06', '7 days', '2026-02-30T00:00:00Z', '+010000-01-01T00:00Z']) {
+    const r = spawnSync(process.execPath, [script, '--cutoff', cutoff], {
+      env: { ...process.env, PATH: noUv }, encoding: 'utf8',
+    });
+    assert.notEqual(r.status, 0, `--cutoff ${cutoff} was accepted`);
+    assert.match(r.stderr, /--cutoff must be an absolute UTC time/, `--cutoff ${cutoff}:\n${r.stderr}`);
+  }
+  assert.equal(sha(LOCK), before, 'a refused run must leave the lock untouched');
 });

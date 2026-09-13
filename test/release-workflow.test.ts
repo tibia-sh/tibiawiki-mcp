@@ -395,6 +395,17 @@ test('a release bumps the package version the plugin runs', () => {
   assert.equal(spec, `tibiawiki-mcp@npm:${name}@${version}`, `.mcp.json ${pin} is not the pinned package`);
 });
 
+test('a dispatched run releases nothing', () => {
+  // A dispatch retries the MCP registry publish for a tag npm already has. release-please does
+  // not look at the event, so a dispatch that found a merged release PR would release it and
+  // publish it to npm, while its registry job published the dispatched tag instead.
+  const steps = releaseJobSteps().filter((step) =>
+    /^ *(?:- +)?uses: *googleapis\/release-please-action@/m.test(step),
+  );
+  assert.equal(steps.length, 1, 'expected exactly one release-please step');
+  assert.equal(stepIf(steps[0]!), "${{ github.event_name == 'push' }}", 'release-please runs on a dispatch');
+});
+
 /** The condition the registry job runs on. */
 const REGISTRY_GATE = "${{ needs.release.outputs.released == 'true' || github.event_name == 'workflow_dispatch' }}";
 

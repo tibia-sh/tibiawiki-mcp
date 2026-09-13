@@ -38,11 +38,94 @@ Read the whole version list. `npm view @tibia.sh/tibiawiki-mcp@X.Y.Z` exits 1 bo
 
 ## A plain re-run publishes nothing
 
-Re-running a release run that failed in a later step, after release-please created the GitHub release, turns the run green and publishes nothing. The failed attempt already created the release and relabelled the PR `autorelease: tagged`, so the re-run finds no release PR left to release. `release_created` stays unset, and every step after release-please is skipped. The red attempt is then only behind the **Latest** menu.
+Re-running a release run that failed in a later step, after release-please created the GitHub release, publishes nothing. The run turns green, unless another merged release PR still carries `autorelease: pending`. The failed attempt already created the release and relabelled the PR `autorelease: tagged`, so the re-run finds no release PR left to release. `release_created` stays unset, so no step builds or publishes anything. The red attempt is then only behind the **Latest** menu.
 
 A green release run does not prove a publish. Check npm. The one re-run that publishes is [the recovery below](#re-run-the-merge-commits-run), after the release, the tag and the label are reset.
 
 The same goes for a push run whose `registry` job failed. Re-running the whole run does not retry the registry publish. Its release job does not release that version again, so `released` stays empty and the `registry` job is skipped. Publish to the registry through [a dispatch](#a-version-the-mcp-registry-does-not-have) instead.
+
+## A merged release PR with no release
+
+The release PR is merged and still carries `autorelease: pending`. Its version has no tag and no GitHub release, and npm does not have it. Every push run that creates no release checks for this at `Check that every merged release PR was released`, and fails there with an error that names the PR.
+
+release-please releases a merged PR only while it carries `autorelease: pending`, and moves the label to `autorelease: tagged` right after it creates the release. Until the label moves, release-please tries the PR again on every push and opens no new release PR. The step fails every push run that leaves the PR unreleased.
+
+This is as urgent as [A release npm does not have](#a-release-npm-does-not-have). The release commit pinned `.mcp.json` to the new version, so the plugin on `main` cannot start until npm has it.
+
+Set `VERSION` to the version in the PR's title, and `PR` to its number:
+
+```bash
+VERSION=X.Y.Z
+PR=N
+```
+
+The step can fail in a run other than the merge commit's own, because a run that waited its turn sees the PR as it is when the step runs. A later run can also release the PR before you look. So check that the state still holds. The first command must print `autorelease: pending`, and the second must print nothing:
+
+```bash
+gh pr view "$PR" --json labels --jq '.labels[].name'
+git ls-remote --tags https://github.com/tibia-sh/tibiawiki-mcp.git "v$VERSION"
+```
+
+If the PR carries `autorelease: tagged` or the tag exists, a run released the PR after all. When `npm view @tibia.sh/tibiawiki-mcp versions --json` lists the version, nothing is left to do. When it does not, go to [A release npm does not have](#a-release-npm-does-not-have).
+
+Otherwise, open the log of the red run's `Run googleapis/release-please-action` step, and find out why release-please did not release the PR:
+
+| The log shows | Cause | Recovery |
+|---|---|---|
+| `Building release for path: .`, then `Pull request should have been merged` | GitHub no longer returns `merge_commit_sha`, as in [Known future break](#known-future-break). A re-run runs the same workflow file and the same release-please, so it stalls the same way. | [Create the release by hand](#create-the-release-by-hand) |
+| `Building release for path: .`, then another message instead of `Creating 1 releases for pull #N`, such as `Bad pull request title` | release-please found the PR but cannot build a release from it. A re-run reads the same PR and stops the same way. | [Create the release by hand](#create-the-release-by-hand) |
+| no `Building release for path: .` | A one-off miss. release-please did not find the PR when it looked for releases. The log can still show that it saw the PR later, as `Found pull request #N` right before `There are untagged, merged release PRs outstanding - aborting`. | [Re-run the merge commit's run](#re-run-the-merge-commits-run), with the changes below |
+
+For a one-off miss, no release or tag exists, so skip the parts of [Re-run the merge commit's run](#re-run-the-merge-commits-run) that reset them. In step 1, run only the loop, not the `isImmutable` check. Skip steps 3 and 4. From step 2 until the re-run has finished, work without a pause and merge nothing to `main`. A push run that starts before the re-run can release the PR itself, in a run triggered at the wrong commit, and leave you at [A release npm does not have](#a-release-npm-does-not-have).
+
+Step 2 finds the merge commit's run from the PR. Re-run that run even when the step failed in another run. Its 30 days count from its own `createdAt`, not from the run that failed. If GitHub can no longer re-run it, or the re-run fails at `Check that every merged release PR was released` again, [create the release by hand](#create-the-release-by-hand).
+
+### Create the release by hand
+
+**Not yet exercised.** It follows the source of release-please 17.6.0, the version `release.yml` runs, and of `gh` 2.100.0.
+
+You create the tag and the GitHub release at the merge commit, as release-please would have, and then move the PR's label to `autorelease: tagged`. That leaves you at [A release npm does not have](#a-release-npm-does-not-have), where only [Publish by hand](#publish-by-hand) applies. [Re-run the merge commit's run](#re-run-the-merge-commits-run) deletes the release you created and runs the same release-please again.
+
+Keep the order of the steps. Once the label moves, the next push run looks for the release of the version in `.release-please-manifest.json`, by its GitHub release or else by its tag. With neither there, it counts every commit as unreleased and opens a release PR past `$VERSION` with the whole history as its notes. [A bad release](#a-bad-release) does not apply either, because it relies on the tag that release-please never created.
+
+1. Check that no release run is waiting or running. The loop must print nothing:
+
+   ```bash
+   for state in requested queued pending waiting in_progress; do gh run list --workflow release.yml --status "$state" --json databaseId --jq '.[].databaseId'; done
+   ```
+
+   If it prints run IDs, wait until those runs finish, and run it again.
+
+2. Find the merge commit, and check that it carries the version. The second command must print `$VERSION`:
+
+   ```bash
+   SHA=$(gh pr view "$PR" --json mergeCommit --jq .mergeCommit.oid)
+   gh api "repos/tibia-sh/tibiawiki-mcp/contents/package.json?ref=$SHA" --jq '.content | @base64d | fromjson | .version'
+   ```
+
+3. Write the notes release-please gives the release. They are the PR body between its first and last `---` lines. Read `notes-$VERSION.md`, and check that it holds the whole changelog entry the PR shows:
+
+   ```bash
+   gh pr view "$PR" --json body --jq '.body | gsub("\r\n"; "\n") | split("\n") | index("---") as $first | rindex("---") as $last | .[$first + 1:$last] | join("\n") | sub("^\\s+"; "") | sub("\\s+$"; "")' > "notes-$VERSION.md"
+   ```
+
+4. Create the release at that commit, with the title release-please gives it. The last command must print `$SHA` and `refs/tags/v$VERSION`:
+
+   ```bash
+   gh release create "v$VERSION" --target "$SHA" --title "v$VERSION" --notes-file "notes-$VERSION.md"
+   git ls-remote --tags https://github.com/tibia-sh/tibiawiki-mcp.git "v$VERSION"
+   ```
+
+5. Move the label. The second command must print `autorelease: tagged` and nothing else:
+
+   ```bash
+   gh pr edit "$PR" --remove-label "autorelease: pending" --add-label "autorelease: tagged"
+   gh pr view "$PR" --json labels --jq '.labels[].name'
+   ```
+
+6. Follow [A release npm does not have](#a-release-npm-does-not-have) through its checks, then [Publish by hand](#publish-by-hand).
+
+When the log shows `Pull request should have been merged`, you can upgrade release-please-action instead of steps 1 to 5. Upgrade only to a release whose release-please no longer reads `merge_commit_sha`. Check that in its source before you rely on it. On 2026-09-13 the newest release-please, 17.11.2, still reads it. The upgrade's push run creates the release at the merge commit and moves the label. It fails at `Release tagged at another commit, not published`, because the upgrade's commit triggered it. From there, follow [A release npm does not have](#a-release-npm-does-not-have) with [Publish by hand](#publish-by-hand), because re-running the merge commit's run runs the old release-please.
 
 ## A release npm does not have
 
@@ -342,4 +425,4 @@ The registry lets only the owner of `tibia.sh` publish `sh.tibia/tibiawiki-mcp`.
 
 ## Known future break
 
-GitHub's REST API version `2026-03-10` drops `merge_commit_sha` from pull request responses, per [`data/reusables/rest-api/breaking-changes-changelog.md`](https://github.com/github/docs/blob/main/data/reusables/rest-api/breaking-changes-changelog.md) in github/docs. release-please 17.6.0 finds the release commit through that field, so without it a merged release PR creates no release, and the run still ends green. release-please sends no API version header, so it gets `2022-11-28`, which GitHub serves to such requests until 24 months after `2026-03-10`, around March 2028. Upgrade release-please-action to a release that handles this before then, and treat a merged release PR that gets no tag as the symptom.
+GitHub's REST API version `2026-03-10` drops `merge_commit_sha` from pull request responses, per [`data/reusables/rest-api/breaking-changes-changelog.md`](https://github.com/github/docs/blob/main/data/reusables/rest-api/breaking-changes-changelog.md) in github/docs. release-please 17.6.0 finds the release commit through that field, so without it a merged release PR creates no release. Its step still ends green. `Check that every merged release PR was released` then turns that run red, and every push run after it, until the PR is released. release-please sends no API version header, so it gets `2022-11-28`, which GitHub serves to such requests until 24 months after `2026-03-10`, around March 2028. Upgrade release-please-action to a release that handles this before then. If the check turns red first, follow [A merged release PR with no release](#a-merged-release-pr-with-no-release). Every release PR stalls the same way until the upgrade.

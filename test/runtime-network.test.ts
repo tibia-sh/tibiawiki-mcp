@@ -7,8 +7,8 @@ import { fileURLToPath } from 'node:url';
  * The runtime never contacts the network. Every answer comes from the index on disk, and only
  * src/indexer/, which builds that index, fetches anything. Only src/http.ts may import node:http, and
  * only to create the listener that serves inbound requests. Each .ts file under src/ outside
- * src/indexer/ is read as text, comments included, so a comment that trips a rule is reworded, never
- * exempted.
+ * src/indexer/ is read as text, comments and strings included, so a comment that trips a rule is
+ * reworded, never exempted.
  */
 
 const root = fileURLToPath(new URL('..', import.meta.url));
@@ -16,16 +16,24 @@ const root = fileURLToPath(new URL('..', import.meta.url));
 /** The one file that may import node:http. */
 const LISTENER = 'src/http.ts';
 
-/** The outbound network APIs no runtime file may name. */
+/** The outbound network APIs no runtime file may name, and a call to fetch on any object. */
 const NETWORK_APIS = [
   /(?<![\w$.])fetch\b/g,
   /globalThis\.fetch/g,
+  /\bfetch\s*\(/g,
   /\bWebSocket\b/g,
   /\bEventSource\b/g,
   /\bXMLHttpRequest\b/g,
   /\bhttp\.request\b/g,
   /\bhttp\.get\b/g,
 ];
+
+/**
+ * The network modules whose names are not ordinary words, and getBuiltinModule, which loads any builtin
+ * by name. Each fails as text anywhere, so a string handed to createRequire or getBuiltinModule fails as
+ * much as an import does.
+ */
+const NETWORK_TEXT = /node:https|node:http2|node:net|node:tls|node:dgram|undici|axios|node-fetch|getBuiltinModule/g;
 
 /**
  * A reference to one of `modules`, or to a path inside one, in quotes or backticks: an import or
@@ -35,14 +43,21 @@ const NETWORK_APIS = [
 const referenceTo = (modules: string[]): RegExp =>
   new RegExp(`\\b(?:from|import|require\\s*\\(|import\\s*\\()\\s*(['"\`])(?:${modules.join('|')})(?:/[^'"\`]*)?\\1`, 'g');
 
-/** A reference to a module that reaches the network, by each specifier that loads it. */
-const NETWORK_MODULE = referenceTo([
-  'node:https', 'https', 'node:http2', 'http2', 'node:net', 'net', 'node:tls', 'tls', 'node:dgram', 'dgram',
-  'undici', 'axios', 'node-fetch', 'ws',
-]);
+/**
+ * The builtins https, http2, net, tls and dgram by their bare names, and the ws package. These fail only
+ * as an import, a require or a dynamic import(), not as text anywhere, because each is also an ordinary
+ * word, such as https in a URL.
+ */
+const NETWORK_MODULE = referenceTo(['https', 'http2', 'net', 'tls', 'dgram', 'ws']);
 
-/** A reference to node:http, by either specifier. */
-const HTTP_MODULE = referenceTo(['node:http', 'http']);
+/**
+ * node:http as text anywhere, except where it begins node:https or node:http2, which NETWORK_TEXT covers.
+ * Every node:http outside the imports src/http.ts may hold then fails one of the two tests.
+ */
+const HTTP_TEXT = /node:http(?![s2])/g;
+
+/** node:http by its bare name, which fails only as a module reference, for the same reason as NETWORK_MODULE. */
+const HTTP_MODULE = referenceTo(['http']);
 
 /**
  * The two statements src/http.ts may import node:http with, their braces captured: a named import and
@@ -105,14 +120,15 @@ const hits = (path: string, text: string, patterns: RegExp[], scanned = text): s
 };
 
 test('nothing outside src/indexer/ names an outbound network API or imports a network module', () => {
-  const found = sources().flatMap(({ path, text }) => hits(path, text, [...NETWORK_APIS, NETWORK_MODULE]));
+  const found = sources().flatMap(({ path, text }) => hits(path, text, [...NETWORK_APIS, NETWORK_TEXT, NETWORK_MODULE]));
   assert.deepEqual(found, [], `outbound network access outside src/indexer/:\n${found.join('\n')}`);
 });
 
 test('only src/http.ts imports node:http, and only its createServer and types', () => {
-  // A default or namespace import, a require or a dynamic import() hands over request, get and Agent too.
+  // A default or namespace import, a require or a dynamic import() hands over request, get and Agent too,
+  // and so does a node:http string handed to createRequire or getBuiltinModule.
   const found = sources().flatMap(({ path, text }) =>
-    hits(path, text, [HTTP_MODULE], path === LISTENER ? withoutListenerImports(text) : text),
+    hits(path, text, [HTTP_TEXT, HTTP_MODULE], path === LISTENER ? withoutListenerImports(text) : text),
   );
-  assert.deepEqual(found, [], `node:http imported outside the forms ${LISTENER} may use:\n${found.join('\n')}`);
+  assert.deepEqual(found, [], `node:http outside the imports ${LISTENER} may hold:\n${found.join('\n')}`);
 });

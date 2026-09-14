@@ -447,6 +447,11 @@ test('every pnpm/setup step runs a frozen install, and takes the pnpm version an
     assert.equal(scalar(inputs, 'version'), undefined, `${where} sets a pnpm version beside packageManager`);
     assert.equal(scalar(inputs, 'runtime'), undefined, `${where} installs a runtime`);
   }
+  // Without a runtime input, pnpm/setup installs every runtime package.json declares in
+  // devEngines.runtime, so a runtime declared there lands on PATH ahead of setup-node's Node too.
+  const manifest = JSON.parse(read('package.json')) as { devEngines?: { runtime?: unknown } };
+  assert.equal(manifest.devEngines?.runtime, undefined,
+    'package.json declares devEngines.runtime, which pnpm/setup installs ahead of setup-node');
 });
 
 test('only the ci.yml test job caches the pnpm store', () => {

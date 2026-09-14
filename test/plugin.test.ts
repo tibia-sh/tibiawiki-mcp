@@ -55,20 +55,31 @@ test('the plugin manifest and MCP config are well formed', () => {
   assert.ok(!JSON.stringify(mcp).includes('/Users/'), 'no absolute developer paths');
 });
 
-test('the marketplace lists this plugin and leaves its version to plugin.json', () => {
+test('the marketplace installs this plugin from its release tag and leaves its version to plugin.json', () => {
   const marketplace = JSON.parse(readFileSync(`${root}.claude-plugin/marketplace.json`, 'utf8'));
   const manifest = JSON.parse(readFileSync(`${root}.claude-plugin/plugin.json`, 'utf8'));
   assert.match(marketplace.owner?.name ?? '', /\S/, 'the marketplace needs an owner name');
   const entry = marketplace.plugins?.find((plugin: { name: unknown }) => plugin.name === manifest.name);
   assert.ok(entry, `the marketplace must list the plugin under plugin.json's name, ${manifest.name}`);
-  // The plugin is the repository root, where plugin.json, .mcp.json and the skill live.
-  assert.equal(entry.source, './', 'the plugin source must be the repository root');
+  // An install copies the plugin from the tag of plugin.json's version, where the skill describes the
+  // server .mcp.json pins. Copied from main, the skill can describe tools that landed for a release
+  // that is not out yet. A release bumps the version in plugin.json and the one in the ref together.
+  // Claude Code clones a github source over SSH only, which fails without SSH access to GitHub, and
+  // clones this HTTPS URL for anyone.
+  const url = `${manifest.repository}.git`;
+  // With a sha beside the ref, Claude Code installs the sha, and no release moves it.
+  assert.ok(!Object.hasOwn(entry.source ?? {}, 'sha'), 'the plugin source must not pin a commit');
+  assert.deepEqual(
+    entry.source,
+    { source: 'url', url, ref: `v${manifest.version}` },
+    `the plugin source must be ${url} at v${manifest.version}, the tag of plugin.json's version`,
+  );
   // Plugin listings show the entry's description over plugin.json's, before and after
   // install, so a description changed in plugin.json alone would not show there.
   assert.equal(entry.description, manifest.description, "the entry description must be plugin.json's");
-  // release-please bumps the version in plugin.json only. Claude Code uses that one without a
-  // warning when the entry sets its own, and `claude plugin validate` passes both, so a version
-  // here could only go stale.
+  // release-please bumps the version in plugin.json and in the ref, never one here. Claude Code uses
+  // plugin.json's without a warning when the entry sets its own, and `claude plugin validate` passes
+  // both, so a version here could only go stale.
   assert.ok(!Object.hasOwn(entry, 'version'), 'the entry must not carry a version');
 });
 

@@ -604,6 +604,28 @@ test('a release bumps the package version the plugin runs', () => {
   assert.equal(spec, `tibiawiki-mcp@npm:${name}@${version}`, `.mcp.json ${pin} is not the pinned package`);
 });
 
+test('a release bumps the tag the marketplace installs the plugin from', () => {
+  // A ref left behind keeps every new install on the previous release.
+  const ref = '$.plugins[0].source.ref';
+  assert.ok(releaseBumps('.claude-plugin/marketplace.json', ref), `.claude-plugin/marketplace.json ${ref} is not bumped`);
+  // Another plugin from this repository, listed first, would sit at the same tag, and the release
+  // would bump its ref instead.
+  const name = valueAt('.claude-plugin/plugin.json', '$.name');
+  assert.equal(
+    valueAt('.claude-plugin/marketplace.json', '$.plugins[0].name'),
+    name,
+    `.claude-plugin/marketplace.json $.plugins[0] is not the ${name} plugin`,
+  );
+  // release-please rewrites the version inside the string the path selects, so the v in front of it
+  // stays. A path that selects nothing or another value leaves the tag behind, and the release PR
+  // stays green.
+  assert.equal(
+    valueAt('.claude-plugin/marketplace.json', ref),
+    `v${PACKAGE_VERSION}`,
+    `.claude-plugin/marketplace.json ${ref} is not the tag of the current release, v${PACKAGE_VERSION}`,
+  );
+});
+
 test('a dispatched run releases nothing', () => {
   // A dispatch retries the MCP registry publish for a tag npm already has. release-please does
   // not look at the event, so a dispatch that found a merged release PR would release it and

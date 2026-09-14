@@ -61,6 +61,11 @@ test('it reports the package version in its handshake', () => withMissingIndex(a
   assert.equal(client.getServerVersion()?.version, PACKAGE_VERSION);
 }));
 
+test('it tells clients its tool list never changes', () => withMissingIndex(async (client) => {
+  // Built by its own factory, so its handshake is checked on its own.
+  assert.equal(client.getServerCapabilities()?.tools?.listChanged, false);
+}));
+
 test('its instructions explain the missing index', () => withMissingIndex(async (client) => {
   assert.match(String(client.getInstructions()), /index unavailable/i);
 }));

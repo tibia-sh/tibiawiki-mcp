@@ -20,6 +20,13 @@ const packageJson = JSON.parse(
 const SERVER_INFO = { name: 'tibiawiki-mcp', version: packageJson.version };
 
 /**
+ * Both servers register their whole tool set when they are built and never change it.
+ * The SDK advertises tools.listChanged as true unless it is set, which invites a client
+ * to listen for tool list changes that never come.
+ */
+const CAPABILITIES = { tools: { listChanged: false } };
+
+/**
  * Licence obligations are met in the server's own metadata rather than a README
  * nobody reads: wiki text is CC BY-SA, and the underlying game content is CipSoft's.
  */
@@ -45,9 +52,9 @@ export function createServer(handle: TibiaDb): McpServer {
   const server = new McpServer(
     SERVER_INFO,
     {
-      capabilities: { tools: {} },
+      capabilities: CAPABILITIES,
       instructions:
-        'Offline TibiaWiki knowledge base. This is a local snapshot of the wiki, generated ' +
+        'TibiaWiki knowledge base: a snapshot of the wiki generated ' +
         `${provenance.generatedAt} by tibiawiki-sql ${provenance.version}. It reflects the wiki ` +
         'as of that time, not live game or server state. Damage modifiers are percentages where ' +
         '100 is neutral: above 100 the creature takes extra damage from that element. ' +
@@ -78,7 +85,7 @@ export function createUnavailableServer(reason: string): McpServer {
   const server = new McpServer(
     SERVER_INFO,
     {
-      capabilities: { tools: {} },
+      capabilities: CAPABILITIES,
       instructions:
         `TibiaWiki index unavailable, so no query can be answered yet. ${reason} ` +
         'Once the index exists, restart this server.',

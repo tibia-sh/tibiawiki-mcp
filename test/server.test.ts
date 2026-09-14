@@ -21,6 +21,22 @@ test('the server instructions carry provenance and the CC-BY-SA attribution', as
   await h.close();
 });
 
+test('the server tells clients its tool list never changes', async () => {
+  const h = await connect();
+  assert.equal(h.client.getServerCapabilities()?.tools?.listChanged, false);
+  await h.close();
+});
+
+test('the instructions call the index a snapshot without assuming a transport', async () => {
+  const h = await connect();
+  const instructions = String(h.client.getInstructions());
+  assert.match(instructions, /^TibiaWiki knowledge base: a snapshot of the wiki generated /);
+  // Every transport sends these same instructions, and over a network the snapshot is
+  // neither offline nor local.
+  assert.doesNotMatch(instructions, /local snapshot|Offline/);
+  await h.close();
+});
+
 test('tibia_get returns known-good structured data for Dragon', async () => {
   const h = await connect();
   const res = await h.client.callTool({ name: 'tibia_get', arguments: { name: 'Dragon' } });

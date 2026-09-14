@@ -74,15 +74,24 @@ function listTitles(titles: readonly string[], limit = 10): string {
     : `${titles.slice(0, limit).join(', ')} and ${titles.length - limit} more`;
 }
 
+/** `error` is the spawn error code, such as `ENOENT`, set only when the command could not start. */
 export type Runner = (
   cmd: string,
   args: string[],
-) => { status: number | null; stderr: string };
+) => { status: number | null; stderr: string; error?: string };
 
 const defaultRunner: Runner = (cmd, args) => {
   const r = spawnSync(cmd, args, { encoding: 'utf8', stdio: ['ignore', 'inherit', 'pipe'] });
-  return { status: r.status, stderr: r.stderr ?? '' };
+  return { status: r.status, stderr: r.stderr ?? '', error: (r.error as NodeJS.ErrnoException | undefined)?.code };
 };
+
+/**
+ * How a uv command failed, for the parenthetical in its error. A command that could not
+ * start has no exit status, so it is named by its spawn error instead.
+ */
+function describeFailure(command: string, { status, error }: ReturnType<Runner>): string {
+  return error === undefined ? `\`${command}\` exit ${status}` : `\`${command}\` could not start: ${error}`;
+}
 
 /**
  * Requirements in a lock `uv pip compile` wrote: each starts a line, with its `--hash`
@@ -107,11 +116,11 @@ function generate(run: Runner, output: string): void {
   // A failed `uv venv` is an install failure too. The generator never runs from an
   // environment the lock did not fully install.
   const install = (command: string, args: string[]): void => {
-    const { status, stderr } = run('uv', args);
-    if (status !== 0) {
+    const result = run('uv', args);
+    if (result.status !== 0) {
       throw new Error(
-        `Could not install the generator environment (\`${command}\` exit ${status}). ` +
-          `Is \`uv\` installed? See https://docs.astral.sh/uv/\n${stderr}`,
+        `Could not install the generator environment (${describeFailure(command, result)}). ` +
+          `Is \`uv\` installed? See https://docs.astral.sh/uv/\n${result.stderr}`,
       );
     }
   };
@@ -125,10 +134,12 @@ function generate(run: Runner, output: string): void {
         `with ${requirements} hashed requirements.\n`,
     );
 
-    const { status, stderr } = run('uv', [
+    const generated = run('uv', [
       'run', '--no-project', '--python', env, 'tibiawikisql', 'generate', '--skip-images', '-o', output,
     ]);
-    if (status !== 0) throw new Error(`Index generation failed (\`uv run\` exit ${status}).\n${stderr}`);
+    if (generated.status !== 0) {
+      throw new Error(`Index generation failed (${describeFailure('uv run', generated)}).\n${generated.stderr}`);
+    }
   } finally {
     rmSync(env, { recursive: true, force: true });
   }

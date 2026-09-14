@@ -198,6 +198,11 @@ for (const [subcommand, stderr] of [
         buildIndex({ targetPath: target, enrich: noopEnrich, api, run: uv.run }),
         (error: Error) => {
           assert.match(error.message, /^Could not install the generator environment/);
+          // A command that ran and failed is named by its exit status.
+          assert.ok(
+            error.message.startsWith(`Could not install the generator environment (\`uv ${subcommand}\` exit 2). `),
+            error.message,
+          );
           assert.ok(error.message.includes(stderr), `uv's stderr must be in the error: ${error.message}`);
           return true;
         },
@@ -210,6 +215,33 @@ for (const [subcommand, stderr] of [
     assert.equal(existsSync(uv.env()), false, 'the generator environment must be removed');
     assert.equal(sha(target), before, 'the pre-existing index must survive untouched');
     assert.equal(readdirSync(dir).length, 1, 'no temp file left behind');
+  });
+}
+
+/**
+ * A command that could not start has no exit status: spawnSync returns a null status and
+ * puts the reason in its error's code. The failure names that code, not `exit null`.
+ */
+for (const [subcommand, code, message] of [
+  ['venv', 'EACCES', 'Could not install the generator environment (`uv venv` could not start: EACCES).'],
+  ['run', 'ENOENT', 'Index generation failed (`uv run` could not start: ENOENT).'],
+] as const) {
+  test(`a uv ${subcommand} that could not start is named by its spawn error, not exit null`, async () => {
+    const target = join(scratch(), 'tibiawiki.db');
+    const uv = fakeUv({ exit: { [subcommand]: { status: null, stderr: '', error: code } } });
+
+    const captured = captureStderr();
+    try {
+      await assert.rejects(
+        buildIndex({ targetPath: target, enrich: noopEnrich, api, run: uv.run }),
+        (error: Error) => {
+          assert.ok(error.message.startsWith(message), error.message);
+          return true;
+        },
+      );
+    } finally {
+      captured.restore();
+    }
   });
 }
 

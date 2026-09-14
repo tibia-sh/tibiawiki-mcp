@@ -1,10 +1,12 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Client } from '@modelcontextprotocol/client';
 import { StdioClientTransport } from '@modelcontextprotocol/client/stdio';
+import { openDb } from '../src/db.ts';
 import { TOOL_NAMES } from '../src/server.ts';
 import { PACKAGE_VERSION } from './harness.ts';
 
@@ -80,3 +82,33 @@ test('every tool answers with an actionable error instead of vanishing', () => w
     assert.match(text, /falls back to the packaged index/, `${name} should name the fallback`);
   }
 }));
+
+/**
+ * The process serves the failure rather than failing, so the reason goes to stderr once and
+ * no exit code is set. Empty input closes stdin at once, which is the client leaving.
+ */
+test('the missing index is written to stderr once, and the server exits 0 when its client leaves', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'twmcp-none-'));
+  try {
+    const path = join(dir, 'nope.db');
+    let reason = '';
+    assert.throws(() => openDb(path), (error: unknown) => {
+      reason = (error as Error).message;
+      return true;
+    });
+    const run = spawnSync(process.execPath, ['dist/index.js', 'serve'], {
+      cwd: process.cwd(),
+      encoding: 'utf8',
+      input: '',
+      timeout: 10_000,
+      // Cleared and silenced as in build-index-cli.test.ts, so stderr can be matched whole:
+      // Node 22 warns that node:sqlite is experimental before this CLI writes anything.
+      env: { ...process.env, TIBIAWIKI_MCP_DB: path, NODE_OPTIONS: '', NODE_NO_WARNINGS: '1' },
+    });
+    assert.equal(run.error, undefined, 'the server must exit on its own once stdin closes');
+    assert.equal(run.status, 0, run.stderr);
+    assert.equal(run.stderr, `tibiawiki-mcp: ${reason}\n`);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

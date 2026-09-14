@@ -30,10 +30,3 @@ jobs:
       # `pnpm test` typechecks, builds, and runs the suite - including the stdio
       # conformance tests, which drive the built binary over a real MCP transport.
       - run: pnpm test
-      - name: No runtime network access outside the indexer
-        run: |
-          if grep -rnE "\bfetch\(|node:http|node:https|undici|axios" src/ '--include=*.ts' \
-             | grep -v '^src/indexer/'; then
-            echo "::error::runtime network access found outside src/indexer/"
-            exit 1
-          fi

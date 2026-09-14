@@ -1,0 +1,15 @@
+{
+  "name": "tibiawiki-mcp",
+  "owner": {
+    "name": "tibia.sh",
+    "url": "https://tibia.sh"
+  },
+  "description": "Offline TibiaWiki knowledge base for Claude Code",
+  "plugins": [
+    {
+      "name": "tibiawiki-mcp",
+      "source": "./",
+      "description": "Offline TibiaWiki knowledge base: attribute queries over creatures, items, NPCs, quests, spells and more"
+    }
+  ]
+}

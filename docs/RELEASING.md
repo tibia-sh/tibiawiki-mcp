@@ -4,7 +4,7 @@
 
 ## A normal release
 
-1. A releasable commit, such as a `feat:` or a `fix:`, lands on `main`. The push runs `release.yml`, and its release-please step opens or updates the release PR, `chore(main): release X.Y.Z`, labelled `autorelease: pending`. The PR bumps the version in `package.json`, `server.json`, `.claude-plugin/plugin.json`, `.mcp.json` and `.release-please-manifest.json`, and adds the release notes to `CHANGELOG.md`.
+1. A releasable commit, such as a `feat:` or a `fix:`, lands on `main`. The push runs `release.yml`, and its release-please step opens or updates the release PR, `chore(main): release X.Y.Z`, labelled `autorelease: pending`. The PR bumps the version in `package.json`, `server.json`, `.claude-plugin/plugin.json`, `.claude-plugin/marketplace.json`, `.mcp.json` and `.release-please-manifest.json`, and adds the release notes to `CHANGELOG.md`.
 2. release-please opens the PR with `GITHUB_TOKEN`, so its CI waits for you. Click **Approve workflows to run** in the merge box, and again after every update to the PR. `main` takes the merge only once the `test` check passes.
 
    You can also approve through the API, as `0.3.0` was. Put the `databaseId` of the run whose conclusion is `action_required` in place of `RUN_ID`:
@@ -50,7 +50,7 @@ The release PR is merged and still carries `autorelease: pending`. Its version h
 
 release-please releases a merged PR only while it carries `autorelease: pending`, and moves the label to `autorelease: tagged` right after it creates the release. Until the label moves, release-please tries the PR again on every push and opens no new release PR. The step fails every push run that leaves the PR unreleased.
 
-This is as urgent as [A release npm does not have](#a-release-npm-does-not-have). The release commit pinned `.mcp.json` to the new version, so the plugin on `main` cannot start until npm has it.
+This is as urgent as [A release npm does not have](#a-release-npm-does-not-have). The release commit pinned `.mcp.json` to the new version, so the plugin on `main` cannot start until npm has it. It also pinned the marketplace entry to the release tag, so until that tag exists, installs and updates of the plugin from the marketplace fail.
 
 Set `VERSION` to the version in the PR's title, and `PR` to its number:
 
@@ -137,7 +137,7 @@ The tag and the GitHub release exist, and `npm view @tibia.sh/tibiawiki-mcp vers
 | A run triggered at another commit reached the merged release PR first. Release runs wait their turn, and GitHub does not guarantee their order. | That run is red at `Release tagged at another commit, not published`, and its error names the tag and both commits. The merge commit's own run is green and published nothing. |
 | Someone re-ran one of those runs. | The latest attempt is green, and the red one is behind the **Latest** menu. |
 
-This is urgent. The release commit pinned `.mcp.json` to the new version, so the plugin on `main` cannot start until npm has it. While you follow either recovery below, merge nothing to `main`.
+This is urgent. The release commit pinned `.mcp.json` to the new version, so the plugin on `main` cannot start until npm has it. Once [the re-run](#re-run-the-merge-commits-run) deletes the release tag, installs and updates of the plugin from the marketplace fail until release-please creates it again. While you follow either recovery below, merge nothing to `main`.
 
 Set `VERSION` to the version npm does not have, and `PR` to the number of its release PR:
 

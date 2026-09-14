@@ -55,6 +55,23 @@ test('the plugin manifest and MCP config are well formed', () => {
   assert.ok(!JSON.stringify(mcp).includes('/Users/'), 'no absolute developer paths');
 });
 
+test('the marketplace lists this plugin and leaves its version to plugin.json', () => {
+  const marketplace = JSON.parse(readFileSync(`${root}.claude-plugin/marketplace.json`, 'utf8'));
+  const manifest = JSON.parse(readFileSync(`${root}.claude-plugin/plugin.json`, 'utf8'));
+  assert.match(marketplace.owner?.name ?? '', /\S/, 'the marketplace needs an owner name');
+  const entry = marketplace.plugins?.find((plugin: { name: unknown }) => plugin.name === manifest.name);
+  assert.ok(entry, `the marketplace must list the plugin under plugin.json's name, ${manifest.name}`);
+  // The plugin is the repository root, where plugin.json, .mcp.json and the skill live.
+  assert.equal(entry.source, './', 'the plugin source must be the repository root');
+  // Plugin listings show the entry's description over plugin.json's, before and after
+  // install, so a description changed in plugin.json alone would not show there.
+  assert.equal(entry.description, manifest.description, "the entry description must be plugin.json's");
+  // release-please bumps the version in plugin.json only. Claude Code uses that one without a
+  // warning when the entry sets its own, and `claude plugin validate` passes both, so a version
+  // here could only go stale.
+  assert.ok(!Object.hasOwn(entry, 'version'), 'the entry must not carry a version');
+});
+
 test('tools/list stays within the stated byte budget', async () => {
   const handle = openDb(FIXTURE);
   const server = createServer(handle);

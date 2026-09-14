@@ -39,29 +39,47 @@ dependency. You don't build anything first.
 
 Two ways, and they ship different things.
 
-**As an MCP server only** — the npm package:
+**As an MCP server only**, from the npm package:
 
 ```bash
 claude mcp add --transport stdio tibiawiki -- npx -y @tibia.sh/tibiawiki-mcp
 ```
 
-**As a plugin** — the server *plus* a skill that teaches an agent how to query it
-(name resolution, the 100-is-neutral modifier convention, the data quirks that
-produce wrong answers). The plugin pieces never reach the npm tarball, because
-`package.json` has `files: ["dist", "data/spell-areas.json", "data/tibiawikisql-requirements.txt"]`.
+**As a plugin**, the server *plus* a skill that teaches an agent how to query it: name
+resolution, the 100-is-neutral modifier convention and the data quirks that produce wrong
+answers. The plugin pieces never reach the npm tarball, because `package.json` has
+`files: ["dist", "data/spell-areas.json", "data/tibiawikisql-requirements.txt"]`.
+
+This repository is also the plugin's marketplace. Add it, then install the plugin:
 
 ```bash
-git clone https://github.com/tibia-sh/tibiawiki-mcp
-cd tibiawiki-mcp
-claude --plugin-dir .
+claude plugin marketplace add tibia-sh/tibiawiki-mcp
+claude plugin install tibiawiki-mcp@tibiawiki-mcp
 ```
 
-The plugin runs the published package through `npx`, at the exact version it was released
-with. A fresh clone needs no `pnpm install` and no build. The first start downloads the
-package, and later starts work offline.
+In a session, `/plugin marketplace add tibia-sh/tibiawiki-mcp` and
+`/plugin install tibiawiki-mcp@tibiawiki-mcp` do the same, and `/plugin install` asks which
+scope you want. From the shell, the plugin installs at user scope by default, so it loads in
+every project.
 
-In a checkout, the plugin runs the published package at the pinned version, not your
-local source.
+The plugin runs the published package through `npx`, at the exact version it was released
+with. It needs no `pnpm install` and no build. The first start downloads the package, and
+later starts work offline.
+
+Updates arrive with releases. Auto-update is off by default for third-party marketplaces, so
+you update the plugin yourself:
+
+```bash
+claude plugin update tibiawiki-mcp@tibiawiki-mcp
+```
+
+A `tibiawiki` server you added earlier with `claude mcp add` runs beside the plugin's server
+when its command differs from the plugin's, as the npm package command above does. Remove it
+with `claude mcp remove tibiawiki -s <scope>`. For a server in `local` scope, the default, run
+that from the project you added it in.
+
+In a checkout, `claude --plugin-dir .` loads the plugin for one session. It still runs the
+published package at the pinned version, not your local source.
 
 ## What the skill adds
 

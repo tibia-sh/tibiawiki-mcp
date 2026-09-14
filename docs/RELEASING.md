@@ -412,17 +412,27 @@ The registry lets only the owner of `tibia.sh` publish `sh.tibia/tibiawiki-mcp`.
    dig +short TXT tibia.sh
    ```
 
-6. Store the private key as the secret, in the form `mcp-publisher` takes: the hex of the key's 32-byte seed. The commands pipe it into `gh`, so it is never shown, pasted or written to your shell history. They set nothing unless the hex is 64 characters long, and `gh` confirms with `Set Actions secret MCP_PRIVATE_KEY`.
+6. Install `mcp-publisher` 1.8.1, the version `release.yml` pins, in the same directory. This is the build for a Mac with Apple silicon. The sha256 is the one `registry_1.8.1_checksums.txt` lists for it, and `tar` unpacks nothing unless the archive matches it.
+
+   ```bash
+   curl -fsSL -o mcp-publisher_darwin_arm64.tar.gz https://github.com/modelcontextprotocol/registry/releases/download/v1.8.1/mcp-publisher_darwin_arm64.tar.gz
+   echo "e45e520892460732a4bdf37255576415d4a53ec171f8b913faf15bb1aef7cb77  mcp-publisher_darwin_arm64.tar.gz" | shasum -a 256 -c - && tar -xzf mcp-publisher_darwin_arm64.tar.gz mcp-publisher
+   ```
+
+7. Check the private key, then store it as the secret, in the form `mcp-publisher` takes: the hex of the key's 32-byte seed. The login checks the key against the TXT record, as the `registry` job does, and must print `✓ Successfully logged in`. Only then does `gh` store the key, and it confirms with `Set Actions secret MCP_PRIVATE_KEY`. The login and `gh` run only when the hex is 64 characters long. The key reaches both commands from a variable, so it is never shown, pasted or written to your shell history. `mcp-publisher` 1.8.1 takes it only as an argument, so any process on your Mac can read it while the login runs.
 
    ```bash
    PRIVATE_KEY="$("$OPENSSL" pkey -in key.pem -noout -text | grep -A3 'priv:' | tail -n +2 | tr -d ' :\n')"
-   [ "${#PRIVATE_KEY}" -eq 64 ] && printf '%s' "$PRIVATE_KEY" | gh secret set MCP_PRIVATE_KEY --env mcp-registry --repo tibia-sh/tibiawiki-mcp
+   [ "${#PRIVATE_KEY}" -eq 64 ] && ./mcp-publisher login dns --domain tibia.sh --private-key "$PRIVATE_KEY" && printf '%s' "$PRIVATE_KEY" | gh secret set MCP_PRIVATE_KEY --env mcp-registry --repo tibia-sh/tibiawiki-mcp
    unset PRIVATE_KEY
+   ./mcp-publisher logout
    ```
 
-7. Delete `key.pem`, or keep it where only you can read it, such as a password manager. GitHub never shows the secret again. Without `key.pem`, replacing the secret means a new key, and a new TXT record in place of the old one.
+   The login saves a registry token to `~/.config/mcp-publisher/token.json`, and `mcp-publisher logout` deletes it. If the login fails with `signature verification failed`, compare the TXT record it prints with the output of step 5. Then run the commands again.
 
-8. Publish the current release to the registry, as in [A version the MCP registry does not have](#a-version-the-mcp-registry-does-not-have). If `Publish to the MCP registry` fails with `signature verification failed`, compare the TXT record its login prints with the output of step 5. The run tests the key only when its log shows `✓ Successfully logged in`. When the registry already has the current release, the step finds it and ends green without a login, so the next release is the first to log in with the key. Once the run is green, record the date at the top of this section.
+8. Delete `key.pem`, or keep it where only you can read it, such as a password manager. GitHub never shows the secret again. Without `key.pem`, replacing the secret means a new key, and a new TXT record in place of the old one.
+
+9. Publish the current release to the registry, as in [A version the MCP registry does not have](#a-version-the-mcp-registry-does-not-have). If `Publish to the MCP registry` fails with `signature verification failed`, compare the TXT record its login prints with the output of step 5. The run tests the key only when its log shows `✓ Successfully logged in`. When the registry already has the current release, the step finds it and ends green without a login, so the next release is the first run to log in with the key. Once the run is green, record the date at the top of this section.
 
 ## Known future break
 

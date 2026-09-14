@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.4.0](https://github.com/tibia-sh/tibiawiki-mcp/compare/v0.3.1...v0.4.0) (2026-09-14)
+
+
+### Features
+
+* add a plugin marketplace for Claude Code ([f37f4ef](https://github.com/tibia-sh/tibiawiki-mcp/commit/f37f4efbe31c13ec6be7f2ac08e8765bda462018))
+
+
+### Bug Fixes
+
+* print build-index failures without a stack trace ([6397967](https://github.com/tibia-sh/tibiawiki-mcp/commit/63979676bae4a6b3384b4dcf9ff1850c1d5c20d8))
+
 ## [0.3.1](https://github.com/tibia-sh/tibiawiki-mcp/compare/v0.3.0...v0.3.1) (2026-09-13)
 
 

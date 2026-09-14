@@ -315,6 +315,10 @@ for (const [label, args] of [
     assert.equal(run.status, 2);
     assert.equal(run.stdout, '');
     assert.match(run.stderr, USAGE);
+    assert.ok(
+      run.stderr.split('\n').includes('tibiawiki-mcp: index-digest takes exactly one index path'),
+      `stderr was: ${run.stderr}`,
+    );
   });
 }
 
@@ -323,6 +327,10 @@ test('an unknown command still exits 2, with a usage that lists index-digest', (
   assert.equal(run.status, 2);
   assert.match(run.stderr, /Unknown command: digest-index/);
   assert.match(run.stderr, USAGE);
+  assert.ok(
+    run.stderr.split('\n').includes('tibiawiki-mcp: Unknown command: digest-index'),
+    `stderr was: ${run.stderr}`,
+  );
 });
 
 /**

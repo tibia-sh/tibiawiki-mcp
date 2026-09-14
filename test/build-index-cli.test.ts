@@ -46,6 +46,9 @@ test('build-index without uv exits 1 with a prefixed diagnostic, no stack trace 
     `stderr was: ${run.stderr}`,
   );
   assert.ok(run.stderr.includes('Is `uv` installed?'), `stderr was: ${run.stderr}`);
+  // A command that never started has no exit status, so the diagnostic names the spawn error.
+  assert.ok(run.stderr.includes('(`uv venv` could not start: ENOENT)'), `stderr was: ${run.stderr}`);
+  assert.ok(!run.stderr.includes('exit null'), `stderr was: ${run.stderr}`);
   assert.deepEqual(
     run.stderr.split('\n').filter((line) => /^\s+at /.test(line)),
     [],

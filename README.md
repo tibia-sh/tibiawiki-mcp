@@ -103,6 +103,24 @@ for health checks.
 On `SIGTERM` the server answers new requests with `503` and gives the ones in flight up to
 10 s to finish. Ctrl-C does the same, and a second Ctrl-C stops it at once.
 
+## Use from claude.ai and other remote clients
+
+To use the tools without installing anything, add `https://mcp.tibia.sh/wiki` to your client as a
+remote MCP server. It needs no auth.
+
+It serves the same five tools as a local install, over Streamable HTTP. It runs the versions
+[`tibia-sh/mcp.tibia.sh`](https://github.com/tibia-sh/mcp.tibia.sh) pins. The landing page at
+`https://mcp.tibia.sh/` shows them.
+
+The rate limit is about 300 JSON-RPC messages a minute per IPv4 address or IPv6 /64, counted per
+Cloudflare location. claude.ai users share Anthropic's egress IPs, so they share each address's
+limit.
+
+Cloudflare processes every request, and your IP address is used for rate limiting. Cloudflare's
+analytics may keep sampled request details, such as your IP address, under Cloudflare's own
+policies. The service writes no request logs, only startup, sleep and error lines, with no data
+from your requests, and keeps them for 7 days.
+
 ## What the skill adds
 
 The MCP server alone gives an agent the tools. The bundled skill gives it the

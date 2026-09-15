@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.0](https://github.com/tibia-sh/tibiawiki-mcp/compare/v0.5.0...v0.6.0) (2026-09-15)
+
+
+### Features
+
+* list the hosted endpoint in the MCP registry ([447cde9](https://github.com/tibia-sh/tibiawiki-mcp/commit/447cde9dc22e7a847d5e0fe4516adfafa528b339))
+
 ## [0.5.0](https://github.com/tibia-sh/tibiawiki-mcp/compare/v0.4.0...v0.5.0) (2026-09-15)
 
 

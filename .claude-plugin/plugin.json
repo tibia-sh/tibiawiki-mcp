@@ -1,6 +1,6 @@
 {
   "name": "tibiawiki-mcp",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "description": "Offline TibiaWiki knowledge base: attribute queries over creatures, items, NPCs, quests, spells and more",
   "license": "MIT",
   "author": {

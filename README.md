@@ -6,7 +6,7 @@ An offline MCP server for TibiaWiki. It answers the questions the wiki itself ca
 - *What drops a Dragon Shield, and how likely is it?*
 - *Where do I buy a Steel Helmet, and for how much?*
 
-**The server makes no network calls.** Every answer comes from a local SQLite snapshot
+**The server makes no outbound network calls.** Every answer comes from a local SQLite snapshot
 that installs with it, so queries return in milliseconds and work offline.
 
 ## Why it exists
@@ -80,6 +80,28 @@ that from the project you added it in.
 
 In a checkout, `claude --plugin-dir .` loads the plugin for one session. It still runs the
 published package at the pinned version, not your local source.
+
+## Serve over HTTP
+
+To serve the tools over Streamable HTTP instead of stdio, run:
+
+```bash
+tibiawiki-mcp serve --http [--host <address>] [--port <number>]
+```
+
+It listens on `127.0.0.1:8080` unless you pass `--host` or `--port`. Point your client at
+`http://<host>:<port>/mcp`. The endpoint is stateless and works with clients on protocol versions
+`2025-11-25` and `2026-07-28`.
+
+On a loopback address the server rejects a request to `/mcp` with a foreign `Host` or `Origin`
+header. On any other address it skips those checks. Put your own edge in front of it to handle those
+checks and TLS.
+
+Request bodies are capped at 64 KiB and need a `Content-Length`. `GET /ping` answers `200`
+for health checks.
+
+On `SIGTERM` the server answers new requests with `503` and gives the ones in flight up to
+10 s to finish. Ctrl-C does the same, and a second Ctrl-C stops it at once.
 
 ## What the skill adds
 

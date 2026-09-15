@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.5.0](https://github.com/tibia-sh/tibiawiki-mcp/compare/v0.4.0...v0.5.0) (2026-09-15)
+
+
+### Features
+
+* add the serve --http command ([150a73f](https://github.com/tibia-sh/tibiawiki-mcp/commit/150a73fae688637f4929d94939f1fb51b2a9f9f7))
+* add the streamable HTTP transport ([a9bde39](https://github.com/tibia-sh/tibiawiki-mcp/commit/a9bde3903c30d7981878cb66f65d1eb786a3fe25))
+
+
+### Bug Fixes
+
+* make the handshake accurate on any transport ([41865ae](https://github.com/tibia-sh/tibiawiki-mcp/commit/41865ae18c0badad12a2eae87b8b67ca231748d2))
+* name the spawn error when uv cannot start ([7b1e8d1](https://github.com/tibia-sh/tibiawiki-mcp/commit/7b1e8d14dec03f6da5a6681c7430cf1d323a9869))
+
 ## [0.4.0](https://github.com/tibia-sh/tibiawiki-mcp/compare/v0.3.1...v0.4.0) (2026-09-14)
 
 

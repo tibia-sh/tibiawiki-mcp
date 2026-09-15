@@ -239,7 +239,7 @@ The tarball ships exactly `dist/`, `data/spell-areas.json` and
 `npm pack --dry-run` as part of `pnpm test`, so anything else leaking in fails CI.
 
 `pnpm smoke <tarball-or-package@version>` is the consumer-side check: it installs the
-package into a throwaway directory and drives the *installed* binary over real stdio —
+package into a throwaway directory and drives the *installed* binary over real stdio and HTTP —
 against a local tarball before publishing, against the registry after.
 
 ## Attribution

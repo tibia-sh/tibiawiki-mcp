@@ -13,9 +13,11 @@ type Pkg = {
 };
 type Server = {
   name: string;
+  description: string;
   version: string;
   repository: { url: string; source: string };
   packages: Array<{ identifier: string; version: string }>;
+  remotes: Array<{ type: string; url: string }>;
 };
 type Plugin = { repository: string; version: string };
 
@@ -78,6 +80,18 @@ test('server.json points at the package that is actually published', () => {
   // server.json carries the version twice, and the MCP registry reads packages[0].
   assert.equal(server.version, pkg.version);
   assert.equal(server.packages[0]!.version, pkg.version);
+});
+
+/**
+ * The registry lists the hosted endpoint from this array alone, and a release without it
+ * would delist the endpoint for good at that version. Exact equality: a second entry or
+ * another transport would pass a partial check while pointing clients somewhere else.
+ */
+test('server.json lists the hosted endpoint as its one remote', () => {
+  assert.deepEqual(server.remotes, [{ type: 'streamable-http', url: 'https://mcp.tibia.sh/wiki' }]);
+  // An entry that lists a remote is not offline. The plugin manifest and package.json
+  // keep the word, because both describe the local install.
+  assert.doesNotMatch(server.description, /Offline/);
 });
 
 test('the plugin manifest points at the new org', () => {

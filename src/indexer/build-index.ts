@@ -75,10 +75,11 @@ function listTitles(titles: readonly string[], limit = 10): string {
 }
 
 /**
- * `error` is the spawn error code, set when the command could not start, such as `ENOENT`,
- * and when Node stopped it: `ENOBUFS` once its stderr passed spawnSync's 1 MiB maxBuffer.
- * `signal` is the signal that ended the command, set only when one did, and then `status`
- * is null. Node stops an over-buffered command with SIGTERM, so `ENOBUFS` comes with both.
+ * `error` is set to the spawn error code, such as `ENOENT`, when the command could not
+ * start, and to `ENOBUFS` when Node stopped it, once its stderr passed spawnSync's 1 MiB
+ * maxBuffer. `signal` is the signal that ended the command, set only when one did, and
+ * then `status` is null. Node stops an over-buffered command with SIGTERM, so `ENOBUFS`
+ * comes with both.
  */
 export type Runner = (
   cmd: string,
@@ -97,10 +98,10 @@ const defaultRunner: Runner = (cmd, args) => {
 
 /**
  * How a uv command failed, for the parenthetical in its error. Only a command that exited
- * has an exit status. One that could not start is named by its spawn error, and one a
- * signal ended by the signal. `ENOBUFS` is checked first, because Node reports it beside
- * the SIGTERM it stopped the command with, and the signal would hide the cause: stderr
- * passed the 1 MiB maxBuffer the default runner leaves in place.
+ * has an exit status. One that could not start is named by its spawn error. One that a
+ * signal ended is named by the signal. `ENOBUFS` is checked first, because Node reports it
+ * beside the SIGTERM it stopped the command with, and the signal would hide the cause:
+ * stderr passed the 1 MiB maxBuffer the default runner leaves in place.
  */
 function describeFailure(command: string, { status, signal, error }: ReturnType<Runner>): string {
   if (error === 'ENOBUFS') return `\`${command}\` wrote more than 1 MiB to stderr and was stopped`;

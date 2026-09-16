@@ -222,10 +222,10 @@ for (const [subcommand, stderr] of [
  * How a failed uv command is named in its error, one row per way spawnSync reports a
  * failure, each proved through the install error and the generation error. Only a command
  * that exited has an exit status. One that could not start is named by its spawn error,
- * and one a signal ended by the signal, never `exit null`. Node stops a command whose
- * stderr passes spawnSync's 1 MiB maxBuffer, and reports that as `ENOBUFS` with a SIGTERM
- * beside it, so that row also proves the order: a stopped command is named as stopped, not
- * as unable to start and not by the signal Node used.
+ * and one that a signal ended is named by the signal, never `exit null`. Node stops a
+ * command whose stderr passes spawnSync's 1 MiB maxBuffer, and reports that as `ENOBUFS`
+ * with a SIGTERM beside it, so that row also proves the order: a stopped command is named
+ * as stopped, not as unable to start and not by the signal Node used.
  */
 const uvFailures: Array<{
   label: string;
@@ -245,6 +245,16 @@ const uvFailures: Array<{
     named: 'by its spawn error, not exit null',
     result: { status: null, signal: null, error: 'EACCES', stderr: '' },
     wording: 'could not start: EACCES',
+  },
+  {
+    // The shape spawnSync returns under a `timeout`: the spawn error and the SIGTERM Node
+    // ended the command with, together. The default runner sets no timeout, so this row
+    // cannot come from it. It is kept because it is the only result that pins the rest of
+    // the order: a spawn error other than ENOBUFS is named ahead of a signal.
+    label: 'timed out with a spawn error and a signal',
+    named: 'by its spawn error, not by the signal',
+    result: { status: null, signal: 'SIGTERM', error: 'ETIMEDOUT', stderr: '' },
+    wording: 'could not start: ETIMEDOUT',
   },
   {
     label: 'a signal killed',

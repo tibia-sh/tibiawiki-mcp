@@ -297,6 +297,9 @@ for (const { args, reason } of [
   { args: ['--http', '--port', '70000'], reason: /--port .*70000/ },
   { args: ['--http', '--port', 'abc'], reason: /--port .*abc/ },
   { args: ['--http', '--host', '[::1]'], reason: /::1 without brackets/ },
+  // Node binds a zone-scoped address, but no URL can name one, so it is refused before the bind.
+  { args: ['--http', '--host', 'fe80::1%en0'], reason: /^tibiawiki-mcp: --host takes an address without a zone ID such as %en0, got fe80::1%en0$/ },
+  { args: ['--http', '--host', '::1%0'], reason: /without a zone ID such as %en0, got ::1%0$/ },
   { args: ['--http', '--host', ''], reason: /--host takes an address/ },
   { args: ['--http', '--host='], reason: /--host takes an address/ },
   { args: ['--http', '--bogus'], reason: /--bogus/ },
@@ -316,5 +319,15 @@ for (const { args, reason } of [
     // The reason is the diagnostic line right before the usage.
     assert.match(lines[usage - 1] ?? '', /^tibiawiki-mcp: /);
     assert.match(lines[usage - 1] ?? '', reason);
+  });
+}
+
+for (const host of ['::1', '127.0.0.1']) {
+  test(`serve --http --host ${host} passes the flag check`, () => {
+    // Against a missing index, an accepted host ends at the index, exit 1 with its reason and no usage,
+    // before anything binds. A refused one would exit 2 with the usage instead.
+    const run = cli(['serve', '--http', '--host', host, '--port', '0'], join(scratch(), 'absent.db'));
+    assert.equal(run.status, 1, `stderr was: ${run.stderr}`);
+    assert.doesNotMatch(run.stderr, /--host|Usage:|listening on/, `stderr was: ${run.stderr}`);
   });
 }

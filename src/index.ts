@@ -46,6 +46,9 @@ function parseServeFlags(args: string[]): ServeFlags | string {
   if (host.includes('[') || host.includes(']')) {
     return `--host takes an IPv6 address such as ::1 without brackets, got ${host}`;
   }
+  // A URL has no way to carry a zone ID, so the URL the server announces and guards cannot be built
+  // for one. listen() would bind the address, then fail on that URL with an error naming neither.
+  if (host.includes('%')) return `--host takes an address without a zone ID such as %en0, got ${host}`;
   return { http: true, host, port: Number(port) };
 }
 

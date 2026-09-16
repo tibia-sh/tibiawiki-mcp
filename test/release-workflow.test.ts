@@ -80,6 +80,8 @@ const releaseJob = (): string => under(under(workflowCode(), 'jobs'), 'release')
 
 const registryJob = (): string => under(under(workflowCode(), 'jobs'), 'registry');
 
+const hostingJob = (): string => under(under(workflowCode(), 'jobs'), 'hosting');
+
 /**
  * Every job in a workflow, release.yml unless `file` names another, as its name and the lines
  * nested under its key.
@@ -111,6 +113,9 @@ const releaseJobSteps = (): string[] => jobSteps(releaseJob());
 
 /** The registry job's steps, one string per list item. */
 const registryJobSteps = (): string[] => jobSteps(registryJob());
+
+/** The hosting job's steps, one string per list item. */
+const hostingJobSteps = (): string[] => jobSteps(hostingJob());
 
 const isCheckout = (step: string): boolean => /^ *(?:- +)?uses: *actions\/checkout@/m.test(step);
 
@@ -790,6 +795,13 @@ const registryPublishStep = (): string => {
   return steps[0]!;
 };
 
+/** The hosting job's one step that sends the dispatch, found by the endpoint its script posts to. */
+const hostingDispatchStep = (): string => {
+  const steps = hostingJobSteps().filter((step) => /\bgh +api +repos\/tibia-sh\/mcp\.tibia\.sh\/dispatches\b/.test(stepScript(step) ?? ''));
+  assert.equal(steps.length, 1, 'expected exactly one hosting job step that runs gh api repos/tibia-sh/mcp.tibia.sh/dispatches');
+  return steps[0]!;
+};
+
 /**
  * A stand-in for curl, reading and writing a run's files in $FAKE_RUN. Call N answers with line N
  * of `responses`, and the last line repeats once they run out. `STATUS FILE` is an HTTP response
@@ -928,37 +940,72 @@ exit "$code"
 `;
 
 /**
- * A stand-in for gh, reading and writing a run's files in $GH_RUN. It takes only `api graphql` with
- * string fields, given as `-f key=value` or `--raw-field key=value`, and writes each value to
- * `field-KEY`. A changed command, a typed field or a second call fails, so none passes on a guess.
- * It prints `response` and exits with `exit`, as gh prints the body even when it exits 1 for a
- * GraphQL error.
+ * A stand-in for gh, reading and writing a run's files in $GH_RUN. Every call goes to `events` as `gh`
+ * and its arguments before anything else, so a call the fake then rejects still shows. It takes two
+ * commands, and any other fails, so a changed command cannot pass on a guess.
+ *
+ * `api graphql` takes string fields, given as `-f key=value` or `--raw-field key=value`, and writes
+ * each value to `field-KEY`. A typed field or a second call fails. It prints `response` and exits with
+ * `exit`, as gh prints the body even when it exits 1 for a GraphQL error.
+ *
+ * `api repos/tibia-sh/mcp.tibia.sh/dispatches --input -` runs only under the fake timeout, so a call
+ * without its bound fails. It writes its stdin, the body gh would send, to `body-N` for call N, counting
+ * every gh call in `events`. Call N answers with line N of `answers`, and a call with no line fails. `0`
+ * is a dispatch GitHub accepted, which prints nothing, as gh prints nothing for a 204. `CODE TEXT` prints
+ * TEXT on stderr and exits CODE, as gh prints the error of a request that failed.
  */
 const FAKE_GH = `#!/usr/bin/env bash
 here="$GH_RUN"
-if [ "$#" -lt 2 ] || [ "$1" != api ] || [ "$2" != graphql ]; then
+printf 'gh %s\\n' "$*" >> "$here/events"
+if [ "$#" -ge 2 ] && [ "$1" = api ] && [ "$2" = graphql ]; then
+  shift 2
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      -f | --raw-field) field="$2"; shift ;;
+      *) echo "fake gh: unsupported argument $1" >&2; exit 2 ;;
+    esac
+    shift
+    key="\${field%%=*}"
+    case "$key" in
+      '' | *[!a-zA-Z]*) echo "fake gh: unsupported field $field" >&2; exit 2 ;;
+    esac
+    if [ "$key" = "$field" ] || [ -e "$here/field-$key" ]; then
+      echo "fake gh: unsupported field $field" >&2
+      exit 2
+    fi
+    printf '%s' "\${field#*=}" > "$here/field-$key"
+  done
+  cat "$here/response"
+  exit "$(cat "$here/exit")"
+fi
+if [ "$#" -ne 4 ] || [ "$1" != api ] || [ "$2" != repos/tibia-sh/mcp.tibia.sh/dispatches ] || [ "$3" != --input ] || [ "$4" != - ]; then
   echo "fake gh: unsupported command: $*" >&2
   exit 2
 fi
-shift 2
-while [ "$#" -gt 0 ]; do
-  case "$1" in
-    -f | --raw-field) field="$2"; shift ;;
-    *) echo "fake gh: unsupported argument $1" >&2; exit 2 ;;
-  esac
-  shift
-  key="\${field%%=*}"
-  case "$key" in
-    '' | *[!a-zA-Z]*) echo "fake gh: unsupported field $field" >&2; exit 2 ;;
-  esac
-  if [ "$key" = "$field" ] || [ -e "$here/field-$key" ]; then
-    echo "fake gh: unsupported field $field" >&2
-    exit 2
-  fi
-  printf '%s' "\${field#*=}" > "$here/field-$key"
-done
-cat "$here/response"
-exit "$(cat "$here/exit")"
+if [ "$BOUNDED_BY_TIMEOUT" != 1 ]; then
+  echo "fake gh: $2 run without timeout" >&2
+  exit 2
+fi
+count=0
+while IFS= read -r line; do
+  case "$line" in 'gh '*) count=$((count + 1)) ;; esac
+done < "$here/events"
+cat > "$here/body-$count"
+n=0
+answer=''
+while IFS= read -r line; do
+  n=$((n + 1))
+  if [ "$n" -eq "$count" ]; then answer="$line"; break; fi
+done < "$here/answers"
+if [ -z "$answer" ]; then
+  echo "fake gh: no answer for call $count" >&2
+  exit 2
+fi
+code="\${answer%% *}"
+if [ "$code" -ne 0 ]; then
+  printf '%s\\n' "\${answer#* }" >&2
+fi
+exit "$code"
 `;
 
 /**
@@ -1110,30 +1157,46 @@ test('the npm wait passes nothing the registry would reject', () => {
   }
 });
 
-test("the registry key reaches only the login command, through its step's env", () => {
-  // Written into a run script, the key would be pasted into the shell as code. In a step's env it is
-  // a variable only the processes of that step see, and the step's script names it only in the login.
+/**
+ * The one secret each environment job holds: the variable the env of one of its steps sets from it,
+ * and that step.
+ */
+const JOB_SECRETS: Array<{ job: string; secret: string; variable: string; step: () => string }> = [
+  { job: 'registry', secret: 'MCP_PRIVATE_KEY', variable: 'MCP_PRIVATE_KEY', step: registryPublishStep },
+  { job: 'hosting', secret: 'HOSTING_DISPATCH_TOKEN', variable: 'GH_TOKEN', step: hostingDispatchStep },
+];
+
+test("each environment job's secret reaches one of its steps through that step's env, and the registry key only the login command", () => {
+  // Written into a run script, a secret would be pasted into the shell as code. In a step's env it is
+  // a variable only the processes of that step see. The registry job holds the registry key and the
+  // hosting job the token that dispatches to the hosting repo, each in one step, and no other line of
+  // the workflow references a secret.
   const references = workflowCode().split('\n').filter((line) => /\bsecrets\b/.test(line));
-  assert.equal(references.length, 1, `expected one reference to a secret: ${references.join(' |')}`);
-  const steps = registryJobSteps().filter((step) => /\bsecrets\b/.test(step));
-  assert.equal(steps.length, 1, 'no registry job step references the secret');
-  const step = steps[0]!;
-  assert.equal(step, registryPublishStep(), 'the secret reaches a step that does not run mcp-publisher');
-  assert.match(
-    under(stepBody(step), 'env'),
-    /^ *MCP_PRIVATE_KEY: *\$\{\{ secrets\.MCP_PRIVATE_KEY \}\}$/m,
-    'the secret does not reach the step through its env',
-  );
-  const elsewhere = workflowCode()
-    .split('\n')
-    .filter((line) => line.includes('MCP_PRIVATE_KEY') && !step.split('\n').includes(line));
-  assert.deepEqual(elsewhere, [], 'a step other than the publish names the key');
-  const uses = (stepScript(step) ?? '').split('\n').filter((line) => line.includes('MCP_PRIVATE_KEY'));
+  assert.equal(references.length, JOB_SECRETS.length, `expected ${JOB_SECRETS.length} references to a secret: ${references.join(' |')}`);
+  const jobs = Object.fromEntries(workflowJobs());
+  for (const { job, secret, variable, step } of JOB_SECRETS) {
+    const steps = jobSteps(jobs[job] ?? '').filter((text) => /\bsecrets\b/.test(text));
+    assert.equal(steps.length, 1, `expected exactly one ${job} job step that references a secret`);
+    assert.equal(steps[0], step(), `the ${job} job's secret reaches another step`);
+    assert.equal(
+      scalar(under(stepBody(steps[0]!), 'env'), variable),
+      `\${{ secrets.${secret} }}`,
+      `${secret} does not reach the ${job} job's step through its env as ${variable}`,
+    );
+    const elsewhere = workflowCode()
+      .split('\n')
+      .filter((line) => line.includes(secret) && !steps[0]!.split('\n').includes(line));
+    assert.deepEqual(elsewhere, [], `a line outside the ${job} job's step names ${secret}`);
+  }
+  // The registry publish's script names the key only in the login. gh reads GH_TOKEN by itself, so the
+  // hosting dispatch's script never names its token.
+  const uses = (stepScript(registryPublishStep()) ?? '').split('\n').filter((line) => line.includes('MCP_PRIVATE_KEY'));
   assert.equal(uses.length, 1, `the script names the key more than once: ${uses.length}`);
   assert.ok(
     uses[0]!.includes('./mcp-publisher login dns --domain tibia.sh --private-key "$MCP_PRIVATE_KEY"'),
     'the script passes the key to something besides the login',
   );
+  assert.doesNotMatch(stepScript(hostingDispatchStep()) ?? '', /GH_TOKEN|HOSTING_DISPATCH_TOKEN/, 'the hosting dispatch script names its token');
 });
 
 test('the registry job publishes after it logs in', () => {
@@ -1500,4 +1563,168 @@ test('the merged release PR check fails closed on an answer it cannot read', () 
     // Such a failure says nothing about the release PRs, so it must not send you to the stall's recovery.
     assert.doesNotMatch(run.errors[0]!, / in docs\/RELEASING\.md/, `${what} is reported as a PR left unreleased: ${run.output}`);
   }
+});
+
+/** The condition the hosting job runs on. `released` is 'true' or empty, and a dispatched run releases nothing. */
+const HOSTING_GATE = "${{ needs.release.outputs.released == 'true' }}";
+
+test('the hosting dispatch is a job of its own, run beside the registry job once npm accepted the release', () => {
+  // The token is a secret of the release-trigger environment. A job gets an environment's secrets only
+  // by naming it, and naming one in the release job would put an environment claim in its OIDC token,
+  // which npm's trusted publisher rejects. The job needs only the release job, so a red registry job
+  // does not stop it, and a dispatched run, which releases nothing, skips it. It runs no action and
+  // checks nothing out beside the token. Its one step runs under the default shell with -e, as the
+  // checks below run its script.
+  const hosting = hostingJob();
+  assert.notEqual(hosting, '', 'the workflow has no hosting job');
+  assert.equal(scalar(hosting, 'needs'), 'release');
+  assert.equal(scalar(hosting, 'if'), HOSTING_GATE);
+  assert.equal(scalar(hosting, 'runs-on'), 'ubuntu-latest');
+  assert.equal(scalar(hosting, 'environment'), 'release-trigger');
+  assert.equal(scalar(hosting, 'timeout-minutes'), '6');
+  const permissions = under(hosting, 'permissions')
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line !== '');
+  assert.deepEqual(permissions, ['contents: read']);
+  assert.equal(scalar(under(hosting, 'env'), 'TAG'), '${{ needs.release.outputs.tag }}');
+  assert.doesNotMatch(hosting, /^ *(?:- +)?uses:/m, 'the hosting job runs an action');
+  const steps = hostingJobSteps();
+  assert.equal(steps.length, 1, 'expected exactly one hosting job step');
+  const step = steps[0]!;
+  assert.equal(step, hostingDispatchStep(), 'the hosting job step does not send the dispatch');
+  // docs/RELEASING.md names the step.
+  assert.equal(scalar(stepBody(step), 'name'), 'Tell mcp.tibia.sh about the release');
+  assert.equal(stepIf(step), undefined, `${stepName(step)} sets if`);
+  assertDefaultShell(hosting, step);
+  assert.doesNotMatch(stepScript(step) ?? '', /\bset +\+[a-z]*e|\bset +\+o +errexit\b/, `${stepName(step)} turns off -e`);
+});
+
+/** The token the hosting dispatch runs with in these checks. The fake gh reads no token. */
+const HOSTING_TOKEN = 'fake-hosting-token';
+
+/** A gh call's answer: its exit code, and the error it prints when that is not 0. */
+type GhReply = { code: number; text: string };
+
+/** A dispatch GitHub accepted: gh exits 0 and prints nothing for the 204. */
+const DISPATCHED: GhReply = { code: 0, text: '' };
+
+/** gh's errors, as it prints them: a request that never connected, and HTTP errors with their status. */
+const HOSTING_UNREACHABLE: GhReply = {
+  code: 1,
+  text: 'Post "https://api.github.com/repos/tibia-sh/mcp.tibia.sh/dispatches": dial tcp 140.82.121.6:443: i/o timeout',
+};
+const GITHUB_FAILED: GhReply = { code: 1, text: 'gh: Server Error (HTTP 502)' };
+const TOKEN_REJECTED: GhReply = { code: 1, text: 'gh: Bad credentials (HTTP 401)' };
+
+/** The body the dispatch sends for `version`, as bump.yml in the hosting repo reads it. */
+const dispatchBody = (version: string): unknown => ({
+  event_type: 'first-party-release',
+  client_payload: { package: '@tibia.sh/tibiawiki-mcp', version },
+});
+
+/** `body` as GitHub would read it: one JSON document, or the test fails. */
+const json = (body: string): unknown => {
+  try {
+    return JSON.parse(body);
+  } catch {
+    return assert.fail(`a body is not one JSON document: ${body}`);
+  }
+};
+
+/**
+ * Runs the hosting job's dispatch step for `tag`, as the checks above run their scripts, with the fake
+ * gh, sleep and timeout first on PATH. jq and everything else is real. `answers` answer the step's gh
+ * calls in order. The step holds the token in its env, so any command that prints it, such as an
+ * environment dump or a trace, fails every run.
+ */
+const runHostingDispatch = (tag: string, answers: GhReply[]) => {
+  const dir = scratch();
+  writeFileSync(join(dir, 'answers'), answers.map(({ code, text }) => `${code} ${text}\n`).join(''));
+  const env = { TAG: tag, GH_TOKEN: HOSTING_TOKEN, PATH: `${fakeBin()}:${process.env['PATH'] ?? ''}`, FAKE_RUN: dir, GH_RUN: dir };
+  const run = bash(stepScript(hostingDispatchStep())!, env, dir);
+  assert.ok(!`${run.stdout}${run.stderr}`.includes(HOSTING_TOKEN), 'the dispatch step printed the token');
+  return {
+    status: run.status,
+    stdout: run.stdout,
+    output: `${run.stdout}${run.stderr}`,
+    errors: run.stdout.split('\n').filter((line) => line.startsWith('::error::')),
+    events: recorded(dir, 'events'),
+    /** What each gh call read on stdin, in the order of the calls. */
+    bodies: readdirSync(dir)
+      .filter((file) => /^body-\d+$/.test(file))
+      .sort()
+      .map((file) => readFileSync(join(dir, file), 'utf8')),
+  };
+};
+
+/** What the fakes record for the dispatch the step sends. */
+const DISPATCH = 'gh api repos/tibia-sh/mcp.tibia.sh/dispatches --input -';
+
+/** The line the step prints once a dispatch of `version` got through, in attempt `attempt`. */
+const told = (version: string, attempt: number): string =>
+  `Told tibia-sh/mcp.tibia.sh about @tibia.sh/tibiawiki-mcp ${version} in attempt ${attempt}.`;
+
+test('the hosting dispatch rejects a tag that is not a release tag, before it calls gh', () => {
+  // The tag decides what bump.yml pins, and the error line names what this run had instead.
+  for (const tag of ['', '0.6.1', 'v0.6', 'v0.6.1-rc.1', 'v0.6.1; true']) {
+    const run = runHostingDispatch(tag, [DISPATCHED]);
+    assert.equal(run.status, 1, `${JSON.stringify(tag)} is accepted: ${run.output}`);
+    assert.deepEqual(run.errors, [`::error::The released tag must look like v1.2.3, and this run has "${tag}".`]);
+    assert.deepEqual(run.events, [], `${JSON.stringify(tag)} reaches gh or sleep`);
+  }
+});
+
+test("the hosting dispatch tells the hosting repo about the tag's version once when its first attempt succeeds", () => {
+  // The body is the event bump.yml is triggered by, with the version the tag names, without its v.
+  for (const version of ['0.6.1', '10.20.300']) {
+    const run = runHostingDispatch(`v${version}`, [DISPATCHED]);
+    assert.equal(run.status, 0, run.output);
+    assert.deepEqual(run.events, [DISPATCH]);
+    assert.deepEqual(run.bodies.map(json), [dispatchBody(version)]);
+    assert.ok(run.stdout.split('\n').includes(told(version, 1)), `the log does not say the dispatch got through: ${run.output}`);
+    assert.deepEqual(run.errors, [], `a dispatch that got through ends with an error: ${run.output}`);
+  }
+});
+
+test('the hosting dispatch tries again 30 seconds after a failure, and stops at the attempt that got through', () => {
+  // A dispatch that got through twice is harmless, because bump.yml finds the version pinned or its
+  // pull request open, so a failed attempt is only tried again, with the same body.
+  const second = runHostingDispatch('v0.6.1', [GITHUB_FAILED, DISPATCHED]);
+  assert.equal(second.status, 0, second.output);
+  assert.deepEqual(second.events, [DISPATCH, PAUSE, DISPATCH]);
+  assert.deepEqual(second.bodies.map(json), [dispatchBody('0.6.1'), dispatchBody('0.6.1')]);
+  assert.ok(second.stdout.split('\n').includes(told('0.6.1', 2)), `the log does not say which attempt got through: ${second.output}`);
+  assert.deepEqual(second.errors, [], `a dispatch that got through ends with an error: ${second.output}`);
+  const third = runHostingDispatch('v0.6.1', [HOSTING_UNREACHABLE, GITHUB_FAILED, DISPATCHED]);
+  assert.equal(third.status, 0, third.output);
+  assert.deepEqual(third.events, [DISPATCH, PAUSE, DISPATCH, PAUSE, DISPATCH]);
+  assert.deepEqual(third.bodies.map(json), [dispatchBody('0.6.1'), dispatchBody('0.6.1'), dispatchBody('0.6.1')]);
+  assert.ok(third.stdout.split('\n').includes(told('0.6.1', 3)), `the log does not say which attempt got through: ${third.output}`);
+  assert.deepEqual(third.errors, [], `a dispatch that got through ends with an error: ${third.output}`);
+});
+
+test('the hosting dispatch fails after 3 attempts, 30 seconds apart, and names the runbook section with the manual command', () => {
+  // The publish already happened, so the job ends red with the version and the recovery, and gh's
+  // own errors say why each attempt failed.
+  const failures = [HOSTING_UNREACHABLE, TOKEN_REJECTED, GITHUB_FAILED];
+  const run = runHostingDispatch('v0.6.1', failures);
+  assert.equal(run.status, 1, run.output);
+  assert.deepEqual(run.events, [DISPATCH, PAUSE, DISPATCH, PAUSE, DISPATCH]);
+  assert.deepEqual(run.errors, [
+    '::error::Could not tell tibia-sh/mcp.tibia.sh about @tibia.sh/tibiawiki-mcp 0.6.1 in 3 attempts, 30 seconds apart. Run bump.yml there by hand, as "The hosting dispatch" in docs/RELEASING.md describes.',
+  ]);
+  assert.doesNotMatch(run.stdout, /^Told /m, `the log says the dispatch got through: ${run.output}`);
+  for (const { text } of failures) {
+    assert.ok(run.output.includes(text), `the log does not carry gh's error: ${text}`);
+  }
+  const section = /"([^"]+)" in docs\/RELEASING\.md/.exec(run.errors[0]!)![1]!;
+  const lines = read('docs/RELEASING.md').split('\n');
+  const start = lines.indexOf(`## ${section}`);
+  assert.notEqual(start, -1, `docs/RELEASING.md has no section "${section}"`);
+  const end = lines.findIndex((line, index) => index > start && line.startsWith('## '));
+  assert.ok(
+    lines.slice(start, end === -1 ? undefined : end).includes('gh workflow run bump.yml -R tibia-sh/mcp.tibia.sh --ref main -f package=@tibia.sh/tibiawiki-mcp -f version=X.Y.Z'),
+    `"${section}" in docs/RELEASING.md does not give the manual command`,
+  );
 });

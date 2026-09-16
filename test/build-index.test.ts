@@ -72,7 +72,7 @@ function fakeUv(opts: {
     const generated = subcommand === 'run'
       ? (opts.generate ?? ((output) => copyFileSync(FIXTURE, output)))(args[args.length - 1]!)
       : undefined;
-    return generated ?? { status: 0, stderr: '' };
+    return generated ?? { status: 0, signal: null, stderr: '' };
   };
   return {
     run,
@@ -190,7 +190,7 @@ for (const [subcommand, stderr] of [
     const target = join(dir, 'tibiawiki.db');
     copyFileSync(FIXTURE, target);
     const before = sha(target);
-    const uv = fakeUv({ exit: { [subcommand]: { status: 2, stderr } } });
+    const uv = fakeUv({ exit: { [subcommand]: { status: 2, signal: null, stderr } } });
 
     const captured = captureStderr();
     try {
@@ -219,30 +219,72 @@ for (const [subcommand, stderr] of [
 }
 
 /**
- * A command that could not start has no exit status: spawnSync returns a null status and
- * puts the reason in its error's code. The failure names that code, not `exit null`.
+ * How a failed uv command is named in its error, one row per way spawnSync reports a
+ * failure, each proved through the install error and the generation error. Only a command
+ * that exited has an exit status. One that could not start is named by its spawn error,
+ * and one a signal ended by the signal, never `exit null`. Node stops a command whose
+ * stderr passes spawnSync's 1 MiB maxBuffer, and reports that as `ENOBUFS` with a SIGTERM
+ * beside it, so that row also proves the order: a stopped command is named as stopped, not
+ * as unable to start and not by the signal Node used.
  */
-for (const [subcommand, code, message] of [
-  ['venv', 'EACCES', 'Could not install the generator environment (`uv venv` could not start: EACCES).'],
-  ['run', 'ENOENT', 'Index generation failed (`uv run` could not start: ENOENT).'],
-] as const) {
-  test(`a uv ${subcommand} that could not start is named by its spawn error, not exit null`, async () => {
-    const target = join(scratch(), 'tibiawiki.db');
-    const uv = fakeUv({ exit: { [subcommand]: { status: null, stderr: '', error: code } } });
+const uvFailures: Array<{
+  label: string;
+  named: string;
+  result: ReturnType<Runner>;
+  /** What follows the command in the parenthetical. */
+  wording: string;
+}> = [
+  {
+    label: 'wrote more than 1 MiB to stderr',
+    named: 'as stopped, not as unable to start',
+    result: { status: null, signal: 'SIGTERM', error: 'ENOBUFS', stderr: 'DEBUG uv_resolver::candidate_selector selecting' },
+    wording: 'wrote more than 1 MiB to stderr and was stopped',
+  },
+  {
+    label: 'could not start',
+    named: 'by its spawn error, not exit null',
+    result: { status: null, signal: null, error: 'EACCES', stderr: '' },
+    wording: 'could not start: EACCES',
+  },
+  {
+    label: 'a signal killed',
+    named: 'by the signal, not exit null',
+    result: { status: null, signal: 'SIGKILL', stderr: 'Resolved 16 packages' },
+    wording: 'was killed by SIGKILL',
+  },
+  {
+    label: 'exited non-zero',
+    named: 'by its exit status',
+    result: { status: 2, signal: null, stderr: 'error: Failed to prepare distributions' },
+    wording: 'exit 2',
+  },
+];
+for (const { label, named, result, wording } of uvFailures) {
+  for (const [subcommand, prefix] of [
+    ['venv', 'Could not install the generator environment'],
+    ['run', 'Index generation failed'],
+  ] as const) {
+    test(`a uv ${subcommand} that ${label} is named ${named}`, async () => {
+      const target = join(scratch(), 'tibiawiki.db');
+      const uv = fakeUv({ exit: { [subcommand]: result } });
+      const message = `${prefix} (\`uv ${subcommand}\` ${wording}).`;
 
-    const captured = captureStderr();
-    try {
-      await assert.rejects(
-        buildIndex({ targetPath: target, enrich: noopEnrich, api, run: uv.run }),
-        (error: Error) => {
-          assert.ok(error.message.startsWith(message), error.message);
-          return true;
-        },
-      );
-    } finally {
-      captured.restore();
-    }
-  });
+      const captured = captureStderr();
+      try {
+        await assert.rejects(
+          buildIndex({ targetPath: target, enrich: noopEnrich, api, run: uv.run }),
+          (error: Error) => {
+            assert.ok(error.message.startsWith(message), error.message);
+            assert.ok(error.message.endsWith(`\n${result.stderr}`), `uv's stderr must end the error: ${error.message}`);
+            return true;
+          },
+        );
+      } finally {
+        captured.restore();
+      }
+      assert.equal(existsSync(uv.env()), false, 'the generator environment must be removed');
+    });
+  }
 }
 
 test('a failing generator leaves an existing good index byte-identical', async () => {
@@ -254,7 +296,7 @@ test('a failing generator leaves an existing good index byte-identical', async (
   const uv = fakeUv({
     generate: (output) => {
       writeFileSync(output, 'partial');
-      return { status: 1, stderr: 'boom' };
+      return { status: 1, signal: null, stderr: 'boom' };
     },
   });
 

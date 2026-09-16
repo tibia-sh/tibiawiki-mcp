@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.1](https://github.com/tibia-sh/tibiawiki-mcp/compare/v0.6.0...v0.6.1) (2026-09-16)
+
+
+### Bug Fixes
+
+* name a signal-killed or over-buffered uv in build-index errors ([faf2962](https://github.com/tibia-sh/tibiawiki-mcp/commit/faf29623c92a2445abae912d24efbeefa8dabac6))
+
 ## [0.6.0](https://github.com/tibia-sh/tibiawiki-mcp/compare/v0.5.0...v0.6.0) (2026-09-15)
 
 

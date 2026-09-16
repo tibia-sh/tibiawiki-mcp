@@ -16,7 +16,7 @@
    gh api -X POST repos/tibia-sh/tibiawiki-mcp/actions/runs/RUN_ID/approve
    ```
 
-3. Merging the release PR publishes. The merge's push run creates the tag `vX.Y.Z` and the GitHub release at the merge commit, and relabels the PR `autorelease: tagged`. Then it checks out that commit, runs `pnpm install --frozen-lockfile` and `pnpm test`, and runs `npm publish` through npm trusted publishing. npm adds provenance for that commit when it confirms that the repository and the package are public. Once npm accepts the publish, the run's `registry` job checks out the tag, checks that `server.json` carries its version, and waits until npm serves that version. Then one step, `Publish to the MCP registry`, publishes `server.json` to the MCP registry in up to three attempts, 30 seconds apart. Each attempt runs its own login.
+3. Merging the release PR publishes. The merge's push run creates the tag `vX.Y.Z` and the GitHub release at the merge commit, and relabels the PR `autorelease: tagged`. Then it checks out that commit, runs `pnpm install --frozen-lockfile` and `pnpm test`, and runs `npm publish` through npm trusted publishing. npm adds provenance for that commit when it confirms that the repository and the package are public. Once npm accepts the publish, the run's `registry` job checks out the tag, checks that `server.json` carries its version, and waits until npm serves that version. Then one step, `Publish to the MCP registry`, publishes `server.json` to the MCP registry in up to three attempts, 30 seconds apart. Each attempt runs its own login. Beside the `registry` job, the run's `hosting` job tells `tibia-sh/mcp.tibia.sh` about the release, and that repository pins the version and deploys it, as [The hosting dispatch](#the-hosting-dispatch) describes.
 4. The release is done when that run is green, its `npm publish` and `Publish to the MCP registry` steps ran, and both npm and the MCP registry list the version.
 
 Only the run triggered at the merge commit publishes, because npm provenance names the commit that triggered the run. A run triggered at any other commit that creates the release fails red instead, at the step `Release tagged at another commit, not published`.
@@ -341,6 +341,22 @@ curl -sS "https://registry.npmjs.org/@tibia.sh%2Ftibiawiki-mcp/$VERSION" | jq -r
 ```
 
 If it prints anything else, or `null`, leave the version out of the registry, and fix `mcpName` in `package.json` in the next release.
+
+## The hosting dispatch
+
+Once npm accepts the publish, the run's `hosting` job tells `tibia-sh/mcp.tibia.sh` about the release. Its one step, `Tell mcp.tibia.sh about the release`, sends a `repository_dispatch` of type `first-party-release` that names the package and the version, using the `HOSTING_DISPATCH_TOKEN` secret of the `release-trigger` environment. It makes up to three attempts, 30 seconds apart, and prints `Told tibia-sh/mcp.tibia.sh about @tibia.sh/tibiawiki-mcp X.Y.Z in attempt N.` once one got through. The job needs only the release job, so it runs beside the `registry` job, and neither waits for the other. A dispatched run of `release.yml` releases nothing, so it skips the job.
+
+The dispatch starts `bump.yml` in the hosting repo. That run pins the version, opens a pull request, turns on auto-merge and waits for the merge, and the merge deploys. [How a release reaches the endpoint](https://github.com/tibia-sh/mcp.tibia.sh#how-a-release-reaches-the-endpoint) in that repository's README describes the chain and what can go wrong there. `gh run list --workflow bump.yml -R tibia-sh/mcp.tibia.sh` lists its runs.
+
+A red `hosting` job leaves npm and the MCP registry untouched. The publish happened before the job started, and the `registry` job does not wait for the dispatch. The job is red when the tag does not look like `vX.Y.Z`, or when all three attempts failed. Its error line names the version, and the log carries what `gh` said about each attempt. A job whose 6 minutes run out while its attempts hang is cancelled instead, with no error line. `Bad credentials (HTTP 401)` means the token expired or was revoked, and [The release trigger token](https://github.com/tibia-sh/mcp.tibia.sh#the-release-trigger-token) in the hosting repo's README describes how to rotate it.
+
+Re-running the whole release run does not send the dispatch again. Its release job releases nothing the second time, so `released` stays empty and the `hosting` job is skipped. Run `bump.yml` by hand instead, on `main` of the hosting repo, with the version npm has:
+
+```bash
+gh workflow run bump.yml -R tibia-sh/mcp.tibia.sh --ref main -f package=@tibia.sh/tibiawiki-mcp -f version=X.Y.Z
+```
+
+The run it starts does what the dispatch would have. A version the hosting repo already pins ends it green with nothing to do, so a dispatch that arrived after all costs nothing. A version below the pinned one fails it, because `bump.yml` refuses a downgrade.
 
 ## A bad release
 

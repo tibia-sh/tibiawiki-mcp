@@ -61,6 +61,11 @@
  *     probe handles that signal by stopping the server before it exits. When you press
  *     Ctrl-C, the server gets SIGINT from the process group as well, because the probe
  *     does not spawn it detached, and it shuts down as it does on SIGTERM.
+ *   - A server that dies, before its startup line or during a check, is reported by its
+ *     exit code or signal with its stderr. A check it fails by dying would read as a
+ *     connection error, so a failed check waits up to a second for the server's end
+ *     before it is reported as its own. The probe keeps the server's stderr for that
+ *     report and prints it nowhere else.
  */
 import { execFileSync } from 'node:child_process';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
@@ -228,6 +233,11 @@ import { bin, cwd, packagedEnv, packagedIndex, textOf } from './shared.mjs';
 const STARTUP_MS = ${TIMEOUT_MS / 2};
 /** How long the server may take to exit after SIGTERM, before it gets SIGKILL. */
 const STOP_MS = 15_000;
+/**
+ * How long a failed check waits for the server's end before the failure is reported as the check's
+ * own. A server that died has ended already, and its close event follows within the moment.
+ */
+const EXIT_MS = 1_000;
 
 const { DB_PATH, generateTime } = await packagedIndex();
 
@@ -275,8 +285,19 @@ const stop = () => (stopping ??= (async () => {
   return { ...(await exited), running, killed: true };
 })());
 
-/** Passes promise through, and names the check in its error when it rejects. */
-const named = (check, promise) => promise.catch((error) => {
+/** The server's end as the failure, with the stderr it left, and when it ended. */
+const crashed = ({ code, signal }, when) =>
+  new Error('HTTP run: the server exited with ' + (signal ?? 'code ' + code) + ' ' + when +
+    '. Server stderr:\\n' + stderr);
+
+/**
+ * Passes promise through, and names the check in its error when it rejects. A check against a
+ * server that has died fails as a connection error, which says nothing about the server, so a
+ * rejection first waits EXIT_MS for the server's end and reports that end when it comes.
+ */
+const named = (check, promise) => promise.catch(async (error) => {
+  const exit = await Promise.race([exited, delay(EXIT_MS, undefined, { ref: false })]);
+  if (exit) throw crashed(exit, 'during ' + check);
   throw new Error(check + ' failed: ' + error.message, { cause: error });
 });
 
@@ -289,9 +310,8 @@ try {
         if (match) resolve(match[1]);
       });
     }),
-    exited.then(({ code, signal }) => {
-      throw new Error('HTTP run: the server exited with ' + (signal ?? 'code ' + code) +
-        ' before its startup line. Server stderr:\\n' + stderr);
+    exited.then((exit) => {
+      throw crashed(exit, 'before its startup line');
     }),
     delay(STARTUP_MS, undefined, { ref: false }).then(() => {
       throw new Error('HTTP run: no startup line within ' + STARTUP_MS / 1000 + ' s. Server stderr:\\n' + stderr);

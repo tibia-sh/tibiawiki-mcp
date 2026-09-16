@@ -1,10 +1,12 @@
 import { after, afterEach, before, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
+import { lookup } from 'node:dns/promises';
 import { createServer as createHttpServer, request, type IncomingHttpHeaders } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { format } from 'node:util';
 import { Client, StreamableHTTPClientTransport, type ClientOptions } from '@modelcontextprotocol/client';
+import { localhostAllowedHostnames } from '@modelcontextprotocol/server';
 import { openDb } from '../src/db.ts';
 import { MAX_BODY_BYTES, isLoopbackAddress, serveHttp, type HttpServing } from '../src/http.ts';
 import { createServer } from '../src/server.ts';
@@ -253,6 +255,44 @@ test('loopback is decided on the bound address, so a 127.1 bind keeps its guards
     assert.equal(own.status, 200);
   } finally {
     await spelled.close();
+  }
+});
+
+/**
+ * A loopback name outside the SDK's own list, which the resolver answers without asking DNS: macOS maps
+ * localhost. itself, and Ubuntu's /etc/hosts names ::1 ip6-localhost. A URL parser reads every loopback
+ * literal, 127.1 included, as the bound address, so only a name can show the given host admitted on its own.
+ * listen() binds the first address a lookup returns, so that one has to be loopback.
+ */
+async function loopbackName(): Promise<string> {
+  const tried: string[] = [];
+  for (const name of ['localhost.', 'ip6-localhost']) {
+    const addresses = await lookup(name, { all: true }).catch((error: NodeJS.ErrnoException) => {
+      tried.push(`${name} (${error.code})`);
+      return [];
+    });
+    const [first] = addresses;
+    if (first === undefined) continue;
+    if (isLoopbackAddress(first.address)) return name;
+    tried.push(`${name} (${addresses.map(({ address }) => address).join(', ')})`);
+  }
+  assert.fail(`no loopback name besides localhost resolves here, tried ${tried.join(' and ')}`);
+}
+
+test('on a loopback bind by name, the given name is served as the Host, and a foreign one gets 403', async () => {
+  const name = await loopbackName();
+  // Both guards against the test collapsing into the 127.1 case above, where the bound address admits the Host.
+  assert.ok(!localhostAllowedHostnames().includes(name), `${name} is in the SDK's own list`);
+  assert.equal(new URL(`http://${name}`).hostname, name, 'a URL parser rewrites the name');
+  const named = await serveHttp(() => createServer(handle), { host: name, port: 0, log: (line) => logged.push(line) });
+  try {
+    assert.ok(['127.0.0.1', '[::1]'].includes(named.url.hostname), `${name} bound ${named.url.hostname}`);
+    const own = await post(TOOLS_LIST, { ...mcpHeaders(LEGACY, named.url), host: `${name}:${named.url.port}` }, named.url);
+    assert.equal(own.status, 200);
+    const foreign = await post(TOOLS_LIST, { ...mcpHeaders(LEGACY, named.url), host: `evil.example:${named.url.port}` }, named.url);
+    assert.equal(foreign.status, 403);
+  } finally {
+    await named.close();
   }
 });
 

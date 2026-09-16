@@ -1581,7 +1581,7 @@ test('the hosting dispatch is a job of its own, run beside the registry job once
   assert.equal(scalar(hosting, 'if'), HOSTING_GATE);
   assert.equal(scalar(hosting, 'runs-on'), 'ubuntu-latest');
   assert.equal(scalar(hosting, 'environment'), 'release-trigger');
-  assert.equal(scalar(hosting, 'timeout-minutes'), '6');
+  assert.equal(scalar(hosting, 'timeout-minutes'), '8');
   const permissions = under(hosting, 'permissions')
     .split('\n')
     .map((line) => line.trim())

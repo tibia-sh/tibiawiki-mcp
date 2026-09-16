@@ -233,7 +233,7 @@ jobs:
     needs: release
     if: ${{ needs.release.outputs.released == 'true' }}
     runs-on: ubuntu-latest
-    timeout-minutes: 6
+    timeout-minutes: 8
     environment: release-trigger
     permissions:
       contents: read
@@ -243,8 +243,9 @@ jobs:
       # gh api exits non-zero on an HTTP error and prints it, and timeout stops a request that hangs
       # after 120 seconds, or kills it 10 seconds later if it ignores that. A dispatch that got through
       # twice is harmless, because bump.yml finds the version pinned or its pull request open, so a
-      # failed attempt is tried again 30 seconds later, three attempts in all. gh reads the token from
-      # GH_TOKEN by itself, so the script never names it.
+      # failed attempt is tried again 30 seconds later, three attempts in all. Three attempts that all
+      # hang take 7.5 minutes, inside the job's 8. gh reads the token from GH_TOKEN by itself, so the
+      # script never names it.
       - name: Tell mcp.tibia.sh about the release
         env:
           GH_TOKEN: ${{ secrets.HOSTING_DISPATCH_TOKEN }}

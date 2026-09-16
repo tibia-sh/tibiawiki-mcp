@@ -22,9 +22,10 @@ const SERVER_INFO = { name: 'tibiawiki-mcp', version: packageJson.version };
 /**
  * Both servers register their whole tool set when they are built and never change it.
  * The SDK advertises tools.listChanged as true unless it is set, which invites a client
- * to listen for tool list changes that never come.
+ * to listen for tool list changes that never come. Frozen at both levels, since every
+ * server built here is handed the same object.
  */
-const CAPABILITIES = { tools: { listChanged: false } };
+export const CAPABILITIES = Object.freeze({ tools: Object.freeze({ listChanged: false }) });
 
 /**
  * Licence obligations are met in the server's own metadata rather than a README

@@ -1,5 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { CAPABILITIES } from '../src/server.ts';
 import { connect } from './harness.ts';
 
 test('tools/list advertises tibia_get as read-only', async () => {
@@ -25,6 +26,12 @@ test('the server tells clients its tool list never changes', async () => {
   const h = await connect();
   assert.equal(h.client.getServerCapabilities()?.tools?.listChanged, false);
   await h.close();
+});
+
+test('the capabilities every server is handed are frozen at both levels', () => {
+  assert.ok(Object.isFrozen(CAPABILITIES), 'the capabilities object is not frozen');
+  assert.ok(Object.isFrozen(CAPABILITIES.tools), 'the tools capability is not frozen');
+  assert.deepEqual(CAPABILITIES, { tools: { listChanged: false } });
 });
 
 test('the instructions call the index a snapshot without assuming a transport', async () => {

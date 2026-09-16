@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.2](https://github.com/tibia-sh/tibiawiki-mcp/compare/v0.6.1...v0.6.2) (2026-09-16)
+
+
+### Bug Fixes
+
+* refuse a zone-scoped --host ([10de2b7](https://github.com/tibia-sh/tibiawiki-mcp/commit/10de2b794d810f9cdb032132feb3e78c5bbdce0b))
+
 ## [0.6.1](https://github.com/tibia-sh/tibiawiki-mcp/compare/v0.6.0...v0.6.1) (2026-09-16)
 
 

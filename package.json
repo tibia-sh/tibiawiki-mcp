@@ -1,6 +1,6 @@
 {
   "name": "@tibia.sh/tibiawiki-mcp",
-  "version": "0.6.1",
+  "version": "0.6.2",
   "description": "Offline MCP server for TibiaWiki: attribute queries over creatures, items, NPCs, quests and spells",
   "type": "module",
   "license": "MIT",

@@ -8,24 +8,33 @@ questions the wiki itself cannot:
 - *Where do I buy a Steel Helmet, and for how much?*
 
 Every answer comes from a SQLite snapshot of the wiki that installs with the server. Queries
-return in milliseconds and work offline, and the server makes no network calls.
+return in milliseconds and work offline. The server makes no network calls.
 
 ## Use it
 
-**Without installing anything.** Add `https://mcp.tibia.sh/wiki` to your MCP client as a remote
-server. It needs no account and no key. In claude.ai, add it as a custom connector.
+### Hosted, nothing to install
 
-**In Claude Code**, as a plugin. You get the server and a skill that teaches the agent how to
-query it well:
+Add `https://mcp.tibia.sh/wiki` to your MCP client as a remote server. It needs no account and no
+key. In claude.ai, add it as a custom connector.
+
+It allows about 300 messages a minute per IP address and writes no request logs. The landing page at
+`https://mcp.tibia.sh` shows the versions it runs.
+[`tibia-sh/mcp.tibia.sh`](https://github.com/tibia-sh/mcp.tibia.sh) has the details.
+
+### Claude Code
+
+Install it as a plugin, from your terminal. You get the server and a skill that teaches the agent
+the traps in the data, like damage modifiers where 100 is neutral:
 
 ```bash
 claude plugin marketplace add tibia-sh/tibiawiki-mcp
 claude plugin install tibiawiki-mcp@tibiawiki-mcp
 ```
 
-Update it later with `claude plugin update tibiawiki-mcp@tibiawiki-mcp`.
+### Any other MCP client
 
-**In any other MCP client**, run the npm package over stdio. It needs Node 22.13 or later:
+Add this to your client's MCP configuration, for example `claude_desktop_config.json` for Claude
+Desktop or `.cursor/mcp.json` for Cursor. It needs `Node 22.13` or later:
 
 ```json
 {
@@ -36,10 +45,10 @@ Update it later with `claude plugin update tibiawiki-mcp@tibiawiki-mcp`.
 ```
 
 The first start downloads the package and its 18 MB index. After that it works offline.
-`tibiawiki-mcp serve --http` serves the same tools over Streamable HTTP, if you want to host it
-yourself.
 
 ## Tools
+
+You ask questions, and your assistant calls these:
 
 | Tool | Answers |
 |---|---|
@@ -49,33 +58,16 @@ yourself.
 | `tibia_find_items` | "Which items match these stats?" |
 | `tibia_how_to_obtain` | "Where do I get X?" Drops, vendors and quest rewards in one call |
 
-A few things about the data that are easy to get wrong. The plugin's skill teaches the agent all
-of them:
-
-- damage modifiers are percentages where 100 is neutral, so a Dragon at `modifier_fire: 0` is
-  immune to fire, not weak to it. The `weak_to` and `resistant_to` filters encode that for you
-- `hitpoints: null` means unrecorded, not zero
-- deprecated, event-only and unavailable pages are hidden unless you pass `include_inactive: true`
-- names are resolved with `tibia_search` before `tibia_get`
+The server tells your assistant how to read the data, for example that a damage modifier of 100
+is neutral. [What the skill adds](https://github.com/tibia-sh/tibiawiki-mcp/blob/main/docs/USAGE.md#what-the-skill-adds)
+lists the traps.
 
 ## How fresh the data is
 
-The index is a snapshot, and every answer says when it was taken, as `indexGeneratedAt`. It ships
-as its own package, [`@tibia.sh/tibiawiki-data`](https://github.com/tibia-sh/tibiawiki-data),
-which is rebuilt every week and released when the wiki changed. A fresh install gets the newest
-one, and the hosted server follows each release by itself.
-
-For data newer than the last release, build your own index with `tibiawiki-mcp build-index`. It
-takes about 6 minutes and needs [`uv`](https://docs.astral.sh/uv/).
-[docs/USAGE.md](https://github.com/tibia-sh/tibiawiki-mcp/blob/main/docs/USAGE.md#refreshing-the-index)
-says where the index goes and which one the server reads.
-
-## The hosted server
-
-`https://mcp.tibia.sh/wiki` serves the same five tools. It allows about 300 messages a minute per
-IP address, and claude.ai users share Anthropic's addresses, so they share that allowance. It
-writes no request logs. Cloudflare processes every request and uses your IP address for the rate
-limit. [`tibia-sh/mcp.tibia.sh`](https://github.com/tibia-sh/mcp.tibia.sh) has the details.
+The index is a snapshot. Every answer says when it was taken, as `indexGeneratedAt`. It ships as
+its own package, [`@tibia.sh/tibiawiki-data`](https://github.com/tibia-sh/tibiawiki-data), rebuilt
+every week and released when the wiki changed. A fresh install gets the newest one. The hosted
+server follows each release by itself.
 
 ## Why it exists
 
@@ -87,9 +79,8 @@ local index is the only way to ask a real question.
 
 ## More
 
-- [docs/USAGE.md](https://github.com/tibia-sh/tibiawiki-mcp/blob/main/docs/USAGE.md) => the plugin in detail, serving over HTTP, building your own index
-- [docs/MAINTAINING.md](https://github.com/tibia-sh/tibiawiki-mcp/blob/main/docs/MAINTAINING.md) => working on the server
-- [docs/RELEASING.md](https://github.com/tibia-sh/tibiawiki-mcp/blob/main/docs/RELEASING.md) => how a release is published
+- [docs/USAGE.md](https://github.com/tibia-sh/tibiawiki-mcp/blob/main/docs/USAGE.md) => the plugin in detail, serving over HTTP yourself, building your own index
+- [docs/MAINTAINING.md](https://github.com/tibia-sh/tibiawiki-mcp/blob/main/docs/MAINTAINING.md) => working on the server and releasing it
 
 ## Attribution
 

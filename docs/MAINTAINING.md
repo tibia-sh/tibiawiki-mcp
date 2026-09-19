@@ -4,11 +4,9 @@ What you need to work on the server. [RELEASING.md](RELEASING.md) covers publish
 
 ## Requirements
 
-- **Node ≥ 22.13** to run it (`node:sqlite` landed in 22.5 and is unflagged from 22.13).
 - **Node ≥ 22.18 to develop it**: the test suite runs TypeScript directly, and
   type-stripping is only on by default from 22.18. Consumers are unaffected: the
   published package ships compiled JavaScript.
-- [`uv`](https://docs.astral.sh/uv/) only if you build your own index.
 
 ## Checking for upstream drift
 
@@ -66,7 +64,7 @@ refuses to install an index the server cannot read.
 
 The caret is a deliberate exception to this repository's exact pins. An exact `3.0.0`
 would keep major 4 out just as well, so the caret is not what guards the schema. It lets
-an install, a hosted instance included, pick up each compatible data release without a
+an install pick up each compatible data release without a
 server release. `pnpm add` does not write `^3`, so edit the range by hand.
 
 The tarball ships exactly `dist/`, `data/spell-areas.json` and

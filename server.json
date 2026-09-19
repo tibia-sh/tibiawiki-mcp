@@ -6,12 +6,12 @@
     "url": "https://github.com/tibia-sh/tibiawiki-mcp",
     "source": "github"
   },
-  "version": "0.6.2",
+  "version": "0.6.3",
   "packages": [
     {
       "registryType": "npm",
       "identifier": "@tibia.sh/tibiawiki-mcp",
-      "version": "0.6.2",
+      "version": "0.6.3",
       "transport": {
         "type": "stdio"
       }

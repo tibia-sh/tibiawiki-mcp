@@ -4,6 +4,8 @@ The details behind the README: the Claude Code plugin, serving over HTTP, and bu
 
 ## Install
 
+You need **Node ≥ 22.13** to run it (`node:sqlite` landed in 22.5 and is unflagged from 22.13).
+
 ```bash
 pnpm add -g @tibia.sh/tibiawiki-mcp
 ```
@@ -93,6 +95,8 @@ On `SIGTERM` the server answers new requests with `503` and gives the ones in fl
 10 s to finish. Ctrl-C does the same, and a second Ctrl-C stops it at once.
 
 ## Refreshing the index
+
+Building your own index needs [`uv`](https://docs.astral.sh/uv/). Nothing else here does.
 
 A fresh install resolves the newest data release this server can read. An existing
 install keeps its release until you update it. For data fresher than the last release,

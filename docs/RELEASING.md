@@ -21,6 +21,18 @@
 
 Only the run triggered at the merge commit publishes, because npm provenance names the commit that triggered the run. A run triggered at any other commit that creates the release fails red instead, at the step `Release tagged at another commit, not published`.
 
+## A release without a fix or a feature
+
+release-please opens a release PR only for a releasable commit. A `docs:` or a `chore:` is not one, so a README that changed stays off the npm page until the next `fix:` or `feat:`. To release anyway, land a commit whose message ends with a `Release-As` footer naming the version:
+
+```text
+docs: say how to release without a fix or a feature
+
+Release-As: 0.6.3
+```
+
+Merge it with a rebase, which keeps the message as it is. A squash merge keeps the footer only when you leave it in the squash message. The push opens the release PR for that version, and from there it is [A normal release](#a-normal-release). `0.6.3` was released this way, to publish the README written for visitors.
+
 ## Where to look
 
 | What | Command |

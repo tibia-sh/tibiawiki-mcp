@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.3](https://github.com/tibia-sh/tibiawiki-mcp/compare/v0.6.2...v0.6.3) (2026-09-19)
+
+
+### Documentation
+
+* say how to release without a fix or a feature ([d07b016](https://github.com/tibia-sh/tibiawiki-mcp/commit/d07b016f23664594641e9bb56ad9c8eca501ad59))
+
 ## [0.6.2](https://github.com/tibia-sh/tibiawiki-mcp/compare/v0.6.1...v0.6.2) (2026-09-16)
 
 

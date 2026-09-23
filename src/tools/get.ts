@@ -668,7 +668,8 @@ export function registerGet(server: McpServer, handle: TibiaDb): void {
         'Full detail for one named Tibia page of any kind: creature (with its loot table, ' +
         'abilities and max damage), item, npc, quest, spell, achievement, house, imbuement, ' +
         'charm, mount, outfit, book, world or update. Takes an exact page name — use ' +
-        'tibia_search first if it is uncertain. Pass `type` to disambiguate a shared name. ' +
+        'tibia_search first if it is uncertain, or tibia_find_updates for an update page. ' +
+        'Pass `type` to disambiguate a shared name. ' +
         `Creature abilities may carry an \`area\`: ${AREA_LEGEND}`,
       inputSchema: z.object({
         name: z.string().min(1).describe('Page name, e.g. "Dragon Lord". Case-insensitive.'),

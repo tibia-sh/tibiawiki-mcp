@@ -9,7 +9,7 @@ import { Client, StreamableHTTPClientTransport, type ClientOptions } from '@mode
 import { localhostAllowedHostnames } from '@modelcontextprotocol/server';
 import { openDb } from '../src/db.ts';
 import { MAX_BODY_BYTES, isLoopbackAddress, serveHttp, type HttpServing } from '../src/http.ts';
-import { createServer } from '../src/server.ts';
+import { createServer, TOOL_NAMES } from '../src/server.ts';
 import { FIXTURE } from './harness.ts';
 
 /**
@@ -159,7 +159,7 @@ for (const [label, options, version] of [
   test(`client 2.0.0 with ${label} negotiates ${version} and is served without a session`, async () => {
     const run = await exercise(options);
     assert.equal(run.version, version);
-    assert.equal(run.tools, 5);
+    assert.equal(run.tools, TOOL_NAMES.length);
     assert.equal(run.isError, false);
     assert.equal(run.first, 'Dragon');
     assert.equal(run.listChanged, false);
@@ -222,7 +222,7 @@ test('a POST declaring 65,537 bytes gets 413 before any of them is sent, and 65,
   const exact = await post(TOOLS_LIST.padEnd(65_536, ' '), mcpHeaders(LEGACY));
   assert.equal(exact.status, 200);
   const [message] = events(exact.body) as Array<{ result: { tools: unknown[] } }>;
-  assert.equal(message?.result.tools.length, 5);
+  assert.equal(message?.result.tools.length, TOOL_NAMES.length);
 });
 
 test('PUT and DELETE on /mcp get 405 with Allow: GET, POST before their bodies are read', async () => {

@@ -50,18 +50,20 @@ async function findAll(client: Client, args: Record<string, unknown>): Promise<U
 }
 
 const VOCATION_2026 = 'Updates/15.25.3a4a52';
+// A closed, historical range around it. The index gains updates every month, so an
+// open-ended range would change what these tests see with each data release.
+const FIRST_HALF_2026 = { released_after: '2026-01-01', released_before: '2026-06-30' };
 
-test('knight since 2026 finds the vocation rebalance with a stances line', () => withRealIndex(async (client) => {
-  const page = await find(client, { text: 'knight', released_after: '2026-01-01', limit: 50 });
-  const hit = page.results.find((r) => r.title === VOCATION_2026);
-  assert.ok(hit, `expected ${VOCATION_2026} among ${JSON.stringify(page.results.map((r) => r.title))}`);
+test('knight in early 2026 finds the vocation rebalance with a stances line', () => withRealIndex(async (client) => {
+  const results = await findAll(client, { text: 'knight', ...FIRST_HALF_2026, limit: 50 });
+  const hit = results.find((r) => r.title === VOCATION_2026);
+  assert.ok(hit, `expected ${VOCATION_2026} among ${JSON.stringify(results.map((r) => r.title))}`);
   assert.equal(hit.name, 'Vocation Adjustments 2026');
   assert.equal(hit.releaseDate, '2026-06-16');
   assert.equal(hit.version, '15.25.3a4a52');
   assert.ok(hit.summary?.startsWith('Rebalancing of all 5 vocations'), `summary: ${hit.summary}`);
   assert.ok(hit.matchingLines.some((l) => l.includes('stances')), JSON.stringify(hit.matchingLines));
-  assert.equal(typeof page.indexGeneratedAt, 'string');
-  for (const r of page.results) {
+  for (const r of results) {
     assert.ok(r.matchingLines.length <= 5, `${r.title} returned ${r.matchingLines.length} lines`);
     for (const line of r.matchingLines) {
       assert.match(line, /knight/i, `${r.title} returned a line without the text`);
@@ -72,22 +74,22 @@ test('knight since 2026 finds the vocation rebalance with a stances line', () =>
 }));
 
 test('text matches the update name', () => withRealIndex(async (client) => {
-  const page = await find(client, { text: 'vocation adjustments', limit: 50 });
-  assert.ok(page.results.some((r) => r.title === VOCATION_2026), JSON.stringify(page.results.map((r) => r.title)));
+  const results = await findAll(client, { text: 'vocation adjustments', ...FIRST_HALF_2026, limit: 50 });
+  assert.ok(results.some((r) => r.title === VOCATION_2026), JSON.stringify(results.map((r) => r.title)));
 }));
 
 test('date bounds are inclusive at both ends', () => withRealIndex(async (client) => {
-  const after = await find(client, { released_after: '2026-06-16', limit: 50 });
-  assert.ok(after.results.some((r) => r.title === VOCATION_2026), 'released_after includes its own day');
-  const before = await find(client, { released_before: '2026-06-16', limit: 50 });
-  assert.ok(before.results.some((r) => r.title === VOCATION_2026), 'released_before includes its own day');
+  const after = await findAll(client, { released_after: '2026-06-16', released_before: '2026-06-30', limit: 50 });
+  assert.ok(after.some((r) => r.title === VOCATION_2026), 'released_after includes its own day');
+  const before = await findAll(client, { released_after: '2026-01-01', released_before: '2026-06-16', limit: 50 });
+  assert.ok(before.some((r) => r.title === VOCATION_2026), 'released_before includes its own day');
   const day = await find(client, { released_after: '2026-06-16', released_before: '2026-06-16' });
   assert.ok(day.results.some((r) => r.title === VOCATION_2026), 'a one-day range includes that day');
   for (const r of day.results) assert.equal(r.releaseDate, '2026-06-16');
 }));
 
 test('results are newest first, then by title', () => withRealIndex(async (client) => {
-  const all = await findAll(client, { released_after: '2020-01-01', limit: 50 });
+  const all = await findAll(client, { released_after: '2020-01-01', released_before: '2026-06-30', limit: 50 });
   assert.ok(all.length > 10, 'guard: the range must hold several updates');
   for (let i = 1; i < all.length; i++) {
     const [a, b] = [all[i - 1]!, all[i]!];
@@ -99,11 +101,12 @@ test('results are newest first, then by title', () => withRealIndex(async (clien
 }));
 
 test('the cursor pages to the end without overlap or gaps', () => withRealIndex(async (client) => {
-  const args = { released_after: '2026-01-01', limit: 2 };
+  const args = { ...FIRST_HALF_2026, limit: 2 };
   const first = await find(client, args);
   assert.ok(first.totalMatches > 4, `guard: need more than 4 updates, got ${first.totalMatches}`);
   assert.equal(first.results.length, 2);
   assert.ok(first.nextCursor, 'a partial first page carries a cursor');
+  assert.equal(typeof first.indexGeneratedAt, 'string');
 
   const titles: string[] = [];
   let page: Page = first;
@@ -115,14 +118,14 @@ test('the cursor pages to the end without overlap or gaps', () => withRealIndex(
   }
   assert.equal(new Set(titles).size, titles.length, 'no update appears twice');
   assert.equal(titles.length, first.totalMatches, 'every match is reached');
-  const whole = await find(client, { released_after: '2026-01-01', limit: 50 });
-  assert.deepEqual(titles, whole.results.map((r) => r.title), 'paging keeps the order of one page');
+  const whole = await findAll(client, { ...FIRST_HALF_2026, limit: 50 });
+  assert.deepEqual(titles, whole.map((r) => r.title), 'paging keeps the order of larger pages');
 }));
 
 test('without text, matchingLines is empty', () => withRealIndex(async (client) => {
-  const page = await find(client, { released_after: '2026-01-01', limit: 50 });
-  assert.ok(page.results.length > 0);
-  for (const r of page.results) assert.deepEqual(r.matchingLines, [], r.title);
+  const results = await findAll(client, { ...FIRST_HALF_2026, limit: 50 });
+  assert.ok(results.length > 0);
+  for (const r of results) assert.deepEqual(r.matchingLines, [], r.title);
 }));
 
 test('%, _ and backslash match themselves', () => withRealIndex(async (client) => {

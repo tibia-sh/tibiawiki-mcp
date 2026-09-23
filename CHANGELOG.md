@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.7.0](https://github.com/tibia-sh/tibiawiki-mcp/compare/v0.6.3...v0.7.0) (2026-09-23)
+
+
+### Features
+
+* find game updates by text and date ([86a198d](https://github.com/tibia-sh/tibiawiki-mcp/commit/86a198d917e0d739d9e6b4ac5e5a82c432208a20))
+
+
+### Bug Fixes
+
+* harden tibia_find_updates' text matching ([9bbe75c](https://github.com/tibia-sh/tibiawiki-mcp/commit/9bbe75cb12b88ad62eb764b2e2b861b4e5e8228d))
+* keep a match that ends a long line ([05777cf](https://github.com/tibia-sh/tibiawiki-mcp/commit/05777cf55e44998c654a372e354e77bf690cffdc))
+* name the spell group cooldowns in seconds ([e6d1fc2](https://github.com/tibia-sh/tibiawiki-mcp/commit/e6d1fc21c5e9ac1ce31133dd9ff7896bc0da1863))
+* refuse a cursor offset past a safe integer ([cb61a7b](https://github.com/tibia-sh/tibiawiki-mcp/commit/cb61a7bf13edc59a4010cbbc026bd4e174c9b913))
+* return spell descriptions and requirements ([4b7953b](https://github.com/tibia-sh/tibiawiki-mcp/commit/4b7953b9158852b7ccfaf7dc6a7cd4b32e2bf5ef))
+
 ## [0.6.3](https://github.com/tibia-sh/tibiawiki-mcp/compare/v0.6.2...v0.6.3) (2026-09-19)
 
 

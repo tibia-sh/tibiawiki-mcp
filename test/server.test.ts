@@ -123,8 +123,8 @@ test('tibia_get returns a spell description and its requirements', async () => {
   assert.equal(data.group, 'Attack');
   assert.equal(data.secondaryGroup, null);
   assert.equal(data.runeGroup, null);
-  assert.equal(data.cooldownGroup, 2);
-  assert.equal(data.secondaryCooldownGroup, null);
+  assert.equal(data.groupCooldown, 2);
+  assert.equal(data.secondaryGroupCooldown, null);
   await h.close();
 });
 
@@ -138,6 +138,20 @@ test('tibia_get lists every vocation that casts a spell, in a fixed order', asyn
   assert.deepEqual(data.vocations, ['sorcerer', 'druid', 'paladin', 'monk']);
   assert.equal(data.basePower, 40);
   assert.equal(data.group, 'Healing');
+  assert.equal(data.groupCooldown, 1);
+  await h.close();
+});
+
+test('tibia_get reports an unrecorded spell power and group cooldown as null', async () => {
+  const h = await connect();
+  const res = await h.client.callTool({
+    name: 'tibia_get', arguments: { name: 'Gift of Life', type: 'spell' },
+  });
+  assert.notEqual(res.isError, true);
+  const data = res.structuredContent as Record<string, any>;
+  assert.equal(data.basePower, null);
+  assert.equal(data.groupCooldown, null);
+  assert.equal(data.secondaryGroupCooldown, null);
   await h.close();
 });
 

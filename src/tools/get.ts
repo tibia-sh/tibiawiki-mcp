@@ -159,6 +159,10 @@ const spellShapeSchema = z.object({
   corroborated: z.boolean(),
 }).nullable().describe('Tiles a spell covers, read from its wiki animation.');
 
+// The spell table's vocation columns, each 0 or 1 and never null. This order is
+// the order `vocations` lists them in.
+const SPELL_VOCATIONS = ['knight', 'sorcerer', 'druid', 'paladin', 'monk'] as const;
+
 const spellOut = z.object({
   type: z.literal('spell'),
   areaShape: spellShapeSchema,
@@ -173,7 +177,7 @@ const spellOut = z.object({
   isPremium: z.boolean().nullable(),
   cooldown: z.number().nullable(),
   effect: z.string().nullable(),
-  vocations: z.array(z.string()),
+  vocations: z.array(z.enum(SPELL_VOCATIONS)),
   isPromotion: z.boolean().nullable(),
   isWheelSpell: z.boolean().nullable(),
   isPassive: z.boolean().nullable(),
@@ -181,8 +185,10 @@ const spellOut = z.object({
   group: z.string().nullable(),
   secondaryGroup: z.string().nullable(),
   runeGroup: z.string().nullable(),
-  cooldownGroup: z.number().nullable(),
-  secondaryCooldownGroup: z.number().nullable(),
+  groupCooldown: z.number().nullable()
+    .describe('Seconds before another spell of the same group can be cast.'),
+  secondaryGroupCooldown: z.number().nullable()
+    .describe('Seconds before another spell of its secondary group can be cast.'),
   status: z.string().nullable(),
   detail, source: sourceSchema,
 });
@@ -418,9 +424,6 @@ export function registerGet(server: McpServer, handle: TibiaDb): void {
     `select q.title, oq.unlock_type from outfit_quest oq join quest q on q.article_id = oq.quest_id
      where oq.outfit_id = ? order by q.title asc, oq.unlock_type asc`);
 
-  // The spell table's vocation columns, each 0 or 1 and never null. This order is
-  // the order `vocations` lists them in.
-  const SPELL_VOCATIONS = ['knight', 'sorcerer', 'druid', 'paladin', 'monk'] as const;
   // tibiawiki-sql: "Day of the week, Monday starts at 0." Starting this array at
   // Sunday shifted the entire schedule by one day.
   const WEEKDAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
@@ -570,8 +573,8 @@ export function registerGet(server: McpServer, handle: TibiaDb): void {
           isPromotion: bool(row.is_promotion), isWheelSpell: bool(row.is_wheel_spell),
           isPassive: bool(row.is_passive), basePower: num(row.base_power),
           group: str(row.group_spell), secondaryGroup: str(row.group_secondary),
-          runeGroup: str(row.group_rune), cooldownGroup: num(row.cooldown_group),
-          secondaryCooldownGroup: num(row.cooldown_group_secondary),
+          runeGroup: str(row.group_rune), groupCooldown: num(row.cooldown_group),
+          secondaryGroupCooldown: num(row.cooldown_group_secondary),
           status: str(row.status), source,
         };
       case 'achievement':

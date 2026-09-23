@@ -9,6 +9,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client';
 import { openDb } from '../src/db.ts';
 import { MAX_BODY_BYTES } from '../src/http.ts';
+import { TOOL_NAMES } from '../src/server.ts';
 import { FIXTURE, tempDirs } from './harness.ts';
 
 /**
@@ -96,7 +97,7 @@ function cli(args: string[], db = FIXTURE) {
   });
 }
 
-test('serve --http announces the address it bound, and client 2.0.0 lists the five tools there', { timeout: 30_000 }, async () => {
+test('serve --http announces the address it bound, and client 2.0.0 lists the tools there', { timeout: 30_000 }, async () => {
   const handle = openDb(FIXTURE);
   const { generatedAt, version } = handle.provenance;
   handle.close();
@@ -111,7 +112,7 @@ test('serve --http announces the address it bound, and client 2.0.0 lists the fi
     await client.connect(new StreamableHTTPClientTransport(url));
     try {
       const { tools } = await client.listTools();
-      assert.equal(tools.length, 5);
+      assert.equal(tools.length, TOOL_NAMES.length);
     } finally {
       await client.close();
     }

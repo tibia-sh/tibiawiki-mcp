@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { Client } from '@modelcontextprotocol/client';
 import { StdioClientTransport } from '@modelcontextprotocol/client/stdio';
 import { FIXTURE, PACKAGE_VERSION } from './harness.ts';
+import { TOOL_NAMES } from '../src/server.ts';
 
 /**
  * Protocol conformance against the REAL published binary over REAL stdio - the
@@ -21,14 +22,11 @@ async function connectStdio() {
   return client;
 }
 
-test('the built binary serves all five tools over stdio', async () => {
+test('the built binary serves every tool over stdio', async () => {
   const client = await connectStdio();
   const { tools } = await client.listTools();
   const names = tools.map((t) => t.name).sort();
-  assert.deepEqual(names, [
-    'tibia_find_creatures', 'tibia_find_items', 'tibia_get',
-    'tibia_how_to_obtain', 'tibia_search',
-  ]);
+  assert.deepEqual(names, [...TOOL_NAMES].sort());
   for (const t of tools) {
     assert.equal(t.annotations?.readOnlyHint, true, `${t.name} must be read-only`);
   }

@@ -7,6 +7,7 @@ import { registerSearch, NAME as SEARCH } from './tools/search.ts';
 import { registerFindCreatures, NAME as FIND_CREATURES } from './tools/find-creatures.ts';
 import { registerFindItems, NAME as FIND_ITEMS } from './tools/find-items.ts';
 import { registerHowToObtain, NAME as HOW_TO_OBTAIN } from './tools/how-to-obtain.ts';
+import { registerFindUpdates, NAME as FIND_UPDATES } from './tools/find-updates.ts';
 
 /**
  * What both servers report in the MCP handshake. The version is package.json's, read at
@@ -46,7 +47,9 @@ export const ATTRIBUTION =
     'corroborated means a second image of the same spell agreed; false does ' +
     'not mean unsupported, since most uncorroborated shapes match other spells\' images.';
 
-export const TOOL_NAMES = [GET, SEARCH, FIND_CREATURES, FIND_ITEMS, HOW_TO_OBTAIN] as const;
+export const TOOL_NAMES = [
+  GET, SEARCH, FIND_CREATURES, FIND_ITEMS, HOW_TO_OBTAIN, FIND_UPDATES,
+] as const;
 
 export function createServer(handle: TibiaDb): McpServer {
   const { provenance } = handle;
@@ -70,6 +73,7 @@ export function createServer(handle: TibiaDb): McpServer {
   registerFindCreatures(server, handle);
   registerFindItems(server, handle);
   registerHowToObtain(server, handle);
+  registerFindUpdates(server, handle);
 
   return server;
 }

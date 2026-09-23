@@ -73,7 +73,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
 const TOOL_NAMES = [
-  'tibia_find_creatures', 'tibia_find_items', 'tibia_get',
+  'tibia_find_creatures', 'tibia_find_items', 'tibia_find_updates', 'tibia_get',
   'tibia_how_to_obtain', 'tibia_search',
 ];
 const TIMEOUT_MS = 120_000;

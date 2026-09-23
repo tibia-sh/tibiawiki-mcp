@@ -7,7 +7,7 @@ const outputSchema = z.object({
   results: z.array(z.object({
     title: z.string(),
     name: z.string().nullable(),
-    releaseDate: z.string(),
+    releaseDate: z.string().nullable(),
     version: z.string().nullable(),
     updateType: z.string().nullable(),
     summary: z.string().nullable(),
@@ -33,27 +33,48 @@ const releaseDate = z.string()
   }, DATE_MESSAGE);
 
 /**
+ * The search text, trimmed so the excerpt's own trim can never cut into a match. A NUL
+ * ends a string for SQLite's LIKE, which then matches every row, so control characters
+ * are refused outright.
+ */
+const searchText = z.string()
+  .trim()
+  .min(1, 'must contain something other than spaces')
+  .refine((s) => !/[\u0000-\u001f]/.test(s), 'must not contain a control character');
+
+/**
  * SQLite's lower() folds ASCII only, so the lines are folded the same way: a line is
  * returned exactly when the SQL filter would match it.
  */
 const asciiLower = (s: string): string => s.replace(/[A-Z]/g, (c) => c.toLowerCase());
 
+const isHighSurrogate = (code: number): boolean => code >= 0xd800 && code <= 0xdbff;
+const isLowSurrogate = (code: number): boolean => code >= 0xdc00 && code <= 0xdfff;
+
 /**
  * A matching line, trimmed and cut to MAX_LINE_LENGTH around its first match, so a
- * long line still shows the text it was returned for. asciiLower keeps every index,
- * so a position in the folded line is the same position in the original.
+ * long line still shows the text it was returned for. `needle` is the folded, trimmed
+ * search text. The match is found in the untrimmed line, and asciiLower keeps every
+ * index, so its position holds in the original. The cut never splits a surrogate pair.
  */
-function excerpt(line: string, needle: string): string {
+export function excerpt(line: string, needle: string): string {
   const trimmed = line.trim();
   if (trimmed.length <= MAX_LINE_LENGTH) return trimmed;
-  const at = asciiLower(trimmed).indexOf(needle);
+  const at = asciiLower(line).indexOf(needle) - (line.length - line.trimStart().length);
   const centred = at - Math.floor((MAX_LINE_LENGTH - needle.length) / 2);
-  const start = Math.max(0, Math.min(centred, trimmed.length - MAX_LINE_LENGTH));
-  return trimmed.slice(start, start + MAX_LINE_LENGTH).trim();
+  let start = Math.max(0, Math.min(centred, trimmed.length - MAX_LINE_LENGTH));
+  if (start > 0 && isLowSurrogate(trimmed.charCodeAt(start))) start -= 1;
+  let end = start + MAX_LINE_LENGTH;
+  if (end < trimmed.length && isHighSurrogate(trimmed.charCodeAt(end - 1))) end -= 1;
+  return trimmed.slice(start, end).trim();
 }
 
-/** `text` is a literal: LIKE's wildcards and the escape character match themselves. */
-const likeLiteral = (s: string): string => s.replace(/[\\%_]/g, (c) => `\\${c}`);
+/**
+ * The pattern for `lower(column) like ? escape '\'`: the folded text as a literal
+ * substring, so LIKE's wildcards and the escape character match themselves.
+ */
+export const likePattern = (text: string): string =>
+  `%${asciiLower(text).replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
 
 export function registerFindUpdates(server: McpServer, handle: TibiaDb): void {
   const { db, provenance } = handle;
@@ -63,13 +84,13 @@ export function registerFindUpdates(server: McpServer, handle: TibiaDb): void {
     {
       description:
         'Find Tibia game updates by text and release date, for questions like "what changed ' +
-        'for knights in 2026" or "which update added X". Matches the update\'s page title, ' +
-        'name, summary and change list, newest first, and returns the change lines that ' +
-        'contain the text. Date bounds are inclusive. For the full changes, call tibia_get ' +
-        'with type "update" and the returned title.',
+        'for knights in 2026" or "which update added X". Matches the text, case-insensitive ' +
+        'for ASCII letters, in the update\'s page title, name, summary and change list, ' +
+        'newest first, and returns the change lines that contain it. Date bounds are ' +
+        'inclusive. For the full changes, call tibia_get with type "update" and the ' +
+        'returned title.',
       inputSchema: z.object({
-        text: z.string().min(1).optional()
-          .describe('Literal substring, case-insensitive, e.g. "knight".'),
+        text: searchText.optional().describe('Literal substring, e.g. "knight".'),
         released_after: releaseDate.optional().describe('YYYY-MM-DD, inclusive.'),
         released_before: releaseDate.optional().describe('YYYY-MM-DD, inclusive.'),
         limit: z.number().int().min(1).max(50).default(10),
@@ -91,11 +112,12 @@ export function registerFindUpdates(server: McpServer, handle: TibiaDb): void {
 
       const where: string[] = [];
       const params: string[] = [];
-      const needle = args.text === undefined ? undefined : asciiLower(args.text);
-      if (needle !== undefined) {
+      const { text } = args;
+      const needle = text === undefined ? undefined : asciiLower(text);
+      if (text !== undefined) {
         const columns = ['title', 'name', 'summary', 'changes'];
         where.push(`(${columns.map((c) => `lower(u.${c}) like ? escape '\\'`).join(' or ')})`);
-        params.push(...columns.map(() => `%${likeLiteral(needle)}%`));
+        params.push(...columns.map(() => likePattern(text)));
       }
       if (args.released_after !== undefined) {
         where.push('u.release_date >= ?');
@@ -120,7 +142,7 @@ export function registerFindUpdates(server: McpServer, handle: TibiaDb): void {
         results: rows.map((row) => ({
           title: String(row.title),
           name: row.name === null ? null : String(row.name),
-          releaseDate: String(row.release_date),
+          releaseDate: row.release_date === null ? null : String(row.release_date),
           version: row.version === null ? null : String(row.version),
           updateType: row.type_primary === null ? null : String(row.type_primary),
           summary: row.summary === null ? null : String(row.summary),

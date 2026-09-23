@@ -194,3 +194,21 @@ test('detailed verbosity adds real columns', async () => {
   assert.ok('location' in data.detail);
   await h.close();
 });
+
+// A well-formed cursor whose offset is past Number.MAX_SAFE_INTEGER reached SQLite as a
+// REAL and failed there with a raw "datatype mismatch" instead of the invalid-cursor answer.
+test('every paged tool refuses a cursor offset past a safe integer', async () => {
+  const h = await connect();
+  const huge = Buffer.from(`o:${'9'.repeat(20)}`, 'utf8').toString('base64url');
+  for (const [name, args] of [
+    ['tibia_search', { query: 'Dragon' }],
+    ['tibia_find_creatures', {}],
+    ['tibia_find_items', {}],
+    ['tibia_find_updates', {}],
+  ] as const) {
+    const res = await h.client.callTool({ name, arguments: { ...args, cursor: huge } });
+    assert.equal(res.isError, true, `${name} must refuse the cursor`);
+    assert.match((res.content as Array<{ text: string }>)[0]!.text, /^Invalid cursor: /, name);
+  }
+  await h.close();
+});

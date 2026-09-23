@@ -6,6 +6,10 @@ import { InMemoryTransport } from '@modelcontextprotocol/server';
 import { Client } from '@modelcontextprotocol/client';
 import { openDb } from '../src/db.ts';
 import { createServer } from '../src/server.ts';
+import { excerpt, likePattern } from '../src/tools/find-updates.ts';
+
+/** The fold SQLite's lower() and NOCASE apply: ASCII letters only. */
+const asciiLower = (s: string): string => s.replace(/[A-Z]/g, (c) => c.toLowerCase());
 
 // The fixture holds two update pages, so these tests open the real packaged index, the
 // way regression.test.ts does. They assert facts about historical update pages, which
@@ -95,7 +99,7 @@ test('results are newest first, then by title', () => withRealIndex(async (clien
     const [a, b] = [all[i - 1]!, all[i]!];
     assert.ok(a.releaseDate >= b.releaseDate, `${a.title} (${a.releaseDate}) before ${b.title} (${b.releaseDate})`);
     if (a.releaseDate === b.releaseDate) {
-      assert.ok(a.title.toLowerCase() <= b.title.toLowerCase(), `${a.title} before ${b.title} on the same day`);
+      assert.ok(asciiLower(a.title) <= asciiLower(b.title), `${a.title} before ${b.title} on the same day`);
     }
   }
 }));
@@ -180,3 +184,60 @@ test('tibia_get with the returned title gives the full changes', () => withRealI
   assert.notEqual(res.isError, true, JSON.stringify(res.content));
   assert.ok(String((res.structuredContent as any).changes).includes('Protector'));
 }));
+
+test('the LIKE pattern matches %, _ and backslash as themselves and only themselves', () => {
+  const db = new DatabaseSync(':memory:');
+  try {
+    const matches = (value: string, text: string): boolean =>
+      (db.prepare(`select lower(?) like ? escape '\\' as m`).get(value, likePattern(text)) as { m: number }).m === 1;
+    assert.ok(matches('Save 50% now', '50%'));
+    assert.ok(!matches('Save 500 now', '50%'), '% is not a wildcard');
+    assert.ok(matches('a_b', 'a_b'));
+    assert.ok(!matches('axb', 'a_b'), '_ is not a wildcard');
+    assert.ok(matches('C:\\path', ':\\p'));
+    assert.ok(!matches('C:path', ':\\p'), 'backslash is not dropped');
+    assert.ok(matches('a\\%b', '\\%'), 'an escaped escape still matches itself');
+    assert.ok(!matches('a%b', '\\%'));
+    assert.ok(matches('KNIGHTS', 'Knight'), 'ASCII letters fold both ways');
+    assert.ok(!matches('Ämter', 'ämter'), 'non-ASCII letters do not fold, as in SQLite');
+  } finally {
+    db.close();
+  }
+});
+
+test('text with a control character is rejected', () => withRealIndex(async (client) => {
+  for (const bad of ['\u0000', 'kni\u0000ght', 'a\u001fb', 'a\tb']) {
+    const res = await client.callTool({ name: 'tibia_find_updates', arguments: { text: bad } });
+    assert.equal(res.isError, true, `${JSON.stringify(bad)} must be rejected`);
+    assert.match(JSON.stringify(res.content), /control character/, JSON.stringify(res.content));
+  }
+}));
+
+test('text is trimmed, and blank text is rejected', () => withRealIndex(async (client) => {
+  const plain = await findAll(client, { text: 'knight', ...FIRST_HALF_2026, limit: 50 });
+  const padded = await findAll(client, { text: '  knight ', ...FIRST_HALF_2026, limit: 50 });
+  assert.deepEqual(padded, plain);
+  const blank = await client.callTool({ name: 'tibia_find_updates', arguments: { text: '   ' } });
+  assert.equal(blank.isError, true);
+}));
+
+const LONE_SURROGATE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/;
+
+test('a long line is cut around its match, without splitting a surrogate pair', () => {
+  const needleAt = (line: string, needle: string) => {
+    const cut = excerpt(line, needle);
+    assert.ok(asciiLower(cut).includes(needle), `the match survives: ${JSON.stringify(cut.slice(0, 40))}`);
+    assert.ok(cut.length <= 200, `${cut.length} characters`);
+    assert.equal(cut, cut.trim());
+    assert.doesNotMatch(cut, LONE_SURROGATE, 'no lone surrogate at either end');
+  };
+  needleAt(`    ${'x'.repeat(250)} knight ${'y'.repeat(250)}   `, 'knight');
+  needleAt(`Knight${'y'.repeat(300)}`, 'knight');
+  needleAt(`${'y'.repeat(300)}KNIGHT`, 'knight');
+  for (const needle of ['knight', 'knigh']) {
+    for (const pad of ['', 'a']) {
+      needleAt(`${pad}${'😀'.repeat(150)}${needle}${'😀'.repeat(150)}`, needle);
+    }
+  }
+  assert.equal(excerpt('  short knight line  ', 'knight'), 'short knight line');
+});

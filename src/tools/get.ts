@@ -172,6 +172,17 @@ const spellOut = z.object({
   soul: z.number().nullable(),
   isPremium: z.boolean().nullable(),
   cooldown: z.number().nullable(),
+  effect: z.string().nullable(),
+  vocations: z.array(z.string()),
+  isPromotion: z.boolean().nullable(),
+  isWheelSpell: z.boolean().nullable(),
+  isPassive: z.boolean().nullable(),
+  basePower: z.number().nullable(),
+  group: z.string().nullable(),
+  secondaryGroup: z.string().nullable(),
+  runeGroup: z.string().nullable(),
+  cooldownGroup: z.number().nullable(),
+  secondaryCooldownGroup: z.number().nullable(),
   status: z.string().nullable(),
   detail, source: sourceSchema,
 });
@@ -407,6 +418,9 @@ export function registerGet(server: McpServer, handle: TibiaDb): void {
     `select q.title, oq.unlock_type from outfit_quest oq join quest q on q.article_id = oq.quest_id
      where oq.outfit_id = ? order by q.title asc, oq.unlock_type asc`);
 
+  // The spell table's vocation columns, each 0 or 1 and never null. This order is
+  // the order `vocations` lists them in.
+  const SPELL_VOCATIONS = ['knight', 'sorcerer', 'druid', 'paladin', 'monk'] as const;
   // tibiawiki-sql: "Day of the week, Monday starts at 0." Starting this array at
   // Sunday shifted the entire schedule by one day.
   const WEEKDAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
@@ -551,7 +565,14 @@ export function registerGet(server: McpServer, handle: TibiaDb): void {
           spellType: str(row.spell_type), element: str(row.element),
           mana: num(row.mana), level: num(row.level), soul: num(row.soul),
           isPremium: row.is_premium === null ? null : Boolean(row.is_premium),
-          cooldown: num(row.cooldown), status: str(row.status), source,
+          cooldown: num(row.cooldown), effect: str(row.effect),
+          vocations: SPELL_VOCATIONS.filter((v) => Number(row[v]) === 1),
+          isPromotion: bool(row.is_promotion), isWheelSpell: bool(row.is_wheel_spell),
+          isPassive: bool(row.is_passive), basePower: num(row.base_power),
+          group: str(row.group_spell), secondaryGroup: str(row.group_secondary),
+          runeGroup: str(row.group_rune), cooldownGroup: num(row.cooldown_group),
+          secondaryCooldownGroup: num(row.cooldown_group_secondary),
+          status: str(row.status), source,
         };
       case 'achievement':
         return {

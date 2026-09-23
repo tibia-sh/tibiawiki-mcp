@@ -107,6 +107,40 @@ test('tibia_get finds a spell despite spell.title lacking COLLATE NOCASE', async
   await h.close();
 });
 
+test('tibia_get returns a spell description and its requirements', async () => {
+  const h = await connect();
+  const res = await h.client.callTool({
+    name: 'tibia_get', arguments: { name: 'Fierce Berserk', type: 'spell' },
+  });
+  assert.notEqual(res.isError, true);
+  const data = res.structuredContent as Record<string, any>;
+  assert.match(data.effect, /^Performs a furious whirlwind attack/);
+  assert.deepEqual(data.vocations, ['knight']);
+  assert.equal(data.isPromotion, false);
+  assert.equal(data.isWheelSpell, false);
+  assert.equal(data.isPassive, false);
+  assert.equal(data.basePower, 92);
+  assert.equal(data.group, 'Attack');
+  assert.equal(data.secondaryGroup, null);
+  assert.equal(data.runeGroup, null);
+  assert.equal(data.cooldownGroup, 2);
+  assert.equal(data.secondaryCooldownGroup, null);
+  await h.close();
+});
+
+test('tibia_get lists every vocation that casts a spell, in a fixed order', async () => {
+  const h = await connect();
+  const res = await h.client.callTool({
+    name: 'tibia_get', arguments: { name: 'Light Healing', type: 'spell' },
+  });
+  assert.notEqual(res.isError, true);
+  const data = res.structuredContent as Record<string, any>;
+  assert.deepEqual(data.vocations, ['sorcerer', 'druid', 'paladin', 'monk']);
+  assert.equal(data.basePower, 40);
+  assert.equal(data.group, 'Healing');
+  await h.close();
+});
+
 test('an ambiguous name asks the caller to disambiguate', async () => {
   const h = await connect();
   const res = await h.client.callTool({ name: 'tibia_get', arguments: { name: 'Mud' } });

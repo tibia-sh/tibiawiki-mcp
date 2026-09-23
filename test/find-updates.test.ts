@@ -237,6 +237,8 @@ test('a long line is cut around its match, without splitting a surrogate pair', 
   for (const needle of ['knight', 'knigh']) {
     for (const pad of ['', 'a']) {
       needleAt(`${pad}${'😀'.repeat(150)}${needle}${'😀'.repeat(150)}`, needle);
+      needleAt(`${pad}${'😀'.repeat(150)}${needle}`, needle);
+      needleAt(`${needle}${'😀'.repeat(150)}${pad}`, needle);
     }
   }
   assert.equal(excerpt('  short knight line  ', 'knight'), 'short knight line');

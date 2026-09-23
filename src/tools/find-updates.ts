@@ -63,7 +63,8 @@ export function excerpt(line: string, needle: string): string {
   const at = asciiLower(line).indexOf(needle) - (line.length - line.trimStart().length);
   const centred = at - Math.floor((MAX_LINE_LENGTH - needle.length) / 2);
   let start = Math.max(0, Math.min(centred, trimmed.length - MAX_LINE_LENGTH));
-  if (start > 0 && isLowSurrogate(trimmed.charCodeAt(start))) start -= 1;
+  // A start inside a pair moves right, not left: left would push the end past a match that ends the line.
+  if (start > 0 && isLowSurrogate(trimmed.charCodeAt(start))) start += 1;
   let end = start + MAX_LINE_LENGTH;
   if (end < trimmed.length && isHighSurrogate(trimmed.charCodeAt(end - 1))) end -= 1;
   return trimmed.slice(start, end).trim();

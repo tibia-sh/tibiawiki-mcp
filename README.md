@@ -57,6 +57,7 @@ You ask questions, and your assistant calls these:
 | `tibia_find_creatures` | "Which creatures match these stats?" |
 | `tibia_find_items` | "Which items match these stats?" |
 | `tibia_how_to_obtain` | "Where do I get X?" Drops, vendors and quest rewards in one call |
+| `tibia_find_updates` | "What changed for knights in 2026?" Game updates by text and release date |
 
 The server tells your assistant how to read the data, for example that a damage modifier of 100
 is neutral. [What the skill adds](https://github.com/tibia-sh/tibiawiki-mcp/blob/main/docs/USAGE.md#what-the-skill-adds)

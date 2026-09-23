@@ -5,7 +5,7 @@ description: Use when answering questions about Tibia — creatures, items, loot
 
 # Querying TibiaWiki
 
-Five tools over an **offline snapshot** of TibiaWiki. Every response carries
+Six tools over an **offline snapshot** of TibiaWiki. Every response carries
 `indexGeneratedAt` — the data reflects the wiki at that moment, not live game or
 server state. Say so when it matters (a recently changed creature, a new update).
 
@@ -18,6 +18,7 @@ server state. Say so when it matters (a recently changed creature, a new update)
 | Creatures matching stats | `tibia_find_creatures` |
 | Items matching stats | `tibia_find_items` |
 | Where an item comes from | `tibia_how_to_obtain` |
+| What changed in the game, and when | `tibia_find_updates` |
 
 **Resolve names before fetching.** `tibia_get` takes an exact page name. If the user
 says "dragonlord" or "that fire dragon", call `tibia_search` first — results are
@@ -27,6 +28,10 @@ an error costs a round trip.
 **Prefer `tibia_how_to_obtain` over two lookups.** It returns creature drops with
 chances, NPC vendors with prices, and quest rewards in one call. Reaching for
 `tibia_find_creatures` plus `tibia_get` to answer "where do I get X" is the slow path.
+
+**Find updates by what changed, not by name.** For "what changed for knights in 2026"
+or "which update added X", call `tibia_find_updates` with text and dates, then
+`tibia_get` with `type: "update"` and the returned `title` for the full changes.
 
 ## Damage modifiers: 100 is neutral
 

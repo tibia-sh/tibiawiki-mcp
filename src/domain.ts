@@ -116,12 +116,18 @@ export function entityHasStatus(type: EntityType): boolean {
   return entity(type).hasStatus;
 }
 
+/**
+ * The order by expr in direction, rows without a value last and title breaking ties, so
+ * every sort is total and a cursor's offset stays stable across pages.
+ */
+const nullsLast = (expr: string, direction: 'asc' | 'desc'): string =>
+  `(${expr} is null), ${expr} ${direction}, title asc`;
+
 export const CREATURE_SORTS = ['experience', 'hitpoints', 'title'] as const;
 export type CreatureSort = (typeof CREATURE_SORTS)[number];
 const CREATURE_ORDER: Record<CreatureSort, string> = {
-  // Nulls last, with title as a tiebreak so pagination is stable.
-  experience: '(experience is null), experience desc, title asc',
-  hitpoints: '(nullif(hitpoints, 0) is null), nullif(hitpoints, 0) desc, title asc',
+  experience: nullsLast('experience', 'desc'),
+  hitpoints: nullsLast('nullif(hitpoints, 0)', 'desc'),
   title: 'title asc',
 };
 export function creatureSort(key: CreatureSort): string {
@@ -142,15 +148,13 @@ export type ItemSort = (typeof ITEM_SORTS)[number];
 const itemStat = (name: 'armor' | 'attack' | 'defense'): string =>
   `(select max(cast(a.value as integer)) from item_attribute a
      where a.item_id = i.article_id and a.name = '${name}')`;
-const statOrder = (name: 'armor' | 'attack' | 'defense'): string =>
-  `(${itemStat(name)} is null), ${itemStat(name)} desc, title asc`;
 const ITEM_ORDER: Record<ItemSort, string> = {
   title: 'title asc',
-  weight: '(weight is null), weight asc, title asc',
-  value: '(value_buy is null), value_buy desc, title asc',
-  armor: statOrder('armor'),
-  attack: statOrder('attack'),
-  defense: statOrder('defense'),
+  weight: nullsLast('weight', 'asc'),
+  value: nullsLast('value_buy', 'desc'),
+  armor: nullsLast(itemStat('armor'), 'desc'),
+  attack: nullsLast(itemStat('attack'), 'desc'),
+  defense: nullsLast(itemStat('defense'), 'desc'),
 };
 export function itemSort(key: ItemSort): string {
   if (!Object.hasOwn(ITEM_ORDER, key)) {
@@ -186,8 +190,8 @@ export const SPELL_TYPES = ['instant', 'rune'] as const;
 export const SPELL_SORTS = ['level', 'mana', 'title'] as const;
 export type SpellSort = (typeof SPELL_SORTS)[number];
 const SPELL_ORDER: Record<SpellSort, string> = {
-  level: '(level is null), level asc, title asc',
-  mana: '(mana is null), mana asc, title asc',
+  level: nullsLast('level', 'asc'),
+  mana: nullsLast('mana', 'asc'),
   title: 'title asc',
 };
 export function spellSort(key: SpellSort): string {
@@ -208,8 +212,8 @@ export const QUEST_REWARDS =
 export const QUEST_SORTS = ['level_recommended', 'level_required', 'title'] as const;
 export type QuestSort = (typeof QUEST_SORTS)[number];
 const QUEST_ORDER: Record<QuestSort, string> = {
-  level_recommended: '(level_recommended is null), level_recommended asc, title asc',
-  level_required: '(level_required is null), level_required asc, title asc',
+  level_recommended: nullsLast('level_recommended', 'asc'),
+  level_required: nullsLast('level_required', 'asc'),
   title: 'title asc',
 };
 export function questSort(key: QuestSort): string {
@@ -222,8 +226,8 @@ export function questSort(key: QuestSort): string {
 export const HOUSE_SORTS = ['rent', 'size', 'title'] as const;
 export type HouseSort = (typeof HOUSE_SORTS)[number];
 const HOUSE_ORDER: Record<HouseSort, string> = {
-  rent: '(rent is null), rent asc, title asc',
-  size: '(size is null), size desc, title asc',
+  rent: nullsLast('rent', 'asc'),
+  size: nullsLast('size', 'desc'),
   title: 'title asc',
 };
 export function houseSort(key: HouseSort): string {

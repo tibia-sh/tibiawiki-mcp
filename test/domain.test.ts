@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { DatabaseSync } from 'node:sqlite';
 import {
   ELEMENTS, modifierColumn, WEAK_TO, RESISTANT_TO, entityTable,
-  creatureSort, itemSort, eavOperator, statusClause,
+  creatureSort, itemSort, spellSort, vocationColumn, eavOperator, statusClause,
   DETAILED_CREATURE_FIELDS, DETAILED_ITEM_FIELDS,
 } from '../src/domain.ts';
 import { encodeCursor, decodeCursor } from '../src/cursor.ts';
@@ -23,11 +23,13 @@ test('the modifier convention is encoded once: >100 is weak, <100 is resistant',
 
 // Every string this module returns is interpolated into SQL. Each map must reject
 // an out-of-enum key rather than pass it through - one negative test per map.
-test('all five SQL-fragment maps reject unknown keys', () => {
+test('all seven SQL-fragment maps reject unknown keys', () => {
   assert.throws(() => modifierColumn('lava' as never), /unknown element/i);
   assert.throws(() => entityTable('dragon' as never), /unknown entity type/i);
   assert.throws(() => creatureSort('rowid' as never), /unknown sort/i);
   assert.throws(() => itemSort('rowid' as never), /unknown sort/i);
+  assert.throws(() => spellSort('rowid' as never), /unknown sort/i);
+  assert.throws(() => vocationColumn('mage' as never), /unknown vocation/i);
   assert.throws(() => eavOperator('drop' as never), /unknown operator/i);
 });
 
@@ -39,6 +41,8 @@ test('the maps also reject inherited prototype names', () => {
     assert.throws(() => entityTable(evil as never), /unknown entity type/i, `entityTable(${evil})`);
     assert.throws(() => creatureSort(evil as never), /unknown sort/i, `creatureSort(${evil})`);
     assert.throws(() => itemSort(evil as never), /unknown sort/i, `itemSort(${evil})`);
+    assert.throws(() => spellSort(evil as never), /unknown sort/i, `spellSort(${evil})`);
+    assert.throws(() => vocationColumn(evil as never), /unknown vocation/i, `vocationColumn(${evil})`);
     assert.throws(() => eavOperator(evil as never), /unknown operator/i, `eavOperator(${evil})`);
     assert.throws(() => modifierColumn(evil as never), /unknown element/i, `modifierColumn(${evil})`);
   }

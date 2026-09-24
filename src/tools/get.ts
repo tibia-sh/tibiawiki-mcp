@@ -4,7 +4,7 @@ import type { McpServer } from '@modelcontextprotocol/server';
 import type { Provenance, TibiaDb } from '../db.ts';
 import {
   ELEMENTS, ENTITY_TYPES, entityTypeSchema, entityTable, entityHasStatus, statusClause,
-  verbositySchema,
+  verbositySchema, SPELL_VOCATIONS,
   DETAILED_CREATURE_FIELDS, DETAILED_ITEM_FIELDS, coerceAttribute, type EntityType,
 } from '../domain.ts';
 
@@ -162,10 +162,6 @@ const spellShapeSchema = z.object({
   sourceUrl: z.string(),
   corroborated: z.boolean(),
 }).nullable().describe('Tiles a spell covers, read from its wiki animation.');
-
-// The spell table's vocation columns, each 0 or 1 and never null. This order is
-// the order `vocations` lists them in.
-const SPELL_VOCATIONS = ['knight', 'sorcerer', 'druid', 'paladin', 'monk'] as const;
 
 const spellOut = z.object({
   type: z.literal('spell'),

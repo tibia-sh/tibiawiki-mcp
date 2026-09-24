@@ -103,7 +103,34 @@ export function itemSort(key: ItemSort): string {
   return ITEM_ORDER[key];
 }
 
-const EAV_OPERATORS = { gte: '>=', lte: '<=' } as const;
+// The spell table's vocation columns, each 0 or 1 and never null. This order is
+// the order a spell's `vocations` lists them in.
+export const SPELL_VOCATIONS = ['knight', 'sorcerer', 'druid', 'paladin', 'monk'] as const;
+export type SpellVocation = (typeof SPELL_VOCATIONS)[number];
+export function vocationColumn(vocation: SpellVocation): string {
+  if (!SPELL_VOCATIONS.includes(vocation)) throw new Error(`Unknown vocation: ${String(vocation)}`);
+  return vocation;
+}
+
+/** The values of `spell.group_spell` and `spell.spell_type`, as the wiki spells them. */
+export const SPELL_GROUPS = ['Attack', 'Healing', 'Support', 'Conjure'] as const;
+export const SPELL_TYPES = ['Instant', 'Rune'] as const;
+
+export const SPELL_SORTS = ['level', 'mana', 'title'] as const;
+export type SpellSort = (typeof SPELL_SORTS)[number];
+const SPELL_ORDER: Record<SpellSort, string> = {
+  level: '(level is null), level asc, title asc',
+  mana: '(mana is null), mana asc, title asc',
+  title: 'title asc',
+};
+export function spellSort(key: SpellSort): string {
+  if (!Object.hasOwn(SPELL_ORDER, key)) {
+    throw new Error(`Unknown sort key: ${String(key)}`);
+  }
+  return SPELL_ORDER[key];
+}
+
+const EAV_OPERATORS ={ gte: '>=', lte: '<=' } as const;
 export type EavOperator = keyof typeof EAV_OPERATORS;
 export function eavOperator(op: EavOperator): string {
   if (!Object.hasOwn(EAV_OPERATORS, op)) {

@@ -6,6 +6,7 @@ import { registerGet, NAME as GET } from './tools/get.ts';
 import { registerSearch, NAME as SEARCH } from './tools/search.ts';
 import { registerFindCreatures, NAME as FIND_CREATURES } from './tools/find-creatures.ts';
 import { registerFindItems, NAME as FIND_ITEMS } from './tools/find-items.ts';
+import { registerFindSpells, NAME as FIND_SPELLS } from './tools/find-spells.ts';
 import { registerHowToObtain, NAME as HOW_TO_OBTAIN } from './tools/how-to-obtain.ts';
 import { registerFindUpdates, NAME as FIND_UPDATES } from './tools/find-updates.ts';
 
@@ -48,7 +49,7 @@ export const ATTRIBUTION =
     'not mean unsupported, since most uncorroborated shapes match other spells\' images.';
 
 export const TOOL_NAMES = [
-  GET, SEARCH, FIND_CREATURES, FIND_ITEMS, HOW_TO_OBTAIN, FIND_UPDATES,
+  GET, SEARCH, FIND_CREATURES, FIND_ITEMS, FIND_SPELLS, HOW_TO_OBTAIN, FIND_UPDATES,
 ] as const;
 
 export function createServer(handle: TibiaDb): McpServer {
@@ -72,6 +73,7 @@ export function createServer(handle: TibiaDb): McpServer {
   registerSearch(server, handle);
   registerFindCreatures(server, handle);
   registerFindItems(server, handle);
+  registerFindSpells(server, handle);
   registerHowToObtain(server, handle);
   registerFindUpdates(server, handle);
 

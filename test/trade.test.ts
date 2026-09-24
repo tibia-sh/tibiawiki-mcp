@@ -36,7 +36,11 @@ async function get(client: Client, args: Record<string, unknown>): Promise<Recor
   return res.structuredContent as Record<string, any>;
 }
 
-/** Rashid's buy offers straight from the index, one per item, price and currency. */
+/**
+ * Rashid's buy offers straight from the index, one per item, price and currency, in
+ * the tool's order. item.title is COLLATE NOCASE, so the order is compared here, in
+ * SQLite, rather than with JavaScript's case-sensitive string comparison.
+ */
 function rashidBuys(activeOnly: boolean): Offer[] {
   const db = new DatabaseSync(DB_PATH, { readOnly: true });
   try {
@@ -47,7 +51,8 @@ function rashidBuys(activeOnly: boolean): Offer[] {
          join item i on i.article_id = o.item_id
          join item c on c.article_id = o.currency_id
         where n.title = 'Rashid'` + (activeOnly ? ` and i.status = 'active'` : '') + `
-        group by i.title, o.value, c.title`,
+        group by i.title, o.value, c.title
+        order by i.title asc, o.value asc, c.title asc`,
     ).all();
     return rows.map((r) => ({ item: String(r.item), price: Number(r.price), currency: String(r.currency) }));
   } finally {
@@ -55,30 +60,13 @@ function rashidBuys(activeOnly: boolean): Offer[] {
   }
 }
 
-const key = (o: Offer) => `${o.item}\u0000${o.price}\u0000${o.currency}`;
-
-function assertTradeList(actual: Offer[], expected: Offer[]) {
-  const keys = actual.map(key);
-  assert.equal(new Set(keys).size, keys.length, 'no offer is listed twice');
-  for (let i = 1; i < actual.length; i++) {
-    const [a, b] = [actual[i - 1]!, actual[i]!];
-    assert.ok(a.item < b.item || (a.item === b.item && a.price <= b.price),
-      `${key(a)} must come before ${key(b)}`);
-  }
-  assert.deepEqual([...keys].sort(), expected.map(key).sort());
-}
-
 test('Rashid lists every item he buys, once each, by title', () => withRealIndex(async (client) => {
-  const all = rashidBuys(false);
-  const active = rashidBuys(true);
-  assert.ok(active.length < all.length, 'Rashid buys some inactive items');
-
   const rashid = await get(client, { name: 'Rashid', type: 'npc', include_inactive: true });
-  assertTradeList(rashid.buys, all);
+  assert.deepEqual(rashid.buys, rashidBuys(false));
   assert.ok(rashid.buys.some((o: Offer) => o.item === 'Magic Plate Armor' && o.currency === 'Gold Coin'));
 
   const rashidActive = await get(client, { name: 'Rashid', type: 'npc' });
-  assertTradeList(rashidActive.buys, active);
+  assert.deepEqual(rashidActive.buys, rashidBuys(true));
 }));
 
 // npc_offer_buy holds Alesar's offer for Earth Knight Axe twice, and npc_offer_sell

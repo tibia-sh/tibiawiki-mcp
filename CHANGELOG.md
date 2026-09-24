@@ -1,5 +1,28 @@
 # Changelog
 
+## [0.8.0](https://github.com/tibia-sh/tibiawiki-mcp/compare/v0.7.0...v0.8.0) (2026-09-24)
+
+
+### Features
+
+* filter items by resistance and bonuses ([4c9cc47](https://github.com/tibia-sh/tibiawiki-mcp/commit/4c9cc47120c08d507c0543513f25bfebe20d2fb2))
+* find quests and houses ([f685c23](https://github.com/tibia-sh/tibiawiki-mcp/commit/f685c23e759c3d45751bc4ca0a6070b1f388b4c2))
+* find spells by vocation, level and group ([1171a1b](https://github.com/tibia-sh/tibiawiki-mcp/commit/1171a1bd259d614080f246c865862f3ae559931f))
+* list every page of a type ([49a6805](https://github.com/tibia-sh/tibiawiki-mcp/commit/49a6805e5d9722a6ab53f8abb91ae2a3e561244e))
+* show who buys an item and what NPCs trade ([7b4fcc3](https://github.com/tibia-sh/tibiawiki-mcp/commit/7b4fcc3cf37975775790c130630888e63cf69ada))
+
+
+### Bug Fixes
+
+* accept lowercase spell groups and types ([a44fcc4](https://github.com/tibia-sh/tibiawiki-mcp/commit/a44fcc42854dcd802069b100e3762df0ae7a0b6d))
+* list each NPC seller once ([da33acd](https://github.com/tibia-sh/tibiawiki-mcp/commit/da33acd3f9e48c8882a2e9c95fa51d5bb164ca37))
+* list each quest reward once ([08a9cf3](https://github.com/tibia-sh/tibiawiki-mcp/commit/08a9cf3aee1c5aadebe76f25ddcdc413df3d3799))
+* order sellers fully ([96e522e](https://github.com/tibia-sh/tibiawiki-mcp/commit/96e522e60fb242dded7f17a7c44977a4bd40f324))
+* reject negative finder numbers ([1eee764](https://github.com/tibia-sh/tibiawiki-mcp/commit/1eee7648240aed15d1c100a98d0b430e37165257))
+* report resistances and skills as numbers ([75e2074](https://github.com/tibia-sh/tibiawiki-mcp/commit/75e207492e83b5423590cc72b00229573a5f8877))
+* sort items by one value per stat ([6f1e670](https://github.com/tibia-sh/tibiawiki-mcp/commit/6f1e6705128917e03d82afbe9b4e955c3c10f26a))
+* take hands in lowercase like other inputs ([4145a3c](https://github.com/tibia-sh/tibiawiki-mcp/commit/4145a3c1d3b11cf24cb4f3998987ff07af917b08))
+
 ## [0.7.0](https://github.com/tibia-sh/tibiawiki-mcp/compare/v0.6.3...v0.7.0) (2026-09-23)
 
 

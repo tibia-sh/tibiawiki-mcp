@@ -4,6 +4,7 @@ import { copyFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import type { Client } from '@modelcontextprotocol/client';
+import { DB_PATH } from '@tibia.sh/tibiawiki-data';
 import { connect, connectTo, FIXTURE, tempDirs, withRealIndex } from './harness.ts';
 
 type Creature = {
@@ -283,3 +284,39 @@ test('a bestiary_level outside its enum is a schema error', async () => {
     await h.close();
   }
 });
+
+test('location_contains matches a literal substring, case-insensitively', async () => {
+  const h = await connect();
+  try {
+    const found = titlesOf(await findAll(h.client, { location_contains: 'ANCIENT TEMPLE' }));
+    const expected = fixtureTitles("lower(location) like '%ancient temple%'");
+    assert.ok(expected.includes('Dragon'), 'guard: Dragon lives in the Ancient Temple');
+    assert.ok(expected.length < fixtureTitles('1').length, 'guard: some creatures live elsewhere');
+    assert.deepEqual(found, expected);
+    // No fixture location holds _ or a backslash, so as wildcards they would match every creature.
+    for (const ch of ['_', '\\']) {
+      assert.equal((await find(h.client, { location_contains: ch })).totalMatches, 0, `${ch} is literal`);
+    }
+  } finally {
+    await h.close();
+  }
+});
+
+test('%, _ and backslash in location_contains match themselves', () => withRealIndex(async (client) => {
+  const db = new DatabaseSync(DB_PATH, { readOnly: true });
+  try {
+    const count = (sql: string, ...params: string[]) =>
+      (db.prepare(`select count(*) c from creature where (${sql}) and status = 'active'`)
+        .get(...params) as { c: number }).c;
+    const located = count('location is not null');
+    for (const ch of ['%', '_', '\\']) {
+      const expected = count('instr(location, ?) > 0', ch);
+      const found = await find(client, { location_contains: ch, limit: 1 });
+      assert.equal(found.totalMatches, expected, `location_contains ${JSON.stringify(ch)}`);
+      assert.ok(found.totalMatches < located, `${JSON.stringify(ch)} does not match every location`);
+      if (ch === '%') assert.ok(expected > 0, 'guard: some creature location holds a literal %');
+    }
+  } finally {
+    db.close();
+  }
+}));

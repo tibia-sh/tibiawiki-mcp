@@ -3,7 +3,7 @@ import type { McpServer } from '@modelcontextprotocol/server';
 import { str, num, bool, type TibiaDb } from '../db.ts';
 import {
   ELEMENTS, elementSchema, modifierColumn, WEAK_TO, RESISTANT_TO,
-  CREATURE_BESTIARY_LEVELS, CREATURE_SORTS, creatureSort, statusClause, hitpointsExpr,
+  CREATURE_BESTIARY_LEVELS, CREATURE_SORTS, creatureSort, statusClause, hitpointsExpr, likePattern,
 } from '../domain.ts';
 import { encodeCursor, decodeCursor } from '../cursor.ts';
 
@@ -105,7 +105,7 @@ export function registerFindCreatures(server: McpServer, handle: TibiaDb): void 
       if (args.convinceable !== undefined) where.push(`c.convince_cost ${args.convinceable ? '> 0' : '= 0'}`);
       if (args.bestiary_level !== undefined) bind('c.bestiary_level = ? collate nocase', args.bestiary_level);
       if (args.location_contains !== undefined) {
-        bind('c.location like ? collate nocase', `%${args.location_contains}%`);
+        bind(`lower(c.location) like ? escape '\\'`, likePattern(args.location_contains));
       }
       const status = statusClause('c', args.include_inactive);
       if (status) where.push(status);

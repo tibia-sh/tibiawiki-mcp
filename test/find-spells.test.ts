@@ -187,7 +187,7 @@ test('an input outside its enum is a schema error', async () => {
   try {
     for (const bad of [
       { vocation: 'mage' }, { group: 'summon' }, { group: 'Healing' }, { element: 'lava' },
-      { spell_type: 'wand' }, { spell_type: 'Rune' }, { sort: 'rowid' },
+      { spell_type: 'wand' }, { spell_type: 'Rune' }, { sort: 'rowid' }, { level_max: -1 },
     ]) {
       const res = await h.client.callTool({ name: 'tibia_find_spells', arguments: bad });
       assert.equal(res.isError, true, `${JSON.stringify(bad)} must be rejected`);

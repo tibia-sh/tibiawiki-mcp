@@ -39,7 +39,7 @@ export function registerFindSpells(server: McpServer, handle: TibiaDb): void {
         'cooldowns, effect and area.',
       inputSchema: z.object({
         vocation: z.enum(SPELL_VOCATIONS).optional(),
-        level_max: z.number().int().optional().describe('Highest level the caster has.'),
+        level_max: z.number().int().nonnegative().optional().describe('Highest level the caster has.'),
         group: z.enum(SPELL_GROUPS).optional(),
         element: z.enum(SPELL_ELEMENTS).optional()
           .describe('Damage element. For healing spells, use group.'),

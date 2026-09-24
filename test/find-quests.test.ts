@@ -280,7 +280,10 @@ test('non-active quests are excluded by default', async () => {
 test('an input outside its schema is a schema error', async () => {
   const h = await connect();
   try {
-    for (const bad of [{ sort: 'rowid' }, { sort: 'level' }, { location_contains: '' }, { limit: 101 }]) {
+    for (const bad of [
+      { sort: 'rowid' }, { sort: 'level' }, { location_contains: '' }, { limit: 101 },
+      { level_max: -1 }, { level_max: 1.5 },
+    ]) {
       const res = await h.client.callTool({ name: 'tibia_find_quests', arguments: bad });
       assert.equal(res.isError, true, `${JSON.stringify(bad)} must be rejected`);
       assert.match(JSON.stringify(res.content), /validation/i, JSON.stringify(res.content));

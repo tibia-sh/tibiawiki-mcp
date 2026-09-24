@@ -35,9 +35,9 @@ export function registerFindHouses(server: McpServer, handle: TibiaDb): void {
         'location and position.',
       inputSchema: z.object({
         city: z.string().min(1).optional().describe('Exact city name, e.g. "Thais", any case.'),
-        rent_max: z.number().int().optional().describe('Highest monthly rent in gold.'),
-        beds_min: z.number().int().optional(),
-        size_min: z.number().int().optional().describe('Fewest tiles.'),
+        rent_max: z.number().int().nonnegative().optional().describe('Highest monthly rent in gold.'),
+        beds_min: z.number().int().nonnegative().optional(),
+        size_min: z.number().int().nonnegative().optional().describe('Fewest tiles.'),
         is_guildhall: z.boolean().optional(),
         include_inactive: z.boolean().default(false),
         sort: z.enum(HOUSE_SORTS).default('rent')

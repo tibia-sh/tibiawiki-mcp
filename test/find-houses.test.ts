@@ -207,7 +207,10 @@ test('non-active houses are excluded by default', async () => {
 test('an input outside its schema is a schema error', async () => {
   const h = await connect();
   try {
-    for (const bad of [{ sort: 'rowid' }, { sort: 'beds' }, { city: '' }, { limit: 0 }]) {
+    for (const bad of [
+      { sort: 'rowid' }, { sort: 'beds' }, { city: '' }, { limit: 0 },
+      { rent_max: -1 }, { beds_min: -1 }, { size_min: -1 },
+    ]) {
       const res = await h.client.callTool({ name: 'tibia_find_houses', arguments: bad });
       assert.equal(res.isError, true, `${JSON.stringify(bad)} must be rejected`);
       assert.match(JSON.stringify(res.content), /validation/i, JSON.stringify(res.content));

@@ -37,7 +37,7 @@ export function registerFindQuests(server: McpServer, handle: TibiaDb): void {
         'this for questions like "which quests can a level 20 character do". Call tibia_get ' +
         'with a title for the legend and dangers.',
       inputSchema: z.object({
-        level_max: z.number().int().optional()
+        level_max: z.number().int().nonnegative().optional()
           .describe('Highest level the character has. Quests with no level requirement always match.'),
         is_premium: z.boolean().optional(),
         is_rookgaard: z.boolean().optional(),

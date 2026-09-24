@@ -58,8 +58,11 @@ export const ITEM_SKILLS = [
   'magic_level', 'sword', 'axe', 'club', 'distance', 'fist', 'shielding',
 ] as const;
 
-/** The values of the `hands` attribute. */
-export const ITEM_HANDS = ['One', 'Two'] as const;
+/**
+ * The values of the `hands` attribute, lowercased like every other input. The attribute
+ * holds them capitalised, so they match with collate nocase.
+ */
+export const ITEM_HANDS = ['one', 'two'] as const;
 
 export const ENTITY_TYPES = [
   'creature', 'item', 'npc', 'quest', 'spell',

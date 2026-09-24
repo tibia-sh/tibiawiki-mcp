@@ -203,10 +203,17 @@ test('weight_max includes the boundary and excludes items without a weight', () 
 }));
 
 test('hands filters one-handed from two-handed weapons', () => withRealIndex(async (client) => {
-  const items = await findAll(client, { hands: 'One', weapon_type: 'Sword' });
+  const items = await findAll(client, { hands: 'one', weapon_type: 'Sword' });
   assert.equal(byTitle(items, 'Amber Sabre')?.attributes.hands, 'One');
   assert.equal(byTitle(items, 'Giant Sword'), undefined, 'Giant Sword is two-handed');
   for (const r of items) assert.equal(r.attributes.hands, 'One', r.title);
+}));
+
+test('hands two finds two-handed weapons and no one-handed ones', () => withRealIndex(async (client) => {
+  const items = await findAll(client, { hands: 'two', weapon_type: 'Sword' });
+  assert.equal(byTitle(items, 'Giant Sword')?.attributes.hands, 'Two');
+  assert.equal(byTitle(items, 'Amber Sabre'), undefined, 'Amber Sabre is one-handed');
+  for (const r of items) assert.equal(r.attributes.hands, 'Two', r.title);
 }));
 
 /** The fold SQLite's NOCASE applies: ASCII letters only. */

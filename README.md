@@ -52,10 +52,13 @@ You ask questions, and your assistant calls these:
 
 | Tool | Answers |
 |---|---|
-| `tibia_search` | "Is there a page called roughly X?" |
-| `tibia_get` | "Tell me everything about X." X can be a creature, item, NPC, quest or spell |
+| `tibia_search` | "Is there a page called roughly X?" or "List every mount." |
+| `tibia_get` | "Tell me everything about X." X can be a creature, item, NPC, quest or spell. An item says which NPCs buy it and for how much, an NPC what it buys and sells |
 | `tibia_find_creatures` | "Which creatures match these stats?" |
-| `tibia_find_items` | "Which items match these stats?" |
+| `tibia_find_items` | "Which items match these stats?" Also by resistance, skill bonus, imbuement slots, weight and hands |
+| `tibia_find_spells` | "Which healing spells can a level 30 druid cast?" |
+| `tibia_find_quests` | "Which quests can a level 20 character do, and what do they give?" |
+| `tibia_find_houses` | "What is the cheapest house in Thais with two beds?" |
 | `tibia_how_to_obtain` | "Where do I get X?" Drops, vendors and quest rewards in one call |
 | `tibia_find_updates` | "What changed for knights in 2026?" Game updates by text and release date |
 

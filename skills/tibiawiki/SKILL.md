@@ -5,7 +5,7 @@ description: Use when answering questions about Tibia — creatures, items, loot
 
 # Querying TibiaWiki
 
-Six tools over an **offline snapshot** of TibiaWiki. Every response carries
+Nine tools over an **offline snapshot** of TibiaWiki. Every response carries
 `indexGeneratedAt` — the data reflects the wiki at that moment, not live game or
 server state. Say so when it matters (a recently changed creature, a new update).
 
@@ -13,21 +13,25 @@ server state. Say so when it matters (a recently changed creature, a new update)
 
 | You want | Use |
 |---|---|
-| The exact page name, given something approximate | `tibia_search` |
+| The exact page name, given something approximate, or every page of a type | `tibia_search` |
 | Everything about one named page | `tibia_get` |
 | Creatures matching stats | `tibia_find_creatures` |
 | Items matching stats | `tibia_find_items` |
+| Spells by vocation, level, group or element | `tibia_find_spells` |
+| Quests by level, premium, Rookgaard or location | `tibia_find_quests` |
+| Houses by city, rent, beds or size | `tibia_find_houses` |
 | Where an item comes from | `tibia_how_to_obtain` |
 | What changed in the game, and when | `tibia_find_updates` |
 
 **Resolve names before fetching.** `tibia_get` takes an exact page name. If the user
-says "dragonlord" or "that fire dragon", call `tibia_search` first — results are
+says "dragonlord" or "that fire dragon", call `tibia_search` first. Results are
 ordered shortest-name-first, so the closest match leads. Guessing a name and getting
-an error costs a round trip.
+an error costs a round trip. For "list every mount", pass `types` and no `query`.
 
 **Prefer `tibia_how_to_obtain` over two lookups.** It returns creature drops with
 chances, NPC vendors with prices, and quest rewards in one call. Reaching for
 `tibia_find_creatures` plus `tibia_get` to answer "where do I get X" is the slow path.
+For "who buys X", call `tibia_get` on the item and read `boughtBy`, highest price first.
 
 **Find updates by what changed, not by name.** For "what changed for knights in 2026"
 or "which update added X", call `tibia_find_updates` with text and dates, then
@@ -56,8 +60,9 @@ sort last. Absence of a chance is not a low chance.
 **`imbuement.slots` is a category list, not a count** — `["swords","clubs","axes"]`
 means which equipment it applies to.
 
-**Vendor prices are the buying price.** `soldByNpcs` is what the player *pays*. The
-lower sell-back price is not reported.
+**Two prices, two directions.** `soldByNpcs` in `tibia_how_to_obtain` is what the
+player *pays* an NPC. `boughtBy` on a `tibia_get` item is what NPCs *pay* the player.
+An NPC's `sells` is what you can buy from it, its `buys` what you can sell to it.
 
 **An item with no sources is not an error.** `tibia_how_to_obtain` returns empty lists
 plus a `note` for genuinely unobtainable items (Magic Longsword). Read the note.
@@ -80,14 +85,14 @@ NPC, and without a type the call returns an error asking you to choose.
 
 `tibia_get` returns more than the headline stats:
 
-- **creature** — `abilities` with damage ranges and an `area` grid (below),
+- **creature**: `abilities` with damage ranges and an `area` grid (below),
   `maxDamage` per element and total, `loot` with chances
-- **item** — EAV `attributes` (attack, defense, required level), `keys`, `storeOffers`,
-  `proficiencyPerks`
-- **npc** — `jobs`, `races`, `destinations` (travel with fares); Rashid additionally
-  carries `rashidSchedule`, his seven-day rotation
-- **quest** — `dangers` as creature names, `rewards`
-- **imbuement** — `materials` with amounts
+- **item**: EAV `attributes` (attack, defense, required level), `keys`, `storeOffers`,
+  `proficiencyPerks`, `boughtBy`
+- **npc**: `jobs`, `races`, `destinations` (travel with fares), `buys`, `sells`. Rashid
+  also carries `rashidSchedule`, his seven-day rotation
+- **quest**: `dangers` as creature names, `rewards`
+- **imbuement**: `materials` with amounts
 
 Use `verbosity: "detailed"` for extra descriptive columns and for a book's full text,
 which is omitted by default because it is the heaviest field in the corpus.

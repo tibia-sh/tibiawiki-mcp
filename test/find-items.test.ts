@@ -4,13 +4,14 @@ import { copyFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import type { Client } from '@modelcontextprotocol/client';
+import { DB_PATH } from '@tibia.sh/tibiawiki-data';
 import { connect, connectTo, FIXTURE, tempDirs, withRealIndex } from './harness.ts';
 
 const scratch = tempDirs('twmcp-find-items-');
 
 type ItemsOut = {
   results: Array<{
-    title: string; itemClass: string | null; weight: number | null;
+    title: string; itemClass: string | null; weight: number | null; clientId: number | null;
     attributes: Record<string, string | number>;
   }>;
   totalMatches: number;
@@ -291,3 +292,79 @@ test('an item with two rows for a stat sorts by the larger', async () => {
     await h.close();
   }
 });
+
+/** A client on the fixture for one test. */
+async function onFixture(fn: (client: Client) => Promise<void>): Promise<void> {
+  const h = await connect();
+  try {
+    await fn(h.client);
+  } finally {
+    await h.close();
+  }
+}
+
+test('client_ids keeps exactly the items holding a listed ID', () => onFixture(async (client) => {
+  const data = await find(client, { client_ids: [3031, 3035] });
+  assert.deepEqual(
+    data.results.map((r) => [r.title, r.clientId]),
+    [['Gold Coin', 3031], ['Platinum Coin', 3035]],
+  );
+  assert.equal(data.totalMatches, 2);
+}));
+
+test('client_ids narrows together with another filter', () => onFixture(async (client) => {
+  const shields = await find(client, { client_ids: [3031, 3416], item_type: 'Shields' });
+  assert.deepEqual(shields.results.map((r) => r.title), ['Dragon Shield']);
+  const valuables = await find(client, { client_ids: [3416], item_type: 'Valuables' });
+  assert.equal(valuables.totalMatches, 0, 'Dragon Shield is not a valuable');
+}));
+
+test('an ID no item holds gives an empty result, not an error', () => onFixture(async (client) => {
+  const data = await find(client, { client_ids: [999999999] });
+  assert.equal(data.totalMatches, 0);
+  assert.deepEqual(data.results, []);
+}));
+
+test('client_ids leaves out inactive items unless include_inactive is set', () => onFixture(async (client) => {
+  // Arrow (Weak) is ts-only.
+  assert.equal((await find(client, { client_ids: [22043] })).totalMatches, 0);
+  const all = await find(client, { client_ids: [22043], include_inactive: true });
+  assert.deepEqual(all.results.map((r) => [r.title, r.clientId]), [['Arrow (Weak)', 22043]]);
+}));
+
+test('an item without a client ID reports null and no ID finds it', () => onFixture(async (client) => {
+  const liquids = await find(client, { item_type: 'Liquids', limit: 100 });
+  const mud = byTitle(liquids.results, 'Mud');
+  assert.ok(mud, 'Mud is a liquid in the fixture');
+  assert.equal(mud.clientId, null);
+  const ids = liquids.results.flatMap((r) => (r.clientId === null ? [] : [r.clientId]));
+  assert.ok(ids.length > 0, 'the other liquids have client IDs');
+  const found = await find(client, { client_ids: ids, item_type: 'Liquids', limit: 100 });
+  assert.equal(found.totalMatches, liquids.totalMatches - 1);
+  assert.equal(byTitle(found.results, 'Mud'), undefined);
+}));
+
+test('client_ids refuses an empty list, a non-positive ID and more than 100 IDs', () => onFixture(async (client) => {
+  const ids = Array.from({ length: 101 }, (_, k) => k + 1);
+  for (const client_ids of [[], [0], [-3031], [3031.5], ids]) {
+    const res = await client.callTool({ name: 'tibia_find_items', arguments: { client_ids } });
+    assert.equal(res.isError, true, `${JSON.stringify(client_ids).slice(0, 40)} must be refused`);
+  }
+}));
+
+test('an ID two item variants share returns every variant', () => withRealIndex(async (client) => {
+  const data = await find(client, { client_ids: [281], limit: 100 });
+  const titles = data.results.map((r) => r.title);
+  assert.ok(titles.includes('Giant Shimmering Pearl'), `got ${JSON.stringify(titles)}`);
+  assert.ok(titles.includes('Giant Shimmering Pearl (Green)'), `got ${JSON.stringify(titles)}`);
+  for (const r of data.results) assert.equal(r.clientId, 281, r.title);
+  const db = new DatabaseSync(DB_PATH, { readOnly: true });
+  try {
+    const expected = db.prepare(
+      "select title from item where client_id = 281 and status = 'active' order by title",
+    ).all().map((row) => String(row.title));
+    assert.deepEqual([...titles].sort(), [...expected].sort());
+  } finally {
+    db.close();
+  }
+}));

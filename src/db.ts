@@ -40,7 +40,7 @@ export const REQUIRED_COLUMNS: Readonly<Record<string, readonly string[]>> = {
   ],
   item: [
     'article_id', 'title', 'item_class', 'item_type', 'type_secondary', 'weight',
-    'value_buy', 'value_sell', 'is_marketable', 'flavor_text', 'status',
+    'value_buy', 'value_sell', 'is_marketable', 'flavor_text', 'status', 'client_id',
   ],
   item_attribute: ['item_id', 'name', 'value'],
   // Written by the build-time enrichment pass, not by the generator.

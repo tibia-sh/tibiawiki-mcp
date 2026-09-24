@@ -164,6 +164,14 @@ test('an item lists the NPCs that buy it, highest price first', async () => {
   await h.close();
 });
 
+test('an item carries its client ID, and null where the wiki records none', async () => {
+  const h = await connect();
+  assert.equal((await get(h, 'Dragon Shield', 'item')).clientId, 3416);
+  // Mud is a liquid, and the wiki gives it no client ID.
+  assert.equal((await get(h, 'Mud', 'item')).clientId, null);
+  await h.close();
+});
+
 // Yasir is an event NPC. Fiona buys Demon Horn at the same price, so the tie also
 // shows the NPC title breaking it.
 test('an inactive buyer appears only with include_inactive', async () => {

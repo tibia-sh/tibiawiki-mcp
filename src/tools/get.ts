@@ -85,6 +85,7 @@ const itemOut = z.object({
   valueBuy: z.number().nullable(),
   valueSell: z.number().nullable(),
   isMarketable: z.boolean().nullable(),
+  clientId: z.number().nullable(),
   status: z.string().nullable(),
   attributes: z.record(z.string(), z.union([z.string(), z.number()])),
   // item_key is one-to-many (Silver Key has 61 rows) and each row is a full key
@@ -538,7 +539,7 @@ export function registerGet(server: McpServer, handle: TibiaDb): void {
           itemClass: str(row.item_class), itemType: str(row.item_type),
           typeSecondary: str(row.type_secondary), weight: num(row.weight),
           valueBuy: num(row.value_buy), valueSell: num(row.value_sell),
-          isMarketable: bool(row.is_marketable),
+          isMarketable: bool(row.is_marketable), clientId: num(row.client_id),
           status: str(row.status), attributes: bag,
           keys: itemKeys.all(row.article_id as number).map((k) => ({
             title: String(k.title), number: num(k.number), name: str(k.name),

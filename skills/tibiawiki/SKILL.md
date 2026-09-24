@@ -5,8 +5,8 @@ description: Use when answering questions about Tibia — creatures, items, loot
 
 # Querying TibiaWiki
 
-Nine tools over an **offline snapshot** of TibiaWiki. Every response carries
-`indexGeneratedAt` — the data reflects the wiki at that moment, not live game or
+Ten tools over an **offline snapshot** of TibiaWiki. Every response carries
+`indexGeneratedAt`. The data reflects the wiki at that moment, not live game or
 server state. Say so when it matters (a recently changed creature, a new update).
 
 ## Pick the right tool
@@ -22,6 +22,7 @@ server state. Say so when it matters (a recently changed creature, a new update)
 | Houses by city, rent, beds or size | `tibia_find_houses` |
 | Where an item comes from | `tibia_how_to_obtain` |
 | What changed in the game, and when | `tibia_find_updates` |
+| Where to sell a list of loot | `tibia_where_to_sell` |
 
 **Resolve names before fetching.** `tibia_get` takes an exact page name. If the user
 says "dragonlord" or "that fire dragon", call `tibia_search` first. Results are
@@ -31,7 +32,13 @@ an error costs a round trip. For "list every mount", pass `types` and no `query`
 **Prefer `tibia_how_to_obtain` over two lookups.** It returns creature drops with
 chances, NPC vendors with prices, and quest rewards in one call. Reaching for
 `tibia_find_creatures` plus `tibia_get` to answer "where do I get X" is the slow path.
-For "who buys X", call `tibia_get` on the item and read `boughtBy`, highest price first.
+For "who buys X", call `tibia_get` on the item and read `boughtBy`, highest price first,
+with each buyer's `city` and `position`. For a whole list of loot, call
+`tibia_where_to_sell` once. It gives each item's best active buyer, grouped by city.
+Rashid moves daily, so both give him city `null`, and `tibia_where_to_sell` adds his week.
+
+**Client IDs map to items.** Pass `client_ids` to `tibia_find_items` to turn the IDs a
+client uses into item names. Variants can share one, so an ID may return several items.
 
 **Find updates by what changed, not by name.** For "what changed for knights in 2026"
 or "which update added X", call `tibia_find_updates` with text and dates, then
@@ -63,6 +70,12 @@ means which equipment it applies to.
 **Two prices, two directions.** `soldByNpcs` in `tibia_how_to_obtain` is what the
 player *pays* an NPC. `boughtBy` on a `tibia_get` item is what NPCs *pay* the player.
 An NPC's `sells` is what you can buy from it, its `buys` what you can sell to it.
+
+**`goldPerKill` is an estimate.** It is gross loot value at NPC prices. Drops without a
+recorded chance are left out and items that sell only on the market count 0. `null`
+means no drop has a recorded chance. Creature behaviour has meaningful zeros too:
+`runsAt` 0 means it never flees, and a `summonCost` or `convinceCost` of 0 means it
+cannot be summoned or convinced.
 
 **An item with no sources is not an error.** `tibia_how_to_obtain` returns empty lists
 plus a `note` for genuinely unobtainable items (Magic Longsword). Read the note.

@@ -11,6 +11,7 @@ import { registerFindQuests, NAME as FIND_QUESTS } from './tools/find-quests.ts'
 import { registerFindHouses, NAME as FIND_HOUSES } from './tools/find-houses.ts';
 import { registerHowToObtain, NAME as HOW_TO_OBTAIN } from './tools/how-to-obtain.ts';
 import { registerFindUpdates, NAME as FIND_UPDATES } from './tools/find-updates.ts';
+import { registerWhereToSell, NAME as WHERE_TO_SELL } from './tools/where-to-sell.ts';
 
 /**
  * What both servers report in the MCP handshake. The version is package.json's, read at
@@ -52,7 +53,7 @@ export const ATTRIBUTION =
 
 export const TOOL_NAMES = [
   GET, SEARCH, FIND_CREATURES, FIND_ITEMS, FIND_SPELLS, FIND_QUESTS, FIND_HOUSES, HOW_TO_OBTAIN,
-  FIND_UPDATES,
+  FIND_UPDATES, WHERE_TO_SELL,
 ] as const;
 
 export function createServer(handle: TibiaDb): McpServer {
@@ -81,6 +82,7 @@ export function createServer(handle: TibiaDb): McpServer {
   registerFindHouses(server, handle);
   registerHowToObtain(server, handle);
   registerFindUpdates(server, handle);
+  registerWhereToSell(server, handle);
 
   return server;
 }

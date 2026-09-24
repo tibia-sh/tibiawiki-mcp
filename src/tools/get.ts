@@ -4,7 +4,7 @@ import type { McpServer } from '@modelcontextprotocol/server';
 import type { Provenance, TibiaDb } from '../db.ts';
 import {
   ELEMENTS, ENTITY_TYPES, entityTypeSchema, entityTable, entityHasStatus, statusClause,
-  verbositySchema, SPELL_VOCATIONS,
+  verbositySchema, SPELL_VOCATIONS, QUEST_REWARDS,
   DETAILED_CREATURE_FIELDS, DETAILED_ITEM_FIELDS, coerceAttribute, type EntityType,
 } from '../domain.ts';
 
@@ -412,9 +412,7 @@ export function registerGet(server: McpServer, handle: TibiaDb): void {
   const dangers = db.prepare(
     `select c.title from quest_danger d join creature c on c.article_id = d.creature_id
      where d.quest_id = ? order by c.title asc`);
-  const questRewards = db.prepare(
-    `select i.title from quest_reward r join item i on i.article_id = r.item_id
-     where r.quest_id = ? order by i.title asc`);
+  const questRewards = db.prepare(QUEST_REWARDS);
   const materials = db.prepare(
     `select i.title, m.amount from imbuement_material m join item i on i.article_id = m.item_id
      where m.imbuement_id = ? order by i.title asc`);

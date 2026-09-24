@@ -190,6 +190,14 @@ export function spellSort(key: SpellSort): string {
   return SPELL_ORDER[key];
 }
 
+/**
+ * A quest's rewards, as item titles, for `db.prepare` with the quest's article_id.
+ * quest_reward holds some pairs twice (The Lightbearer's Ring of Healing), hence distinct.
+ */
+export const QUEST_REWARDS =
+  `select distinct i.title from quest_reward r join item i on i.article_id = r.item_id
+   where r.quest_id = ? order by i.title asc`;
+
 export const QUEST_SORTS = ['level_recommended', 'level_required', 'title'] as const;
 export type QuestSort = (typeof QUEST_SORTS)[number];
 const QUEST_ORDER: Record<QuestSort, string> = {

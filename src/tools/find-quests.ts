@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/server';
 import type { TibiaDb } from '../db.ts';
-import { QUEST_SORTS, questSort, statusClause, likePattern } from '../domain.ts';
+import { QUEST_REWARDS, QUEST_SORTS, questSort, statusClause, likePattern } from '../domain.ts';
 import { encodeCursor, decodeCursor } from '../cursor.ts';
 
 const outputSchema = z.object({
@@ -24,10 +24,7 @@ export const NAME = 'tibia_find_quests';
 export function registerFindQuests(server: McpServer, handle: TibiaDb): void {
   const { db, provenance } = handle;
 
-  // quest_reward holds some pairs twice (The Lightbearer's Ring of Healing), hence distinct.
-  const rewards = db.prepare(
-    `select distinct i.title from quest_reward r join item i on i.article_id = r.item_id
-     where r.quest_id = ? order by i.title asc`);
+  const rewards = db.prepare(QUEST_REWARDS);
 
   server.registerTool(
     NAME,

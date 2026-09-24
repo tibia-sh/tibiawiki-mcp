@@ -55,7 +55,8 @@ export function registerFindItems(server: McpServer, handle: TibiaDb): void {
         weight_max: z.number().optional().describe('In oz. Items without a weight never match.'),
         hands: z.enum(ITEM_HANDS).optional(),
         include_inactive: z.boolean().default(false),
-        sort: z.enum(ITEM_SORTS).default('title'),
+        sort: z.enum(ITEM_SORTS).default('title')
+          .describe('weight ascends, value, armor, attack and defense descend, title is alphabetical.'),
         limit: z.number().int().min(1).max(100).default(25),
         cursor: z.string().optional(),
       }),

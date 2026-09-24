@@ -2,6 +2,7 @@ import { after } from 'node:test';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { DB_PATH } from '@tibia.sh/tibiawiki-data';
 import { InMemoryTransport } from '@modelcontextprotocol/server';
 import { Client } from '@modelcontextprotocol/client';
 import { openDb } from '../src/db.ts';
@@ -43,7 +44,25 @@ export function tempDirs(prefix: string): () => string {
  * Protocol-era conformance is covered separately by the stdio test in Task 10.
  */
 export async function connect() {
-  const handle = openDb(FIXTURE);
+  return connectTo(FIXTURE);
+}
+
+/**
+ * Runs `fn` with a client on the real packaged index, for tests that need rows the
+ * fixture does not keep. Those tests assert facts that later data releases do not
+ * change, and membership rather than position.
+ */
+export async function withRealIndex<T>(fn: (client: Client) => Promise<T>): Promise<T> {
+  const h = await connectTo(DB_PATH);
+  try {
+    return await fn(h.client);
+  } finally {
+    await h.close();
+  }
+}
+
+async function connectTo(path: string) {
+  const handle = openDb(path);
   const server = createServer(handle);
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
   await server.connect(serverTransport);

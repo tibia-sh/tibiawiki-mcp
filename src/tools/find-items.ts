@@ -3,7 +3,7 @@ import type { McpServer } from '@modelcontextprotocol/server';
 import type { TibiaDb } from '../db.ts';
 import {
   ITEM_SORTS, itemSort, eavOperator, statusClause, coerceAttribute, REPORTED_ATTRS,
-  type EavOperator,
+  ITEM_RESISTANCES, resistanceAttribute, ITEM_SKILLS, ITEM_HANDS, type EavOperator,
 } from '../domain.ts';
 import { encodeCursor, decodeCursor } from '../cursor.ts';
 
@@ -33,8 +33,10 @@ export function registerFindItems(server: McpServer, handle: TibiaDb): void {
     {
       description:
         'Find Tibia items matching class, type and stat filters such as attack, defense, armor ' +
-        'and required level. Use this for questions like "which two-handed swords need level 100 ' +
-        'or less". Vocation and weapon type match by membership, so "knight" matches "knights".',
+        'and required level, resistances, skill bonuses, imbuement slots, weight and hands. Use ' +
+        'this for questions like "which two-handed swords need level 100 or less" or "which ' +
+        'sorcerer items resist fire". Vocation and weapon type match by membership, so "knight" ' +
+        'matches "knights". Call tibia_get on a title for the full item.',
       inputSchema: z.object({
         item_class: z.string().optional().describe('e.g. "Weapons", "Armors".'),
         item_type: z.string().optional().describe('e.g. "Sword Weapons".'),
@@ -45,6 +47,13 @@ export function registerFindItems(server: McpServer, handle: TibiaDb): void {
         defense_min: z.number().int().optional(),
         armor_min: z.number().int().optional(),
         required_level_max: z.number().int().optional(),
+        resistant_to: z.array(z.enum(ITEM_RESISTANCES)).optional()
+          .describe('Resists every listed element (resistance above 0).'),
+        skill_bonus: z.array(z.enum(ITEM_SKILLS)).optional()
+          .describe('Raises every listed skill.'),
+        imbuement_slots_min: z.number().int().optional(),
+        weight_max: z.number().optional().describe('In oz. Items without a weight never match.'),
+        hands: z.enum(ITEM_HANDS).optional(),
         include_inactive: z.boolean().default(false),
         sort: z.enum(ITEM_SORTS).default('title'),
         limit: z.number().int().min(1).max(100).default(25),
@@ -83,6 +92,14 @@ export function registerFindItems(server: McpServer, handle: TibiaDb): void {
         );
         params.push(attr, `%${value}%`);
       };
+      /** Exact EAV predicate, for attributes that hold a single value. */
+      const equals = (attr: string, value: string) => {
+        where.push(
+          `exists (select 1 from item_attribute a where a.item_id = i.article_id
+            and a.name = ? and a.value = ?)`,
+        );
+        params.push(attr, value);
+      };
       const bind = (clause: string, value: string | number) => {
         where.push(clause);
         params.push(value);
@@ -97,6 +114,12 @@ export function registerFindItems(server: McpServer, handle: TibiaDb): void {
       if (args.required_level_max !== undefined) numeric('required_level', 'lte', args.required_level_max);
       if (args.weapon_type !== undefined) text('weapon_type', args.weapon_type);
       if (args.vocation !== undefined) text('required_vocation', args.vocation);
+      // Resistances and skill bonuses are signed ("-8", "+2"), and the cast reads the sign.
+      for (const e of args.resistant_to ?? []) numeric(resistanceAttribute(e), 'gt', 0);
+      for (const skill of args.skill_bonus ?? []) numeric(skill, 'gt', 0);
+      if (args.imbuement_slots_min !== undefined) numeric('imbuement_slots', 'gte', args.imbuement_slots_min);
+      if (args.weight_max !== undefined) bind('i.weight <= ?', args.weight_max);
+      if (args.hands !== undefined) equals('hands', args.hands);
       const status = statusClause('i', args.include_inactive);
       if (status) where.push(status);
 

@@ -26,6 +26,41 @@ export function modifierColumn(element: Element): string {
 export const WEAK_TO = (column: string): string => `${column} > 100`;
 export const RESISTANT_TO = (column: string): string => `${column} < 100`;
 
+/**
+ * The elements an item can resist: every element but healing, which no item resists.
+ * An item's resistance is a percentage in `item_attribute`, where above 0 protects and
+ * below 0 is a weakness. Two elements go by other names there.
+ */
+export const ITEM_RESISTANCES = [
+  'physical', 'earth', 'fire', 'ice', 'energy', 'death', 'holy', 'drown', 'lifedrain',
+] as const satisfies readonly Element[];
+export type ItemResistance = (typeof ITEM_RESISTANCES)[number];
+const RESISTANCE_ATTRS: Record<ItemResistance, string> = {
+  physical: 'resistance_physical',
+  earth: 'resistance_earth',
+  fire: 'resistance_fire',
+  ice: 'resistance_ice',
+  energy: 'resistance_energy',
+  death: 'resistance_death',
+  holy: 'resistance_holy',
+  drown: 'resistance_drowning',
+  lifedrain: 'resistance_life_drain',
+};
+export function resistanceAttribute(element: ItemResistance): string {
+  if (!Object.hasOwn(RESISTANCE_ATTRS, element)) {
+    throw new Error(`Unknown element: ${String(element)}`);
+  }
+  return RESISTANCE_ATTRS[element];
+}
+
+/** The skill bonus attributes of an item, each a signed number such as "+2". */
+export const ITEM_SKILLS = [
+  'magic_level', 'sword', 'axe', 'club', 'distance', 'fist', 'shielding',
+] as const;
+
+/** The values of the `hands` attribute. */
+export const ITEM_HANDS = ['One', 'Two'] as const;
+
 export const ENTITY_TYPES = [
   'creature', 'item', 'npc', 'quest', 'spell',
   'achievement', 'house', 'imbuement', 'charm', 'mount', 'outfit', 'book',
@@ -89,12 +124,25 @@ export function creatureSort(key: CreatureSort): string {
   return CREATURE_ORDER[key];
 }
 
-export const ITEM_SORTS = ['title', 'weight', 'value'] as const;
+export const ITEM_SORTS = ['title', 'weight', 'value', 'armor', 'attack', 'defense'] as const;
 export type ItemSort = (typeof ITEM_SORTS)[number];
+/**
+ * An item stat for ordering, read by leading integer as the numeric filters read it,
+ * so "33 +3" ranks as 33. It is null for an item without the stat. The query must
+ * alias the item table `i`.
+ */
+const itemStat = (name: 'armor' | 'attack' | 'defense'): string =>
+  `(select cast(a.value as integer) from item_attribute a
+     where a.item_id = i.article_id and a.name = '${name}' limit 1)`;
+const statOrder = (name: 'armor' | 'attack' | 'defense'): string =>
+  `(${itemStat(name)} is null), ${itemStat(name)} desc, title asc`;
 const ITEM_ORDER: Record<ItemSort, string> = {
   title: 'title asc',
   weight: '(weight is null), weight asc, title asc',
   value: '(value_buy is null), value_buy desc, title asc',
+  armor: statOrder('armor'),
+  attack: statOrder('attack'),
+  defense: statOrder('defense'),
 };
 export function itemSort(key: ItemSort): string {
   if (!Object.hasOwn(ITEM_ORDER, key)) {
@@ -130,7 +178,7 @@ export function spellSort(key: SpellSort): string {
   return SPELL_ORDER[key];
 }
 
-const EAV_OPERATORS ={ gte: '>=', lte: '<=' } as const;
+const EAV_OPERATORS ={ gt: '>', gte: '>=', lte: '<=' } as const;
 export type EavOperator = keyof typeof EAV_OPERATORS;
 export function eavOperator(op: EavOperator): string {
   if (!Object.hasOwn(EAV_OPERATORS, op)) {
@@ -174,6 +222,7 @@ export const NUMERIC_ATTRS = [
 
 export const REPORTED_ATTRS: ReadonlySet<string> = new Set<string>([
   ...NUMERIC_ATTRS, 'required_vocation', 'weapon_type', 'hands',
+  ...Object.values(RESISTANCE_ATTRS), ...ITEM_SKILLS,
 ]);
 
 export function coerceAttribute(name: string, value: unknown): string | number {

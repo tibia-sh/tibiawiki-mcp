@@ -40,7 +40,8 @@ export function registerFindSpells(server: McpServer, handle: TibiaDb): void {
       inputSchema: z.object({
         vocation: z.enum(SPELL_VOCATIONS).optional(),
         level_max: z.number().int().nonnegative().optional().describe('Highest level the caster has.'),
-        group: z.enum(SPELL_GROUPS).optional(),
+        group: z.enum(SPELL_GROUPS).optional()
+          .describe('Runes are all filed under support, so find attack runes by spell_type and element.'),
         element: z.enum(SPELL_ELEMENTS).optional()
           .describe('Damage element. For healing spells, use group.'),
         spell_type: z.enum(SPELL_TYPES).optional(),

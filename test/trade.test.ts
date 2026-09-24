@@ -2,30 +2,12 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { DatabaseSync } from 'node:sqlite';
 import { DB_PATH } from '@tibia.sh/tibiawiki-data';
-import { InMemoryTransport } from '@modelcontextprotocol/server';
-import { Client } from '@modelcontextprotocol/client';
-import { openDb } from '../src/db.ts';
-import { createServer } from '../src/server.ts';
+import type { Client } from '@modelcontextprotocol/client';
+import { withRealIndex } from './harness.ts';
 
 // The fixture keeps 12 of Rashid's buy offers and none of the offer tables' duplicate
 // rows, so these tests open the real packaged index. They compare against the index
 // itself rather than a count, which later data releases change.
-async function withRealIndex<T>(fn: (client: Client) => Promise<T>): Promise<T> {
-  const handle = openDb(DB_PATH);
-  const server = createServer(handle);
-  const [ct, st] = InMemoryTransport.createLinkedPair();
-  await server.connect(st);
-  const client = new Client({ name: 'trade', version: '1.0.0' });
-  await client.connect(ct);
-  try {
-    return await fn(client);
-  } finally {
-    await client.close();
-    await server.close();
-    handle.close();
-  }
-}
-
 type Offer = { item: string; price: number; currency: string };
 
 async function get(client: Client, args: Record<string, unknown>): Promise<Record<string, any>> {

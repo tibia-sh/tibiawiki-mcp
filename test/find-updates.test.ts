@@ -2,11 +2,9 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { DatabaseSync } from 'node:sqlite';
 import { DB_PATH } from '@tibia.sh/tibiawiki-data';
-import { InMemoryTransport } from '@modelcontextprotocol/server';
-import { Client } from '@modelcontextprotocol/client';
-import { openDb } from '../src/db.ts';
-import { createServer } from '../src/server.ts';
+import type { Client } from '@modelcontextprotocol/client';
 import { excerpt, likePattern } from '../src/tools/find-updates.ts';
+import { withRealIndex } from './harness.ts';
 
 /** The fold SQLite's lower() and NOCASE apply: ASCII letters only. */
 const asciiLower = (s: string): string => s.replace(/[A-Z]/g, (c) => c.toLowerCase());
@@ -14,22 +12,6 @@ const asciiLower = (s: string): string => s.replace(/[A-Z]/g, (c) => c.toLowerCa
 // The fixture holds two update pages, so these tests open the real packaged index, the
 // way regression.test.ts does. They assert facts about historical update pages, which
 // later data releases do not change, and membership rather than position.
-async function withRealIndex<T>(fn: (client: Client) => Promise<T>): Promise<T> {
-  const handle = openDb(DB_PATH);
-  const server = createServer(handle);
-  const [ct, st] = InMemoryTransport.createLinkedPair();
-  await server.connect(st);
-  const client = new Client({ name: 'find-updates', version: '1.0.0' });
-  await client.connect(ct);
-  try {
-    return await fn(client);
-  } finally {
-    await client.close();
-    await server.close();
-    handle.close();
-  }
-}
-
 type Update = {
   title: string; name: string | null; releaseDate: string; version: string | null;
   updateType: string | null; summary: string | null; matchingLines: string[];

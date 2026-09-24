@@ -1,11 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { DB_PATH } from '@tibia.sh/tibiawiki-data';
-import { InMemoryTransport } from '@modelcontextprotocol/server';
-import { Client } from '@modelcontextprotocol/client';
-import { openDb } from '../src/db.ts';
-import { createServer } from '../src/server.ts';
-import { connect } from './harness.ts';
+import type { Client } from '@modelcontextprotocol/client';
+import { connect, withRealIndex } from './harness.ts';
 
 type ItemsOut = {
   results: Array<{
@@ -97,22 +93,6 @@ test('item_class is a real column filter and sorting is stable', async () => {
 // the tests below open the real packaged index, the way find-updates.test.ts does.
 // They assert stats of long-standing items, which later data releases do not change,
 // and membership rather than position.
-async function withRealIndex<T>(fn: (client: Client) => Promise<T>): Promise<T> {
-  const handle = openDb(DB_PATH);
-  const server = createServer(handle);
-  const [ct, st] = InMemoryTransport.createLinkedPair();
-  await server.connect(st);
-  const client = new Client({ name: 'find-items', version: '1.0.0' });
-  await client.connect(ct);
-  try {
-    return await fn(client);
-  } finally {
-    await client.close();
-    await server.close();
-    handle.close();
-  }
-}
-
 type Item = ItemsOut['results'][number];
 
 async function find(client: Client, args: Record<string, unknown>): Promise<ItemsOut> {

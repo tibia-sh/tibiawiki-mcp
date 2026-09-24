@@ -140,12 +140,56 @@ export const runsAtSchema = z.number().nullable()
 export const summonCostSchema = z.number().nullable().describe('Mana. 0: cannot be summoned.');
 export const convinceCostSchema = z.number().nullable().describe('Mana. 0: cannot be convinced.');
 
-export const CREATURE_SORTS = ['experience', 'hitpoints', 'title'] as const;
+/**
+ * The best gold price an NPC pays for each item, as a subquery with one row per item:
+ * `item_id`, `npc_id` (the buyer) and `price`. The price is the highest `npc_offer_buy.value`
+ * in Gold Coin from an active NPC, and a tie goes to the NPC whose title comes first.
+ * npc_offer_buy holds exact duplicate rows, and ranking keeps one row per item, so they
+ * cannot change a result. An item no active NPC buys for gold has no row.
+ */
+export const BEST_GOLD_PRICE =
+  `select item_id, npc_id, price from (
+     select o.item_id, o.npc_id, o.value as price,
+            row_number() over (partition by o.item_id order by o.value desc, n.title asc) as rank
+       from npc_offer_buy o
+       join npc n on n.article_id = o.npc_id
+       join item cur on cur.article_id = o.currency_id
+      where ${statusClause('n', false)} and cur.title = 'Gold Coin'
+   ) where rank = 1`;
+
+/**
+ * Estimated gold per kill, as a subquery with one row per creature that has a drop with a
+ * recorded chance: `creature_id` and `gold_per_kill`. Each such drop is worth
+ * chance / 100 x average amount x unit value, summed and rounded to an integer. The amount
+ * is `max` when `min` is 0, since tibiawiki-sql stores an amount written without a range
+ * as `min` 0, and the midpoint of the range otherwise. Coins count at face value, any other
+ * item at its BEST_GOLD_PRICE, and an item with neither counts 0.
+ */
+export const GOLD_PER_KILL =
+  `select d.creature_id, cast(round(sum(d.chance / 100.0
+            * (case when d.min = 0 then d.max else (d.min + d.max) / 2.0 end)
+            * coalesce(case i.title when 'Gold Coin' then 1 when 'Platinum Coin' then 100
+                                    when 'Crystal Coin' then 10000 end, best.price, 0)
+          )) as integer) as gold_per_kill
+     from creature_drop d
+     join item i on i.article_id = d.item_id
+     left join (${BEST_GOLD_PRICE}) best on best.item_id = d.item_id
+    where d.chance is not null
+    group by d.creature_id`;
+
+export const goldPerKillSchema = z.number().nullable().describe(
+  'Estimated gross loot value at NPC prices. Drops without a recorded chance are left out, ' +
+    'and items that sell only on the market count as 0.',
+);
+
+export const CREATURE_SORTS = ['experience', 'hitpoints', 'title', 'gold_per_kill'] as const;
 export type CreatureSort = (typeof CREATURE_SORTS)[number];
+/** gold_per_kill needs the query to select GOLD_PER_KILL's column under that name. */
 const CREATURE_ORDER: Record<CreatureSort, string> = {
   experience: nullsLast('experience', 'desc'),
   hitpoints: nullsLast('nullif(hitpoints, 0)', 'desc'),
   title: 'title asc',
+  gold_per_kill: nullsLast('gold_per_kill', 'desc'),
 };
 export function creatureSort(key: CreatureSort): string {
   if (!Object.hasOwn(CREATURE_ORDER, key)) {

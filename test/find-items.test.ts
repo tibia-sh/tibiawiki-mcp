@@ -127,16 +127,16 @@ function byTitle(items: Item[], title: string): Item | undefined {
 test('resistant_to keeps items that resist the element, not ones weak to it', () => withRealIndex(async (client) => {
   const items = await findAll(client, { resistant_to: ['fire'] });
   // Magma Coat has resistance_fire 8. Terra Legs carries the attribute too, at -6.
-  assert.equal(byTitle(items, 'Magma Coat')?.attributes.resistance_fire, '8');
+  assert.equal(byTitle(items, 'Magma Coat')?.attributes.resistance_fire, 8);
   assert.equal(byTitle(items, 'Terra Legs'), undefined, 'a negative resistance is a weakness');
-  for (const r of items) assert.ok(Number(r.attributes.resistance_fire) > 0, `${r.title}`);
+  for (const r of items) assert.ok((r.attributes.resistance_fire as number) > 0, `${r.title}`);
 }));
 
 test('resistant_to with two elements needs both', () => withRealIndex(async (client) => {
   const items = await findAll(client, { resistant_to: ['fire', 'ice'] });
   const headguard = byTitle(items, 'Alicorn Headguard');
   assert.ok(headguard, 'Alicorn Headguard resists fire 5 and ice 5');
-  assert.equal(headguard.attributes.resistance_ice, '5');
+  assert.equal(headguard.attributes.resistance_ice, 5);
   // Magma Coat resists fire 8 but has ice -8. Bonfire Amulet resists fire and has no
   // ice resistance, Crystal Boots resist ice and have no fire resistance.
   assert.equal(byTitle(items, 'Magma Coat'), undefined);
@@ -146,11 +146,20 @@ test('resistant_to with two elements needs both', () => withRealIndex(async (cli
 
 test('lifedrain maps to the resistance_life_drain attribute', () => withRealIndex(async (client) => {
   const items = await findAll(client, { resistant_to: ['lifedrain'] });
-  assert.equal(byTitle(items, 'Garlic Necklace')?.attributes.resistance_life_drain, '20');
+  assert.equal(byTitle(items, 'Garlic Necklace')?.attributes.resistance_life_drain, 20);
   // Depth Galea resists drowning only.
   assert.equal(byTitle(items, 'Depth Galea'), undefined);
   const drown = await findAll(client, { resistant_to: ['drown'] });
-  assert.equal(byTitle(drown, 'Depth Galea')?.attributes.resistance_drowning, '100');
+  assert.equal(byTitle(drown, 'Depth Galea')?.attributes.resistance_drowning, 100);
+}));
+
+test('tibia_get reports signed resistances and skill bonuses as numbers', () => withRealIndex(async (client) => {
+  const legs = await client.callTool({ name: 'tibia_get', arguments: { name: 'Terra Legs' } });
+  assert.equal((legs.structuredContent as any).attributes.resistance_fire, -6);
+  const book = await client.callTool({
+    name: 'tibia_get', arguments: { name: 'Spellbook of Mind Control' },
+  });
+  assert.equal((book.structuredContent as any).attributes.magic_level, 2);
 }));
 
 test('healing is not an item resistance', () => withRealIndex(async (client) => {
@@ -162,7 +171,7 @@ test('healing is not an item resistance', () => withRealIndex(async (client) => 
 
 test('skill_bonus with a vocation finds magic level items for sorcerers', () => withRealIndex(async (client) => {
   const items = await findAll(client, { skill_bonus: ['magic_level'], vocation: 'sorcerer' });
-  assert.equal(byTitle(items, 'Spellbook of Mind Control')?.attributes.magic_level, '+2');
+  assert.equal(byTitle(items, 'Spellbook of Mind Control')?.attributes.magic_level, 2);
   // Amber Rod gives magic level to druids only, Magma Coat is for sorcerers without it.
   assert.equal(byTitle(items, 'Amber Rod'), undefined);
   assert.equal(byTitle(items, 'Magma Coat'), undefined);
@@ -172,8 +181,8 @@ test('skill_bonus with two skills needs both', () => withRealIndex(async (client
   const items = await findAll(client, { skill_bonus: ['sword', 'axe'] });
   const greaves = byTitle(items, 'Falcon Greaves');
   assert.ok(greaves, 'Falcon Greaves gives sword, axe and club');
-  assert.equal(greaves.attributes.sword, '+3');
-  assert.equal(greaves.attributes.axe, '+3');
+  assert.equal(greaves.attributes.sword, 3);
+  assert.equal(greaves.attributes.axe, 3);
   // Ectoplasmic Shield gives axe and club but no sword, Earthheart Cuirass sword but no axe.
   assert.equal(byTitle(items, 'Ectoplasmic Shield'), undefined);
   assert.equal(byTitle(items, 'Earthheart Cuirass'), undefined);

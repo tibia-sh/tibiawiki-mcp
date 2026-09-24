@@ -1,7 +1,12 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { copyFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 import type { Client } from '@modelcontextprotocol/client';
-import { connect, withRealIndex } from './harness.ts';
+import { connect, connectTo, FIXTURE, tempDirs, withRealIndex } from './harness.ts';
+
+const scratch = tempDirs('twmcp-find-items-');
 
 type ItemsOut = {
   results: Array<{
@@ -237,3 +242,24 @@ test('sort defense ranks a suffixed value by its leading integer', () => withRea
   assert.equal(byTitle(items, 'Moonsilver Axe')?.attributes.defense, '33 +3');
   assertStatOrder(items, 'defense');
 }));
+
+test('an item with two rows for a stat sorts by the larger', async () => {
+  // No item has two armor rows today, but the filters accept any row, so the sort
+  // must read one value per item that does not depend on row order. Devil Helmet has
+  // armor 7 in the fixture, and a second row of 99 puts it above Magic Plate Armor (17).
+  const path = join(scratch(), 'index.db');
+  copyFileSync(FIXTURE, path);
+  const db = new DatabaseSync(path);
+  db.prepare(
+    `insert into item_attribute (item_id, name, value)
+       select article_id, 'armor', '99' from item where title = 'Devil Helmet'`,
+  ).run();
+  db.close();
+  const h = await connectTo(path);
+  try {
+    const data = await find(h.client, { sort: 'armor', limit: 1 });
+    assert.equal(data.results[0]?.title, 'Devil Helmet');
+  } finally {
+    await h.close();
+  }
+});

@@ -128,12 +128,13 @@ export const ITEM_SORTS = ['title', 'weight', 'value', 'armor', 'attack', 'defen
 export type ItemSort = (typeof ITEM_SORTS)[number];
 /**
  * An item stat for ordering, read by leading integer as the numeric filters read it,
- * so "33 +3" ranks as 33. It is null for an item without the stat. The query must
- * alias the item table `i`.
+ * so "33 +3" ranks as 33. It is null for an item without the stat. The filters accept
+ * any of an item's rows, so an item with two rows for a stat sorts by the larger, not
+ * by whichever row comes first. The query must alias the item table `i`.
  */
 const itemStat = (name: 'armor' | 'attack' | 'defense'): string =>
-  `(select cast(a.value as integer) from item_attribute a
-     where a.item_id = i.article_id and a.name = '${name}' limit 1)`;
+  `(select max(cast(a.value as integer)) from item_attribute a
+     where a.item_id = i.article_id and a.name = '${name}')`;
 const statOrder = (name: 'armor' | 'attack' | 'defense'): string =>
   `(${itemStat(name)} is null), ${itemStat(name)} desc, title asc`;
 const ITEM_ORDER: Record<ItemSort, string> = {

@@ -61,7 +61,8 @@ export async function withRealIndex<T>(fn: (client: Client) => Promise<T>): Prom
   }
 }
 
-async function connectTo(path: string) {
+/** A client on the index at `path`, for tests that build a scratch copy of the fixture. */
+export async function connectTo(path: string) {
   const handle = openDb(path);
   const server = createServer(handle);
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();

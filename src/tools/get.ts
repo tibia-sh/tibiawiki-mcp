@@ -25,6 +25,7 @@ const sourceSchema = z.object({
   page: z.string(), url: z.string(), indexGeneratedAt: z.string(),
 });
 const detail = z.record(z.string(), z.union([z.string(), z.number(), z.null()])).optional();
+const tradeSchema = z.array(z.object({ item: z.string(), price: z.number(), currency: z.string() }));
 
 /**
  * Linked, never stored. `width`/`height` are the sprite image's pixel size - NOT a
@@ -101,6 +102,7 @@ const itemOut = z.object({
   proficiencyPerks: z.array(z.object({
     level: z.number().nullable(), effect: z.string().nullable(), skill: z.string().nullable(),
   })),
+  boughtBy: z.array(z.object({ npc: z.string(), price: z.number(), currency: z.string() })),
   sounds: z.array(z.string()),
   detail, source: sourceSchema,
 });
@@ -129,6 +131,8 @@ const npcOut = z.object({
       x: z.number().nullable(), y: z.number().nullable(), z: z.number().nullable(),
     }),
   })).optional(),
+  buys: tradeSchema.describe('Items the player can sell to this NPC.'),
+  sells: tradeSchema.describe('Items the player can buy from this NPC.'),
   detail, source: sourceSchema,
 });
 const questOut = z.object({
@@ -418,6 +422,30 @@ export function registerGet(server: McpServer, handle: TibiaDb): void {
   const materials = db.prepare(
     `select i.title, m.amount from imbuement_material m join item i on i.article_id = m.item_id
      where m.imbuement_id = ? order by i.title asc`);
+  // npc_offer_buy is the NPC buying FROM the player (where to sell an item), and
+  // npc_offer_sell the NPC selling TO the player. Both tables hold exact duplicate
+  // rows (Satsu's Cocktail Glass is there nine times), hence `distinct`.
+  // currency_id is NOT NULL and names the currency item, e.g. Gold Coin.
+  const boughtBy = (includeInactive: boolean) => {
+    const status = statusClause('n', includeInactive);
+    return db.prepare(
+      `select distinct n.title as npc, o.value as price, cur.title as currency
+         from npc_offer_buy o
+         join npc n on n.article_id = o.npc_id
+         join item cur on cur.article_id = o.currency_id
+        where o.item_id = ?` + (status ? ` and ${status}` : '') + `
+        order by o.value desc, n.title asc, cur.title asc`);
+  };
+  const npcTrade = (table: 'npc_offer_buy' | 'npc_offer_sell', includeInactive: boolean) => {
+    const status = statusClause('i', includeInactive);
+    return db.prepare(
+      `select distinct i.title as item, o.value as price, cur.title as currency
+         from ${table} o
+         join item i on i.article_id = o.item_id
+         join item cur on cur.article_id = o.currency_id
+        where o.npc_id = ?` + (status ? ` and ${status}` : '') + `
+        order by i.title asc, o.value asc, cur.title asc`);
+  };
   const outfitQuests = db.prepare(
     // Total order: Assassin Outfits has two rows for the same quest title,
     // distinguished only by unlock_type ('outfit' and 'addons').
@@ -440,7 +468,13 @@ export function registerGet(server: McpServer, handle: TibiaDb): void {
     return n === -1 ? null : n;
   };
 
-  const shape = (type: EntityType, row: Row, verbosity: 'concise' | 'detailed') => {
+  const trade = (o: Row) => ({
+    item: String(o.item), price: Number(o.price), currency: String(o.currency),
+  });
+
+  const shape = (
+    type: EntityType, row: Row, verbosity: 'concise' | 'detailed', includeInactive: boolean,
+  ) => {
     const title = String(row.title);
     const spellShapeFor = (r: Row) => {
       const row = spellShapeRow.get(r.article_id as number) as Row | undefined;
@@ -525,6 +559,9 @@ export function registerGet(server: McpServer, handle: TibiaDb): void {
           proficiencyPerks: perks.all(row.article_id as number).map((p) => ({
             level: num(p.proficiency_level), effect: str(p.effect), skill: str(p.skill_image),
           })),
+          boughtBy: boughtBy(includeInactive).all(row.article_id as number).map((o) => ({
+            npc: String(o.npc), price: Number(o.price), currency: String(o.currency),
+          })),
           sounds: itemSounds.all(row.article_id as number).map((r) => String(r.content)),
           source,
         }, DETAILED_ITEM_FIELDS);
@@ -549,6 +586,8 @@ export function registerGet(server: McpServer, handle: TibiaDb): void {
                 })),
               }
             : {}),
+          buys: npcTrade('npc_offer_buy', includeInactive).all(row.article_id as number).map(trade),
+          sells: npcTrade('npc_offer_sell', includeInactive).all(row.article_id as number).map(trade),
           source,
         };
       case 'quest':
@@ -669,7 +708,8 @@ export function registerGet(server: McpServer, handle: TibiaDb): void {
     {
       description:
         'Full detail for one named Tibia page of any kind: creature (with its loot table, ' +
-        'abilities and max damage), item, npc, quest, spell, achievement, house, imbuement, ' +
+        'abilities and max damage), item (with the NPCs that buy it), npc (with what it buys ' +
+        'and sells), quest, spell, achievement, house, imbuement, ' +
         'charm, mount, outfit, book, world or update. Takes an exact page name — use ' +
         'tibia_search first if it is uncertain, or tibia_find_updates for an update page. ' +
         'Pass `type` to disambiguate a shared name. ' +
@@ -678,7 +718,8 @@ export function registerGet(server: McpServer, handle: TibiaDb): void {
         name: z.string().min(1).describe('Page name, e.g. "Dragon Lord". Case-insensitive.'),
         type: entityTypeSchema.optional().describe('Restrict the lookup to one kind of page.'),
         include_inactive: z.boolean().default(false)
-          .describe('Include deprecated, event-only and unavailable pages. Applies to the requested page.'),
+          .describe('Include deprecated, event-only and unavailable pages. Applies to the requested ' +
+            'page and to the NPCs or items in its trade lists.'),
         verbosity: verbositySchema.describe('"detailed" adds extra descriptive columns.'),
       }),
       outputSchema,
@@ -715,7 +756,7 @@ export function registerGet(server: McpServer, handle: TibiaDb): void {
       }
 
       const hit = hits[0]!;
-      const output = shape(hit.type, hit.row, verbosity);
+      const output = shape(hit.type, hit.row, verbosity, include_inactive);
       const image = (output as {
         image?: { url: string; mimeType: string; fileName: string } | null;
       }).image ?? null;

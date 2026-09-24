@@ -144,6 +144,68 @@ test('a non-Rashid NPC has no schedule field rather than an empty one', async ()
   await h.close();
 });
 
+const getInactive = async (h: Awaited<ReturnType<typeof connect>>, name: string, type: string) => {
+  const res = await h.client.callTool({
+    name: 'tibia_get', arguments: { name, type, include_inactive: true },
+  });
+  assert.notEqual(res.isError, true, `${name}: ${JSON.stringify(res.content)}`);
+  return res.structuredContent as Record<string, any>;
+};
+
+// npc_offer_buy is the player selling to the NPC. No other tool reads it.
+test('an item lists the NPCs that buy it, highest price first', async () => {
+  const h = await connect();
+  const shield = await get(h, 'Dragon Shield', 'item');
+  assert.deepEqual(shield.boughtBy, [
+    { npc: "Nah'Bob", price: 4000, currency: 'Gold Coin' },
+    { npc: 'Shanar', price: 360, currency: 'Gold Coin' },
+    { npc: 'H.L.', price: 115, currency: 'Gold Coin' },
+  ]);
+  await h.close();
+});
+
+// Yasir is an event NPC. Fiona buys Demon Horn at the same price, so the tie also
+// shows the NPC title breaking it.
+test('an inactive buyer appears only with include_inactive', async () => {
+  const h = await connect();
+  assert.deepEqual((await get(h, 'Demon Horn', 'item')).boughtBy, [
+    { npc: 'Fiona', price: 1000, currency: 'Gold Coin' },
+  ]);
+  assert.deepEqual((await getInactive(h, 'Demon Horn', 'item')).boughtBy, [
+    { npc: 'Fiona', price: 1000, currency: 'Gold Coin' },
+    { npc: 'Yasir', price: 1000, currency: 'Gold Coin' },
+  ]);
+  await h.close();
+});
+
+test('an NPC lists what it buys, by item title', async () => {
+  const h = await connect();
+  const nahBob = await get(h, "Nah'Bob", 'npc');
+  assert.deepEqual(nahBob.buys, [
+    { item: 'Broadsword', price: 500, currency: 'Gold Coin' },
+    { item: 'Dragon Shield', price: 4000, currency: 'Gold Coin' },
+    { item: 'Fire Axe', price: 8000, currency: 'Gold Coin' },
+    { item: 'Fire Sword', price: 4000, currency: 'Gold Coin' },
+    { item: 'Ice Rapier', price: 1000, currency: 'Gold Coin' },
+    { item: 'Royal Helmet', price: 30000, currency: 'Gold Coin' },
+  ]);
+  assert.deepEqual(nahBob.sells, []);
+  await h.close();
+});
+
+// Arrow (Weak) is a ts-only item that Xed, an active NPC, sells.
+test('an NPC leaves out inactive items unless include_inactive is set', async () => {
+  const h = await connect();
+  const xed = await get(h, 'Xed', 'npc');
+  assert.deepEqual(xed.sells, [{ item: 'Crossbow', price: 500, currency: 'Gold Coin' }]);
+  assert.deepEqual(xed.buys, []);
+  assert.deepEqual((await getInactive(h, 'Xed', 'npc')).sells, [
+    { item: 'Arrow (Weak)', price: 3, currency: 'Gold Coin' },
+    { item: 'Crossbow', price: 500, currency: 'Gold Coin' },
+  ]);
+  await h.close();
+});
+
 // quest_danger stores creature_id, not a name - it must be joined to be useful.
 test('a quest returns its dangers as creature names and its rewards', async () => {
   const h = await connect();

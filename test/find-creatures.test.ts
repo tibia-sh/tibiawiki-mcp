@@ -6,7 +6,7 @@ import { DatabaseSync } from 'node:sqlite';
 import type { Client } from '@modelcontextprotocol/client';
 import { DB_PATH } from '@tibia.sh/tibiawiki-data';
 import {
-  runsAtSchema, summonCostSchema, convinceCostSchema, goldPerKillSchema,
+  runsAtSchema, summonCostSchema, convinceCostSchema, goldPerKillSchema, asciiLower,
 } from '../src/domain.ts';
 import { connect, connectTo, FIXTURE, tempDirs, withRealIndex } from './harness.ts';
 
@@ -88,7 +88,7 @@ function expectedGold(db: DatabaseSync, title: string): number | null {
 
 /**
  * Asserts the rows are in gold_per_kill order: highest first, ties by title, nulls last, and
- * no creature twice. Returns them split into the priced and the null part.
+ * no creature twice. creature.title is collate nocase, so titles compare with ASCII case folded. Returns them split into the priced and the null part.
  */
 function assertGoldOrder(found: Creature[]): { priced: Creature[]; unpriced: Creature[] } {
   assert.equal(new Set(found.map((c) => c.title)).size, found.length, 'no creature repeats');
@@ -96,10 +96,16 @@ function assertGoldOrder(found: Creature[]): { priced: Creature[]; unpriced: Cre
   const priced = firstNull === -1 ? found : found.slice(0, firstNull);
   const unpriced = firstNull === -1 ? [] : found.slice(firstNull);
   for (const c of unpriced) assert.equal(c.goldPerKill, null, `${c.title} sorts after the nulls began`);
+  for (let i = 1; i < unpriced.length; i++) {
+    const [a, b] = [unpriced[i - 1]!, unpriced[i]!];
+    assert.ok(asciiLower(a.title) < asciiLower(b.title), `${a.title} before ${b.title} among the nulls`);
+  }
   for (let i = 1; i < priced.length; i++) {
     const [a, b] = [priced[i - 1]!, priced[i]!];
     assert.ok(a.goldPerKill! >= b.goldPerKill!, `${a.title} ${a.goldPerKill} before ${b.title} ${b.goldPerKill}`);
-    if (a.goldPerKill === b.goldPerKill) assert.ok(a.title < b.title, `${a.title} before ${b.title} on a tie`);
+    if (a.goldPerKill === b.goldPerKill) {
+      assert.ok(asciiLower(a.title) < asciiLower(b.title), `${a.title} before ${b.title} on a tie`);
+    }
   }
   return { priced, unpriced };
 }
@@ -539,6 +545,49 @@ test('an item bought only by an inactive NPC adds nothing, and duplicate offers 
     }
   } finally {
     await flipped.close();
+  }
+});
+
+test('a Crystal Coin counts 10,000 gold', async () => {
+  const db = new DatabaseSync(FIXTURE, { readOnly: true });
+  let drop: { title: string; chance: number; min: number; max: number } | undefined;
+  let expected: number | null;
+  try {
+    drop = db.prepare(
+      `select c.title, d.chance, d.min, d.max from creature_drop d
+         join creature c on c.article_id = d.creature_id join item i on i.article_id = d.item_id
+        where i.title = 'Crystal Coin' and d.chance is not null and c.status = 'active'
+        order by c.title limit 1`).get() as typeof drop;
+    assert.ok(drop, 'guard: some active creature drops Crystal Coins with a chance');
+    expected = expectedGold(db, drop.title);
+  } finally {
+    db.close();
+  }
+  const h = await connect();
+  try {
+    assert.equal(await getGold(h.client, drop.title), expected, `${drop.title} matches the rule`);
+  } finally {
+    await h.close();
+  }
+
+  // The same creature with only its Crystal Coin drop left is worth exactly that drop.
+  const path = join(scratch(), 'crystal.db');
+  copyFileSync(FIXTURE, path);
+  const scratchDb = new DatabaseSync(path);
+  try {
+    scratchDb.prepare(`delete from creature_drop
+      where creature_id = (select article_id from creature where title = ?)
+        and item_id != (select article_id from item where title = 'Crystal Coin')`).run(drop.title);
+  } finally {
+    scratchDb.close();
+  }
+  const amount = drop.min === 0 ? drop.max : (drop.min + drop.max) / 2;
+  const alone = await connectTo(path);
+  try {
+    assert.equal(await getGold(alone.client, drop.title), Math.round(10000 * (drop.chance / 100) * amount),
+      `${drop.title}'s Crystal Coins alone`);
+  } finally {
+    await alone.close();
   }
 });
 

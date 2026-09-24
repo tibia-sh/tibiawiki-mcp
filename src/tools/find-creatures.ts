@@ -4,6 +4,7 @@ import { str, num, bool, type TibiaDb } from '../db.ts';
 import {
   ELEMENTS, elementSchema, modifierColumn, WEAK_TO, RESISTANT_TO,
   CREATURE_BESTIARY_LEVELS, CREATURE_SORTS, creatureSort, statusClause, hitpointsExpr, likePattern,
+  runsAtSchema, summonCostSchema, convinceCostSchema,
 } from '../domain.ts';
 import { encodeCursor, decodeCursor } from '../cursor.ts';
 
@@ -15,12 +16,12 @@ const outputSchema = z.object({
     bestiaryClass: z.string().nullable(),
     isBoss: z.boolean(),
     modifiers: z.record(z.string(), z.number().nullable()),
-    runsAt: z.number().nullable().describe('Flees at or below these hit points. 0: never flees.'),
+    runsAt: runsAtSchema,
     seesInvisible: z.boolean().nullable(),
     paralysable: z.boolean().nullable(),
     pushable: z.boolean().nullable(),
-    summonCost: z.number().nullable().describe('Mana. 0: cannot be summoned.'),
-    convinceCost: z.number().nullable().describe('Mana. 0: cannot be convinced.'),
+    summonCost: summonCostSchema,
+    convinceCost: convinceCostSchema,
   })),
   totalMatches: z.number(),
   nextCursor: z.string().optional(),
@@ -58,7 +59,8 @@ export function registerFindCreatures(server: McpServer, handle: TibiaDb): void 
         pushable: z.boolean().optional(),
         summonable: z.boolean().optional().describe('true: summon cost above 0. false: 0.'),
         convinceable: z.boolean().optional().describe('true: convince cost above 0. false: 0.'),
-        bestiary_level: z.enum(CREATURE_BESTIARY_LEVELS).optional(),
+        bestiary_level: z.enum(CREATURE_BESTIARY_LEVELS).optional()
+          .describe('Creatures with no recorded bestiary level are excluded from this filter.'),
         location_contains: z.string().optional().describe('Substring of the location text.'),
         include_inactive: z.boolean().default(false),
         sort: z.enum(CREATURE_SORTS).default('experience'),

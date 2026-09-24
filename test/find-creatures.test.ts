@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import type { Client } from '@modelcontextprotocol/client';
 import { DB_PATH } from '@tibia.sh/tibiawiki-data';
+import { runsAtSchema, summonCostSchema, convinceCostSchema } from '../src/domain.ts';
 import { connect, connectTo, FIXTURE, tempDirs, withRealIndex } from './harness.ts';
 
 type Creature = {
@@ -320,3 +321,30 @@ test('%, _ and backslash in location_contains match themselves', () => withRealI
     db.close();
   }
 }));
+
+test('both tools describe what 0 means in the same words, and name unrecorded levels', async () => {
+  const h = await connect();
+  try {
+    const { tools } = await h.client.listTools();
+    const tool = (name: string) => {
+      const t = tools.find((x) => x.name === name);
+      assert.ok(t, `guard: ${name} is listed`);
+      return t;
+    };
+    const find = tool('tibia_find_creatures');
+    const row = (find.outputSchema as any).properties.results.items.properties;
+    const get = JSON.stringify(tool('tibia_get').outputSchema);
+    for (const [field, schema] of [
+      ['runsAt', runsAtSchema], ['summonCost', summonCostSchema], ['convinceCost', convinceCostSchema],
+    ] as const) {
+      assert.ok(schema.description, `${field} has a description`);
+      assert.equal(row[field].description, schema.description, `tibia_find_creatures ${field}`);
+      assert.ok(get.includes(JSON.stringify(schema.description)), `tibia_get ${field}`);
+    }
+    assert.equal(runsAtSchema.description, 'Hit points at which it flees. 0: never flees.');
+    const level = (find.inputSchema as any).properties.bestiary_level.description as string;
+    assert.match(level, /no recorded bestiary level are excluded/);
+  } finally {
+    await h.close();
+  }
+});

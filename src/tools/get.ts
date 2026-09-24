@@ -6,6 +6,7 @@ import {
   ELEMENTS, ENTITY_TYPES, entityTypeSchema, entityTable, entityHasStatus, statusClause,
   verbositySchema, SPELL_VOCATIONS, QUEST_REWARDS,
   DETAILED_CREATURE_FIELDS, DETAILED_ITEM_FIELDS, coerceAttribute, type EntityType,
+  runsAtSchema, summonCostSchema, convinceCostSchema,
 } from '../domain.ts';
 
 type Row = Record<string, unknown>;
@@ -50,14 +51,14 @@ const creatureOut = z.object({
   bestiaryLevel: z.string().nullable(),
   isBoss: z.boolean(),
   status: z.string().nullable(),
-  runsAt: z.number().nullable().describe('Flees at or below these hit points. 0: never flees.'),
+  runsAt: runsAtSchema,
   seesInvisible: z.boolean().nullable(),
   paralysable: z.boolean().nullable(),
   pushable: z.boolean().nullable(),
   pushObjects: z.boolean().nullable(),
   illusionable: z.boolean().nullable(),
-  summonCost: z.number().nullable().describe('Mana. 0: cannot be summoned.'),
-  convinceCost: z.number().nullable().describe('Mana. 0: cannot be convinced.'),
+  summonCost: summonCostSchema,
+  convinceCost: convinceCostSchema,
   modifiers: z.record(z.string(), z.number().nullable()),
   loot: z.array(z.object({
     item: z.string(),

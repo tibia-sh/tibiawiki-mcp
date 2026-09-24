@@ -96,7 +96,7 @@ export function registerFindItems(server: McpServer, handle: TibiaDb): void {
       const equals = (attr: string, value: string) => {
         where.push(
           `exists (select 1 from item_attribute a where a.item_id = i.article_id
-            and a.name = ? and a.value = ?)`,
+            and a.name = ? and a.value = ? collate nocase)`,
         );
         params.push(attr, value);
       };

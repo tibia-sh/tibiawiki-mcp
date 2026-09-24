@@ -131,6 +131,15 @@ export const CREATURE_BESTIARY_LEVELS = [
   'harmless', 'trivial', 'easy', 'medium', 'hard', 'challenging',
 ] as const;
 
+/**
+ * Creature numbers the wiki gives a meaning at 0, described once for every tool that
+ * reports them. The value is reported as the wiki records it.
+ */
+export const runsAtSchema = z.number().nullable()
+  .describe('Hit points at which it flees. 0: never flees.');
+export const summonCostSchema = z.number().nullable().describe('Mana. 0: cannot be summoned.');
+export const convinceCostSchema = z.number().nullable().describe('Mana. 0: cannot be convinced.');
+
 export const CREATURE_SORTS = ['experience', 'hitpoints', 'title'] as const;
 export type CreatureSort = (typeof CREATURE_SORTS)[number];
 const CREATURE_ORDER: Record<CreatureSort, string> = {

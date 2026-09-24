@@ -15,6 +15,7 @@ const outputSchema = z.object({
     itemType: z.string().nullable(),
     weight: z.number().nullable(),
     valueBuy: z.number().nullable(),
+    clientId: z.number().nullable(),
     attributes: z.record(z.string(), z.union([z.string(), z.number()])),
   })),
   totalMatches: z.number(),
@@ -54,6 +55,8 @@ export function registerFindItems(server: McpServer, handle: TibiaDb): void {
         imbuement_slots_min: z.number().int().optional(),
         weight_max: z.number().optional().describe('In oz. Items without a weight never match.'),
         hands: z.enum(ITEM_HANDS).optional(),
+        client_ids: z.array(z.number().int().positive()).min(1).max(100).optional()
+          .describe('The item\'s client ID, any listed. Item variants can share one.'),
         include_inactive: z.boolean().default(false),
         sort: z.enum(ITEM_SORTS).default('title')
           .describe('weight ascends, value, armor, attack and defense descend, title is alphabetical.'),
@@ -121,6 +124,10 @@ export function registerFindItems(server: McpServer, handle: TibiaDb): void {
       if (args.imbuement_slots_min !== undefined) numeric('imbuement_slots', 'gte', args.imbuement_slots_min);
       if (args.weight_max !== undefined) bind('i.weight <= ?', args.weight_max);
       if (args.hands !== undefined) equals('hands', args.hands);
+      if (args.client_ids !== undefined) {
+        where.push(`i.client_id in (${args.client_ids.map(() => '?').join(', ')})`);
+        params.push(...args.client_ids);
+      }
       const status = statusClause('i', args.include_inactive);
       if (status) where.push(status);
 
@@ -145,6 +152,7 @@ export function registerFindItems(server: McpServer, handle: TibiaDb): void {
             itemType: str(row.item_type),
             weight: num(row.weight),
             valueBuy: num(row.value_buy),
+            clientId: num(row.client_id),
             attributes: bag,
           };
         }),

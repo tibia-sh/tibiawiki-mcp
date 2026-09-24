@@ -4,7 +4,7 @@ import { DB_PATH } from '@tibia.sh/tibiawiki-data';
 import { connect } from './harness.ts';
 import { coerceAttribute } from '../src/domain.ts';
 
-// Regression: item_attribute is TEXT and the five "numeric" attributes are not always
+// Regression: item_attribute is TEXT and the "numeric" attributes are not always
 // integers. Three active items carry a bonus suffix (Moonsilver Axe defense "33 +3").
 // Number() made those NaN, which the SDK-enforced outputSchema rejects, turning a
 // legitimate lookup - and an entire page of find_items - into an error.

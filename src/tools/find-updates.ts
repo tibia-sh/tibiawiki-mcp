@@ -2,7 +2,7 @@ import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/server';
 import type { TibiaDb } from '../db.ts';
 import { encodeCursor, decodeCursor } from '../cursor.ts';
-import { asciiLower } from '../domain.ts';
+import { asciiLower, likePattern } from '../domain.ts';
 
 const outputSchema = z.object({
   results: z.array(z.object({
@@ -64,13 +64,6 @@ export function excerpt(line: string, needle: string): string {
   if (end < trimmed.length && isHighSurrogate(trimmed.charCodeAt(end - 1))) end -= 1;
   return trimmed.slice(start, end).trim();
 }
-
-/**
- * The pattern for `lower(column) like ? escape '\'`: the folded text as a literal
- * substring, so LIKE's wildcards and the escape character match themselves.
- */
-export const likePattern = (text: string): string =>
-  `%${asciiLower(text).replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
 
 export function registerFindUpdates(server: McpServer, handle: TibiaDb): void {
   const { db, provenance } = handle;

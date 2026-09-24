@@ -205,6 +205,8 @@ test('every paged tool refuses a cursor offset past a safe integer', async () =>
     ['tibia_find_creatures', {}],
     ['tibia_find_items', {}],
     ['tibia_find_spells', {}],
+    ['tibia_find_quests', {}],
+    ['tibia_find_houses', {}],
     ['tibia_find_updates', {}],
   ] as const) {
     const res = await h.client.callTool({ name, arguments: { ...args, cursor: huge } });

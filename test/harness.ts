@@ -95,5 +95,10 @@ export async function connectTo(path: string) {
  *
  * If this is approached again, weigh trimming `tibia_get` (or splitting it) before
  * raising it further: the number is meant to force that conversation, not to slide.
+ *
+ * Raised from 40,000 to 48,000 on 2026-09-24, when the tools went from six to nine
+ * (spells, quests and houses) and `tools/list` measured 40,416 bytes. `tibia_get` is
+ * 23,329 of that, and its fourteen-member output schema alone is 21,597, still the
+ * largest part by far. It is the first thing to trim or split before any further raise.
  */
-export const TOOLS_LIST_BUDGET = 40_000;
+export const TOOLS_LIST_BUDGET = 48_000;

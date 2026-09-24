@@ -3,7 +3,8 @@ import assert from 'node:assert/strict';
 import { DatabaseSync } from 'node:sqlite';
 import { DB_PATH } from '@tibia.sh/tibiawiki-data';
 import type { Client } from '@modelcontextprotocol/client';
-import { excerpt, likePattern } from '../src/tools/find-updates.ts';
+import { likePattern } from '../src/domain.ts';
+import { excerpt } from '../src/tools/find-updates.ts';
 import { withRealIndex } from './harness.ts';
 
 /** The fold SQLite's lower() and NOCASE apply: ASCII letters only. */

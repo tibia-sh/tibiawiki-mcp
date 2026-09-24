@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { DatabaseSync } from 'node:sqlite';
 import {
   ELEMENTS, modifierColumn, WEAK_TO, RESISTANT_TO, entityTable,
-  creatureSort, itemSort, spellSort, vocationColumn, eavOperator, statusClause,
+  creatureSort, itemSort, spellSort, questSort, houseSort, vocationColumn, eavOperator, statusClause,
   ITEM_RESISTANCES, resistanceAttribute,
   DETAILED_CREATURE_FIELDS, DETAILED_ITEM_FIELDS,
 } from '../src/domain.ts';
@@ -31,12 +31,14 @@ test('the modifier convention is encoded once: >100 is weak, <100 is resistant',
 
 // Every string this module returns is interpolated into SQL. Each map must reject
 // an out-of-enum key rather than pass it through - one negative test per map.
-test('all eight SQL-fragment maps reject unknown keys', () => {
+test('all ten SQL-fragment maps reject unknown keys', () => {
   assert.throws(() => modifierColumn('lava' as never), /unknown element/i);
   assert.throws(() => entityTable('dragon' as never), /unknown entity type/i);
   assert.throws(() => creatureSort('rowid' as never), /unknown sort/i);
   assert.throws(() => itemSort('rowid' as never), /unknown sort/i);
   assert.throws(() => spellSort('rowid' as never), /unknown sort/i);
+  assert.throws(() => questSort('rowid' as never), /unknown sort/i);
+  assert.throws(() => houseSort('rowid' as never), /unknown sort/i);
   assert.throws(() => vocationColumn('mage' as never), /unknown vocation/i);
   assert.throws(() => eavOperator('drop' as never), /unknown operator/i);
   assert.throws(() => resistanceAttribute('healing' as never), /unknown element/i);
@@ -51,6 +53,8 @@ test('the maps also reject inherited prototype names', () => {
     assert.throws(() => creatureSort(evil as never), /unknown sort/i, `creatureSort(${evil})`);
     assert.throws(() => itemSort(evil as never), /unknown sort/i, `itemSort(${evil})`);
     assert.throws(() => spellSort(evil as never), /unknown sort/i, `spellSort(${evil})`);
+    assert.throws(() => questSort(evil as never), /unknown sort/i, `questSort(${evil})`);
+    assert.throws(() => houseSort(evil as never), /unknown sort/i, `houseSort(${evil})`);
     assert.throws(() => vocationColumn(evil as never), /unknown vocation/i, `vocationColumn(${evil})`);
     assert.throws(() => eavOperator(evil as never), /unknown operator/i, `eavOperator(${evil})`);
     assert.throws(() => modifierColumn(evil as never), /unknown element/i, `modifierColumn(${evil})`);

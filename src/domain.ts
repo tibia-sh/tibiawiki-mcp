@@ -190,6 +190,34 @@ export function spellSort(key: SpellSort): string {
   return SPELL_ORDER[key];
 }
 
+export const QUEST_SORTS = ['level_recommended', 'level_required', 'title'] as const;
+export type QuestSort = (typeof QUEST_SORTS)[number];
+const QUEST_ORDER: Record<QuestSort, string> = {
+  level_recommended: '(level_recommended is null), level_recommended asc, title asc',
+  level_required: '(level_required is null), level_required asc, title asc',
+  title: 'title asc',
+};
+export function questSort(key: QuestSort): string {
+  if (!Object.hasOwn(QUEST_ORDER, key)) {
+    throw new Error(`Unknown sort key: ${String(key)}`);
+  }
+  return QUEST_ORDER[key];
+}
+
+export const HOUSE_SORTS = ['rent', 'size', 'title'] as const;
+export type HouseSort = (typeof HOUSE_SORTS)[number];
+const HOUSE_ORDER: Record<HouseSort, string> = {
+  rent: '(rent is null), rent asc, title asc',
+  size: '(size is null), size desc, title asc',
+  title: 'title asc',
+};
+export function houseSort(key: HouseSort): string {
+  if (!Object.hasOwn(HOUSE_ORDER, key)) {
+    throw new Error(`Unknown sort key: ${String(key)}`);
+  }
+  return HOUSE_ORDER[key];
+}
+
 const EAV_OPERATORS = { gt: '>', gte: '>=', lte: '<=' } as const;
 export type EavOperator = keyof typeof EAV_OPERATORS;
 export function eavOperator(op: EavOperator): string {
@@ -204,6 +232,13 @@ export function eavOperator(op: EavOperator): string {
  * compared in JS matches or sorts exactly as the SQL would.
  */
 export const asciiLower = (s: string): string => s.replace(/[A-Z]/g, (c) => c.toLowerCase());
+
+/**
+ * The pattern for `lower(column) like ? escape '\'`: the folded text as a literal
+ * substring, so LIKE's wildcards and the escape character match themselves.
+ */
+export const likePattern = (text: string): string =>
+  `%${asciiLower(text).replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
 
 /**
  * Non-active rows are numerous (138 event, 45 unavailable, 39 deprecated creatures)

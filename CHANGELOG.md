@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.10.0](https://github.com/tibia-sh/tibiawiki-mcp/compare/v0.9.0...v0.10.0) (2026-09-24)
+
+
+### Features
+
+* add city and position to buyers ([972c8ad](https://github.com/tibia-sh/tibiawiki-mcp/commit/972c8adc0c58fbbbc48dfcf478baba6106918ab1))
+* estimate gold per kill ([eac9bb7](https://github.com/tibia-sh/tibiawiki-mcp/commit/eac9bb74108359b8d09bf4d41ca1ec95d19aa77a))
+* expose how creatures behave ([c59ff1a](https://github.com/tibia-sh/tibiawiki-mcp/commit/c59ff1adb7bf8aa8ba82cd86273d5db1107c3713))
+* expose item client IDs ([56a442c](https://github.com/tibia-sh/tibiawiki-mcp/commit/56a442c093c44a8293231129c73119564004f8b5))
+* find where to sell a list of items ([95fa26d](https://github.com/tibia-sh/tibiawiki-mcp/commit/95fa26d168ed051d4924eac0e2572936df372900))
+
+
+### Bug Fixes
+
+* match creature locations literally ([0841d1b](https://github.com/tibia-sh/tibiawiki-mcp/commit/0841d1bbd7fe409f69fff45f6d567fc1cd0216d7))
+* share creature field descriptions ([abc682f](https://github.com/tibia-sh/tibiawiki-mcp/commit/abc682f3841868be4c8f96f430d14639be11d9a8))
+
 ## [0.9.0](https://github.com/tibia-sh/tibiawiki-mcp/compare/v0.8.0...v0.9.0) (2026-09-24)
 
 

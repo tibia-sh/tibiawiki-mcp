@@ -5,7 +5,9 @@ import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import type { Client } from '@modelcontextprotocol/client';
 import { DB_PATH } from '@tibia.sh/tibiawiki-data';
-import { runsAtSchema, summonCostSchema, convinceCostSchema } from '../src/domain.ts';
+import {
+  runsAtSchema, summonCostSchema, convinceCostSchema, goldPerKillSchema,
+} from '../src/domain.ts';
 import { connect, connectTo, FIXTURE, tempDirs, withRealIndex } from './harness.ts';
 
 type Creature = {
@@ -13,6 +15,7 @@ type Creature = {
   bestiaryClass: string | null; modifiers: Record<string, number | null>;
   runsAt: number | null; seesInvisible: boolean | null; paralysable: boolean | null;
   pushable: boolean | null; summonCost: number | null; convinceCost: number | null;
+  goldPerKill: number | null;
 };
 type FindOut = { results: Creature[]; totalMatches: number; nextCursor?: string };
 
@@ -48,6 +51,58 @@ function fixtureTitles(where: string): string[] {
 }
 
 const titlesOf = (found: Creature[]): string[] => found.map((c) => c.title).sort();
+
+/** `tibia_get`'s goldPerKill for one creature. */
+async function getGold(client: Client, name: string): Promise<number | null> {
+  const res = await client.callTool({ name: 'tibia_get', arguments: { name } });
+  assert.notEqual(res.isError, true, JSON.stringify(res.content));
+  const detail = res.structuredContent as Record<string, unknown>;
+  assert.ok('goldPerKill' in detail, `tibia_get reports goldPerKill for ${name}`);
+  return detail.goldPerKill as number | null;
+}
+
+/**
+ * The gold-per-kill rule written independently of src/domain.ts: coins at face value, other
+ * items at the highest Gold Coin price an active NPC pays, each drop with a chance weighted by
+ * it and by its average amount. Null when the creature has no drop with a chance.
+ */
+function expectedGold(db: DatabaseSync, title: string): number | null {
+  const row = db.prepare(
+    `with coin(title, face) as (values ('Gold Coin', 1), ('Platinum Coin', 100), ('Crystal Coin', 10000))
+     select count(*) as drops, sum(d.chance / 100.0
+       * iif(d.min = 0, d.max, (d.min + d.max) / 2.0)
+       * coalesce(
+           (select face from coin where coin.title = i.title),
+           (select max(o.value) from npc_offer_buy o
+              join npc n on n.article_id = o.npc_id
+              join item cur on cur.article_id = o.currency_id
+             where o.item_id = d.item_id and n.status = 'active' and cur.title = 'Gold Coin'),
+           0)) as gold
+     from creature_drop d
+     join creature c on c.article_id = d.creature_id
+     join item i on i.article_id = d.item_id
+     where c.title = ? and d.chance is not null`,
+  ).get(title) as { drops: number; gold: number | null };
+  return row.drops === 0 ? null : Math.round(row.gold!);
+}
+
+/**
+ * Asserts the rows are in gold_per_kill order: highest first, ties by title, nulls last, and
+ * no creature twice. Returns them split into the priced and the null part.
+ */
+function assertGoldOrder(found: Creature[]): { priced: Creature[]; unpriced: Creature[] } {
+  assert.equal(new Set(found.map((c) => c.title)).size, found.length, 'no creature repeats');
+  const firstNull = found.findIndex((c) => c.goldPerKill === null);
+  const priced = firstNull === -1 ? found : found.slice(0, firstNull);
+  const unpriced = firstNull === -1 ? [] : found.slice(firstNull);
+  for (const c of unpriced) assert.equal(c.goldPerKill, null, `${c.title} sorts after the nulls began`);
+  for (let i = 1; i < priced.length; i++) {
+    const [a, b] = [priced[i - 1]!, priced[i]!];
+    assert.ok(a.goldPerKill! >= b.goldPerKill!, `${a.title} ${a.goldPerKill} before ${b.title} ${b.goldPerKill}`);
+    if (a.goldPerKill === b.goldPerKill) assert.ok(a.title < b.title, `${a.title} before ${b.title} on a tie`);
+  }
+  return { priced, unpriced };
+}
 
 test('finds creatures weak to an element above an experience floor', async () => {
   const h = await connect();
@@ -336,14 +391,180 @@ test('both tools describe what 0 means in the same words, and name unrecorded le
     const get = JSON.stringify(tool('tibia_get').outputSchema);
     for (const [field, schema] of [
       ['runsAt', runsAtSchema], ['summonCost', summonCostSchema], ['convinceCost', convinceCostSchema],
+      ['goldPerKill', goldPerKillSchema],
     ] as const) {
       assert.ok(schema.description, `${field} has a description`);
       assert.equal(row[field].description, schema.description, `tibia_find_creatures ${field}`);
       assert.ok(get.includes(JSON.stringify(schema.description)), `tibia_get ${field}`);
     }
     assert.equal(runsAtSchema.description, 'Hit points at which it flees. 0: never flees.');
+    assert.match(goldPerKillSchema.description!, /NPC prices/);
+    assert.match(goldPerKillSchema.description!, /without a recorded chance/);
+    assert.match(goldPerKillSchema.description!, /market/);
+    const sort = (find.inputSchema as any).properties.sort.description as string;
+    assert.match(sort, /gold_per_kill/);
+    assert.match(sort, /highest first/);
     const level = (find.inputSchema as any).properties.bestiary_level.description as string;
     assert.match(level, /no recorded bestiary level are excluded/);
+  } finally {
+    await h.close();
+  }
+});
+
+test('goldPerKill for Dragon and Dragon Lord matches the rule, in both tools', () =>
+  withRealIndex(async (client) => {
+    const db = new DatabaseSync(DB_PATH, { readOnly: true });
+    try {
+      const found = await findAll(client, { bestiary_class: 'Dragon' });
+      for (const title of ['Dragon', 'Dragon Lord']) {
+        const expected = expectedGold(db, title);
+        assert.ok(expected !== null && expected > 0, `guard: ${title} has priced drops, got ${expected}`);
+        const row = found.find((c) => c.title === title);
+        assert.ok(row, `guard: ${title} is found`);
+        assert.equal(row.goldPerKill, expected, `tibia_find_creatures ${title}`);
+        assert.equal(await getGold(client, title), expected, `tibia_get ${title}`);
+      }
+    } finally {
+      db.close();
+    }
+  }));
+
+test('goldPerKill is null without a chanced drop and 0 when no drop is priced', () =>
+  withRealIndex(async (client) => {
+    const db = new DatabaseSync(DB_PATH, { readOnly: true });
+    try {
+      // Has drops, and not one of them has a recorded chance.
+      const noChance = db.prepare(
+        `select c.title from creature c join creature_drop d on d.creature_id = c.article_id
+          where c.status = 'active' group by c.article_id
+         having count(d.chance) = 0 order by c.title limit 1`).get() as { title: string } | undefined;
+      // Has drops with a chance, none of them a coin or bought for Gold Coins by an active NPC.
+      const unpriced = db.prepare(
+        `select c.title from creature c
+           join creature_drop d on d.creature_id = c.article_id and d.chance is not null
+           join item i on i.article_id = d.item_id
+          where c.status = 'active' group by c.article_id
+         having sum(i.title in ('Gold Coin', 'Platinum Coin', 'Crystal Coin') or exists (
+           select 1 from npc_offer_buy o join npc n on n.article_id = o.npc_id
+             join item cur on cur.article_id = o.currency_id
+            where o.item_id = d.item_id and n.status = 'active' and cur.title = 'Gold Coin')) = 0
+          order by c.title limit 1`).get() as { title: string } | undefined;
+      assert.ok(noChance, 'guard: some creature has drops but no chance on any');
+      assert.ok(unpriced, 'guard: some creature has chanced drops that no one buys for gold');
+      assert.equal(expectedGold(db, noChance.title), null);
+      assert.equal(expectedGold(db, unpriced.title), 0);
+
+      assert.equal(await getGold(client, noChance.title), null, `tibia_get ${noChance.title}`);
+      assert.equal(await getGold(client, unpriced.title), 0, `tibia_get ${unpriced.title}`);
+      const all = await findAll(client, { sort: 'gold_per_kill' });
+      const { priced, unpriced: nulls } = assertGoldOrder(all);
+      assert.ok(nulls.some((c) => c.title === noChance.title), `${noChance.title} sorts with the nulls`);
+      assert.ok(priced.some((c) => c.title === unpriced.title && c.goldPerKill === 0),
+        `${unpriced.title} is 0, among the priced`);
+    } finally {
+      db.close();
+    }
+  }));
+
+test('sort gold_per_kill pages highest first, nulls last, with no repeats', async () => {
+  const h = await connect();
+  try {
+    for (const args of [{}, { is_boss: false }, { weak_to: ['holy'] }]) {
+      const pages: Creature[] = [];
+      let cursor: string | undefined;
+      let total = 0;
+      do {
+        const page = await find(h.client, { ...args, sort: 'gold_per_kill', limit: 7, ...(cursor ? { cursor } : {}) });
+        pages.push(...page.results);
+        total = page.totalMatches;
+        cursor = page.nextCursor;
+      } while (cursor);
+      assert.equal(pages.length, total, `${JSON.stringify(args)} walks every match`);
+      assert.ok(total > 7, `guard: ${JSON.stringify(args)} spans pages`);
+      const { priced, unpriced } = assertGoldOrder(pages);
+      assert.ok(priced.length > 0, `guard: ${JSON.stringify(args)} has priced creatures`);
+      if (Object.keys(args).length === 0) assert.ok(unpriced.length > 0, 'guard: some creature has no gold value');
+      // The same creatures as the default sort, so the join neither drops nor adds a row.
+      assert.deepEqual(titlesOf(pages), titlesOf(await findAll(h.client, args)), JSON.stringify(args));
+    }
+  } finally {
+    await h.close();
+  }
+});
+
+test('an item bought only by an inactive NPC adds nothing, and duplicate offers change nothing', async () => {
+  // The Plasmother always drops one The Plasmother's Remains, which only Yasir buys, and he
+  // is an event NPC. In the fixture every gold buyer of it is inactive.
+  const fixture = new DatabaseSync(FIXTURE, { readOnly: true });
+  const buyers = fixture.prepare(
+    `select n.status, o.value from npc_offer_buy o join npc n on n.article_id = o.npc_id
+      join item i on i.article_id = o.item_id where i.title = 'The Plasmother''s Remains'`).all();
+  const drop = fixture.prepare(
+    `select d.chance, d.min, d.max from creature_drop d join creature c on c.article_id = d.creature_id
+      join item i on i.article_id = d.item_id
+      where c.title = 'The Plasmother' and i.title = 'The Plasmother''s Remains'`).get();
+  const before = expectedGold(fixture, 'The Plasmother');
+  fixture.close();
+  assert.deepEqual(buyers.map((b) => ({ ...b })), [{ status: 'event', value: 50000 }], 'guard: only Yasir buys it');
+  assert.deepEqual({ ...drop }, { chance: 100, min: 0, max: 1 }, 'guard: always one, stored as 0-1');
+  assert.ok(before !== null, 'guard: The Plasmother has chanced drops');
+
+  const h = await connect();
+  try {
+    assert.equal(await getGold(h.client, 'The Plasmother'), before, 'the inactive buyer is left out');
+  } finally {
+    await h.close();
+  }
+
+  // The same index with Yasir active and every offer stored twice: his 50,000 now counts,
+  // once, for the one item a 0-1 drop gives.
+  const path = join(scratch(), 'gold.db');
+  copyFileSync(FIXTURE, path);
+  const db = new DatabaseSync(path);
+  try {
+    db.exec(`update npc set status = 'active' where title = 'Yasir';
+      insert into npc_offer_buy select * from npc_offer_buy;`);
+  } finally {
+    db.close();
+  }
+  const flipped = await connectTo(path);
+  try {
+    assert.equal(await getGold(flipped.client, 'The Plasmother'), before + 50000);
+    const dragon = (await findAll(flipped.client, { bestiary_class: 'Dragon' })).find((c) => c.title === 'Dragon');
+    const fixtureDb = new DatabaseSync(FIXTURE, { readOnly: true });
+    try {
+      assert.equal(dragon?.goldPerKill, expectedGold(fixtureDb, 'Dragon'), 'duplicate offers leave Dragon as it was');
+    } finally {
+      fixtureDb.close();
+    }
+  } finally {
+    await flipped.close();
+  }
+});
+
+test('a 1-104 drop counts its midpoint', async () => {
+  // Dragon's Gold Coin drop is stored as 1-104. Alone at a 70% chance it is worth
+  // 0.7 x 52.5 = 36.75, so 37. Reading it as its maximum would give 73, and integer
+  // division of the midpoint 36.
+  const path = join(scratch(), 'midpoint.db');
+  copyFileSync(FIXTURE, path);
+  const db = new DatabaseSync(path);
+  try {
+    const coin = db.prepare(
+      `select d.min, d.max from creature_drop d join creature c on c.article_id = d.creature_id
+        join item i on i.article_id = d.item_id where c.title = 'Dragon' and i.title = 'Gold Coin'`).get();
+    assert.deepEqual({ ...coin }, { min: 1, max: 104 }, 'guard: Dragon drops 1-104 Gold Coins');
+    db.exec(`delete from creature_drop
+      where creature_id = (select article_id from creature where title = 'Dragon')
+        and item_id != (select article_id from item where title = 'Gold Coin');
+      update creature_drop set chance = 70
+      where creature_id = (select article_id from creature where title = 'Dragon')`);
+  } finally {
+    db.close();
+  }
+  const h = await connectTo(path);
+  try {
+    assert.equal(await getGold(h.client, 'Dragon'), 37);
   } finally {
     await h.close();
   }

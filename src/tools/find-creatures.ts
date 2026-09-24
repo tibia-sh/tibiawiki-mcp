@@ -4,7 +4,7 @@ import { str, num, bool, type TibiaDb } from '../db.ts';
 import {
   ELEMENTS, elementSchema, modifierColumn, WEAK_TO, RESISTANT_TO,
   CREATURE_BESTIARY_LEVELS, CREATURE_SORTS, creatureSort, statusClause, hitpointsExpr, likePattern,
-  runsAtSchema, summonCostSchema, convinceCostSchema,
+  runsAtSchema, summonCostSchema, convinceCostSchema, GOLD_PER_KILL, goldPerKillSchema,
 } from '../domain.ts';
 import { encodeCursor, decodeCursor } from '../cursor.ts';
 
@@ -22,6 +22,7 @@ const outputSchema = z.object({
     pushable: z.boolean().nullable(),
     summonCost: summonCostSchema,
     convinceCost: convinceCostSchema,
+    goldPerKill: goldPerKillSchema,
   })),
   totalMatches: z.number(),
   nextCursor: z.string().optional(),
@@ -63,7 +64,8 @@ export function registerFindCreatures(server: McpServer, handle: TibiaDb): void 
           .describe('Creatures with no recorded bestiary level are excluded from this filter.'),
         location_contains: z.string().optional().describe('Substring of the location text.'),
         include_inactive: z.boolean().default(false),
-        sort: z.enum(CREATURE_SORTS).default('experience'),
+        sort: z.enum(CREATURE_SORTS).default('experience')
+          .describe('experience, hitpoints and gold_per_kill: highest first.'),
         limit: z.number().int().min(1).max(100).default(25),
         cursor: z.string().optional(),
       }),
@@ -115,9 +117,13 @@ export function registerFindCreatures(server: McpServer, handle: TibiaDb): void 
       const clause = where.length ? `where ${where.join(' and ')}` : '';
       const total = db.prepare(`select count(*) c from creature c ${clause}`).get(...params) as
         { c: number };
+      // One pass of the gold aggregate serves both the output field and its sort.
       const rows = db
         .prepare(
-          `select c.* from creature c ${clause} order by ${creatureSort(args.sort)} limit ? offset ?`,
+          `with gold as (${GOLD_PER_KILL})
+           select c.*, gold.gold_per_kill from creature c
+             left join gold on gold.creature_id = c.article_id
+           ${clause} order by ${creatureSort(args.sort)} limit ? offset ?`,
         )
         .all(...params, args.limit, offset);
 
@@ -141,6 +147,7 @@ export function registerFindCreatures(server: McpServer, handle: TibiaDb): void 
           pushable: bool(row.pushable),
           summonCost: num(row.summon_cost),
           convinceCost: num(row.convince_cost),
+          goldPerKill: num(row.gold_per_kill),
         })),
         totalMatches: total.c,
         ...(offset + args.limit < total.c ? { nextCursor: encodeCursor(offset + args.limit) } : {}),

@@ -6,7 +6,7 @@ import {
   ELEMENTS, ENTITY_TYPES, entityTypeSchema, entityTable, entityHasStatus, statusClause,
   verbositySchema, SPELL_VOCATIONS, QUEST_REWARDS,
   DETAILED_CREATURE_FIELDS, DETAILED_ITEM_FIELDS, coerceAttribute, type EntityType,
-  runsAtSchema, summonCostSchema, convinceCostSchema,
+  runsAtSchema, summonCostSchema, convinceCostSchema, GOLD_PER_KILL, goldPerKillSchema,
 } from '../domain.ts';
 
 type Row = Record<string, unknown>;
@@ -59,6 +59,7 @@ const creatureOut = z.object({
   illusionable: z.boolean().nullable(),
   summonCost: summonCostSchema,
   convinceCost: convinceCostSchema,
+  goldPerKill: goldPerKillSchema,
   modifiers: z.record(z.string(), z.number().nullable()),
   loot: z.array(z.object({
     item: z.string(),
@@ -398,6 +399,7 @@ export function registerGet(server: McpServer, handle: TibiaDb): void {
     `select file_name, url, description_url, width, height, mime_type
        from mcp_image where entity_type = ? and article_id = ?`);
   const maxDamage = db.prepare('select * from creature_max_damage where creature_id = ?');
+  const goldPerKill = db.prepare(`select gold_per_kill from (${GOLD_PER_KILL}) where creature_id = ?`);
   const creatureSounds = db.prepare(
     'select content from creature_sound where creature_id = ? order by content asc');
   const itemKeys = db.prepare(
@@ -518,6 +520,7 @@ export function registerGet(server: McpServer, handle: TibiaDb): void {
           paralysable: bool(row.paralysable), pushable: bool(row.pushable),
           pushObjects: bool(row.push_objects), illusionable: bool(row.illusionable),
           summonCost: num(row.summon_cost), convinceCost: num(row.convince_cost),
+          goldPerKill: num(goldPerKill.get(row.article_id as number)?.gold_per_kill),
           modifiers: Object.fromEntries(ELEMENTS.map((e) => [e, num(row[`modifier_${e}`])])),
           loot: drops.all(row.article_id as number).map((d) => ({
             item: String(d.item), chance: num(d.chance), min: num(d.lo), max: num(d.hi),

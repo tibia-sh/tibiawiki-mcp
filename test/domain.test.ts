@@ -5,7 +5,7 @@ import {
   ELEMENTS, modifierColumn, WEAK_TO, RESISTANT_TO, entityTable,
   creatureSort, itemSort, spellSort, questSort, houseSort, vocationColumn, eavOperator, statusClause,
   ITEM_RESISTANCES, resistanceAttribute,
-  DETAILED_CREATURE_FIELDS, DETAILED_ITEM_FIELDS,
+  DETAILED_CREATURE_FIELDS, DETAILED_ITEM_FIELDS, BEST_GOLD_PRICE,
 } from '../src/domain.ts';
 import { encodeCursor, decodeCursor } from '../src/cursor.ts';
 
@@ -112,4 +112,36 @@ test('every detailed field names a column that actually exists', () => {
     assert.ok(item.has(f), `item.${f} does not exist`);
   }
   db.close();
+});
+
+test('BEST_GOLD_PRICE names one active Gold Coin buyer per item, ties by NPC title', () => {
+  const db = new DatabaseSync(FIXTURE, { readOnly: true });
+  try {
+    const rows = db.prepare(
+      `select i.title as item, n.title as npc, b.price from (${BEST_GOLD_PRICE}) b
+         join item i on i.article_id = b.item_id join npc n on n.article_id = b.npc_id`,
+    ).all() as Array<{ item: string; npc: string; price: number }>;
+    assert.equal(new Set(rows.map((r) => r.item)).size, rows.length, 'one row per item');
+    // Written apart from the definition: the highest active Gold Coin offer per item.
+    const best = db.prepare(
+      `select i.title as item, max(o.value) as price from npc_offer_buy o
+         join npc n on n.article_id = o.npc_id join item i on i.article_id = o.item_id
+         join item cur on cur.article_id = o.currency_id
+        where n.status = 'active' and cur.title = 'Gold Coin' group by o.item_id`,
+    ).all() as Array<{ item: string; price: number }>;
+    assert.ok(best.length > 0, 'guard: the fixture holds active Gold Coin offers');
+    assert.deepEqual(
+      Object.fromEntries(rows.map((r) => [r.item, r.price])),
+      Object.fromEntries(best.map((r) => [r.item, r.price])),
+    );
+    // Inigo and Grizzly Adams both pay 55 for a Cyclops Toe, and Yasir, an event NPC, too.
+    assert.deepEqual(
+      rows.filter((r) => r.item === 'Cyclops Toe').map((r) => ({ ...r })),
+      [{ item: 'Cyclops Toe', npc: 'Grizzly Adams', price: 55 }],
+    );
+    // Only Yasir buys it.
+    assert.ok(!rows.some((r) => r.item === "The Plasmother's Remains"), 'an inactive buyer is no buyer');
+  } finally {
+    db.close();
+  }
 });

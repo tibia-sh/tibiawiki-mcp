@@ -1,6 +1,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { connect } from './harness.ts';
+import { DatabaseSync } from 'node:sqlite';
+import type { Client } from '@modelcontextprotocol/client';
+import { DB_PATH } from '@tibia.sh/tibiawiki-data';
+import { asciiLower } from '../src/domain.ts';
+import { connect, withRealIndex } from './harness.ts';
 
 type SearchOut = {
   results: Array<{ title: string; type: string }>;
@@ -80,8 +84,6 @@ test('a malformed cursor is reported, not silently treated as page one', async (
 
 type ListOut = SearchOut & { totalMatches: number };
 
-const asciiLower = (s: string): string => s.replace(/[A-Z]/g, (c) => c.toLowerCase());
-
 test('tibia_search with types and no query lists every page of them in title order', async () => {
   const h = await connect();
   try {
@@ -126,6 +128,65 @@ test('tibia_search counts a type listed twice once', async () => {
     const data = res.structuredContent as ListOut;
     assert.equal(data.totalMatches, 2);
     assert.deepEqual(data.results.map((r) => r.title), ['Adrenaline Burst', 'Bless']);
+  } finally {
+    await h.close();
+  }
+});
+
+/** Every page of a tibia_search call, walked through nextCursor. */
+async function searchAll(client: Client, args: Record<string, unknown>): Promise<SearchOut['results']> {
+  const all: SearchOut['results'] = [];
+  let cursor: string | undefined;
+  do {
+    const res = await client.callTool({
+      name: 'tibia_search', arguments: { ...args, ...(cursor ? { cursor } : {}) },
+    });
+    assert.notEqual(res.isError, true, JSON.stringify(res.content));
+    const data = res.structuredContent as ListOut;
+    all.push(...data.results);
+    cursor = data.nextCursor;
+  } while (cursor);
+  return all;
+}
+
+test('tibia_search lists two types merged in title order across page boundaries', async () => {
+  await withRealIndex(async (client) => {
+    const small = await searchAll(client, { types: ['mount', 'outfit'], limit: 7 });
+    const large = await searchAll(client, { types: ['mount', 'outfit'], limit: 100 });
+    assert.deepEqual(small, large, 'the page size does not change the order');
+    const keys = small.map((r) => `${r.type}:${r.title}`);
+    assert.equal(new Set(keys).size, keys.length, 'no (type, title) pair repeats');
+    const db = new DatabaseSync(DB_PATH, { readOnly: true });
+    try {
+      const expected = (db.prepare(
+        `select 'mount' type, title from mount where status = 'active'
+         union all select 'outfit', title from outfit where status = 'active'`,
+      ).all() as Array<{ type: string; title: string }>).map((r) => `${r.type}:${r.title}`);
+      assert.deepEqual([...keys].sort(), expected.sort(), 'no pair goes missing');
+    } finally {
+      db.close();
+    }
+    let switches = 0;
+    for (let i = 1; i < small.length; i++) {
+      const [a, b] = [small[i - 1]!, small[i]!];
+      assert.ok(asciiLower(a.title) <= asciiLower(b.title), `${a.title} before ${b.title}`);
+      if (a.type !== b.type) switches++;
+    }
+    assert.ok(switches > 1, 'guard: the two types interleave, so the merge is tested');
+  });
+});
+
+test('tibia_search with a query counts a type listed twice once', async () => {
+  const h = await connect();
+  try {
+    const call = async (types: string[]) => (await h.client.callTool({
+      name: 'tibia_search', arguments: { query: 'e', types },
+    })).structuredContent as ListOut;
+    const once = await call(['charm']);
+    const twice = await call(['charm', 'charm']);
+    assert.ok(once.totalMatches > 0, 'guard: the query matches a charm');
+    assert.equal(twice.totalMatches, once.totalMatches);
+    assert.deepEqual(twice.results, once.results);
   } finally {
     await h.close();
   }

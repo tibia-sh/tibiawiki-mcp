@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.9.0](https://github.com/tibia-sh/tibiawiki-mcp/compare/v0.8.0...v0.9.0) (2026-09-24)
+
+
+### Features
+
+* filter items by mana drain and critical hits ([593c493](https://github.com/tibia-sh/tibiawiki-mcp/commit/593c493d69df7b02058f46277845aa4d807904f0))
+
 ## [0.8.0](https://github.com/tibia-sh/tibiawiki-mcp/compare/v0.7.0...v0.8.0) (2026-09-24)
 
 

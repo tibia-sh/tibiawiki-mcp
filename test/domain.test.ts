@@ -4,6 +4,7 @@ import { DatabaseSync } from 'node:sqlite';
 import {
   ELEMENTS, modifierColumn, WEAK_TO, RESISTANT_TO, entityTable,
   creatureSort, itemSort, spellSort, vocationColumn, eavOperator, statusClause,
+  ITEM_RESISTANCES, resistanceAttribute,
   DETAILED_CREATURE_FIELDS, DETAILED_ITEM_FIELDS,
 } from '../src/domain.ts';
 import { encodeCursor, decodeCursor } from '../src/cursor.ts';
@@ -16,6 +17,13 @@ test('every element maps to its modifier column', () => {
   assert.equal(modifierColumn('lifedrain'), 'modifier_lifedrain');
 });
 
+test('items resist every element but healing, under the wiki attribute names', () => {
+  assert.deepEqual([...ITEM_RESISTANCES], ELEMENTS.filter((e) => e !== 'healing'));
+  assert.equal(resistanceAttribute('fire'), 'resistance_fire');
+  assert.equal(resistanceAttribute('lifedrain'), 'resistance_life_drain');
+  assert.equal(resistanceAttribute('drown'), 'resistance_drowning');
+});
+
 test('the modifier convention is encoded once: >100 is weak, <100 is resistant', () => {
   assert.equal(WEAK_TO('modifier_fire'), 'modifier_fire > 100');
   assert.equal(RESISTANT_TO('modifier_fire'), 'modifier_fire < 100');
@@ -23,7 +31,7 @@ test('the modifier convention is encoded once: >100 is weak, <100 is resistant',
 
 // Every string this module returns is interpolated into SQL. Each map must reject
 // an out-of-enum key rather than pass it through - one negative test per map.
-test('all seven SQL-fragment maps reject unknown keys', () => {
+test('all eight SQL-fragment maps reject unknown keys', () => {
   assert.throws(() => modifierColumn('lava' as never), /unknown element/i);
   assert.throws(() => entityTable('dragon' as never), /unknown entity type/i);
   assert.throws(() => creatureSort('rowid' as never), /unknown sort/i);
@@ -31,6 +39,7 @@ test('all seven SQL-fragment maps reject unknown keys', () => {
   assert.throws(() => spellSort('rowid' as never), /unknown sort/i);
   assert.throws(() => vocationColumn('mage' as never), /unknown vocation/i);
   assert.throws(() => eavOperator('drop' as never), /unknown operator/i);
+  assert.throws(() => resistanceAttribute('healing' as never), /unknown element/i);
 });
 
 test('the maps also reject inherited prototype names', () => {
@@ -45,6 +54,7 @@ test('the maps also reject inherited prototype names', () => {
     assert.throws(() => vocationColumn(evil as never), /unknown vocation/i, `vocationColumn(${evil})`);
     assert.throws(() => eavOperator(evil as never), /unknown operator/i, `eavOperator(${evil})`);
     assert.throws(() => modifierColumn(evil as never), /unknown element/i, `modifierColumn(${evil})`);
+    assert.throws(() => resistanceAttribute(evil as never), /unknown element/i, `resistanceAttribute(${evil})`);
   }
 });
 

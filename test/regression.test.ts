@@ -15,6 +15,13 @@ test('coerceAttribute keeps a non-integer stat as its raw string', () => {
   assert.ok(!Number.isNaN(coerceAttribute('defense', '33 +3') as number));
 });
 
+test('coerceAttribute reads a signed resistance or skill bonus as a number', () => {
+  assert.equal(coerceAttribute('resistance_fire', '-8'), -8);
+  assert.equal(coerceAttribute('resistance_life_drain', '20'), 20);
+  assert.equal(coerceAttribute('magic_level', '+2'), 2);
+  assert.equal(coerceAttribute('shielding', '-10'), -10);
+});
+
 test('tibia_get survives an item whose defense has a bonus suffix', async () => {
   const h = await connect();
   const res = await h.client.callTool({

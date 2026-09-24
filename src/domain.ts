@@ -271,27 +271,28 @@ export const DETAILED_CREATURE_FIELDS = [
 export const DETAILED_ITEM_FIELDS = ['flavor_text'] as const;
 
 /**
- * Item stats live in `item_attribute` as TEXT, and the five "numeric" ones are not
- * always integers: three active items carry a bonus suffix, e.g. Moonsilver Axe has
+ * Item stats live in `item_attribute` as TEXT, and the "numeric" ones are not always
+ * integers: three active items carry a bonus suffix, e.g. Moonsilver Axe has
  * `defense = "33 +3"`. `Number()` turns those into NaN, which the tools' outputSchema
  * rejects, failing the whole call. So coercion is best-effort: a clean integer becomes
  * a number, anything else is returned verbatim, which is also more informative.
+ * Resistances and skill bonuses are signed, "-8" or "+2", and `Number()` reads the sign.
  *
  * SQL filtering is unaffected and stays consistent - SQLite's
  * `cast('33 +3' as integer)` is 33, so `defense_min: 33` still matches.
  */
-export const NUMERIC_ATTRS = [
+export const NUMERIC_ATTRS: readonly string[] = [
   'attack', 'defense', 'armor', 'required_level', 'imbuement_slots',
-] as const;
+  ...Object.values(RESISTANCE_ATTRS), ...ITEM_SKILLS,
+];
 
 export const REPORTED_ATTRS: ReadonlySet<string> = new Set<string>([
   ...NUMERIC_ATTRS, 'required_vocation', 'weapon_type', 'hands',
-  ...Object.values(RESISTANCE_ATTRS), ...ITEM_SKILLS,
 ]);
 
 export function coerceAttribute(name: string, value: unknown): string | number {
   const raw = String(value);
-  if (!(NUMERIC_ATTRS as readonly string[]).includes(name)) return raw;
+  if (!NUMERIC_ATTRS.includes(name)) return raw;
   const n = Number(raw);
   return Number.isFinite(n) ? n : raw;
 }

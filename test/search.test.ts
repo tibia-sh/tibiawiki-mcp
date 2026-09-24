@@ -77,3 +77,95 @@ test('a malformed cursor is reported, not silently treated as page one', async (
   assert.equal(res.isError, true);
   await h.close();
 });
+
+type ListOut = SearchOut & { totalMatches: number };
+
+const asciiLower = (s: string): string => s.replace(/[A-Z]/g, (c) => c.toLowerCase());
+
+test('tibia_search with types and no query lists every page of them in title order', async () => {
+  const h = await connect();
+  try {
+    const titles: string[] = [];
+    let cursor: string | undefined;
+    do {
+      const res = await h.client.callTool({
+        name: 'tibia_search',
+        arguments: { types: ['spell'], include_inactive: true, limit: 100, ...(cursor ? { cursor } : {}) },
+      });
+      const data = res.structuredContent as ListOut;
+      assert.equal(data.totalMatches, 211);
+      assert.ok(data.results.every((r) => r.type === 'spell'));
+      titles.push(...data.results.map((r) => r.title));
+      cursor = data.nextCursor;
+    } while (cursor);
+    assert.equal(titles.length, 211);
+    assert.equal(new Set(titles).size, 211, 'no page repeats a spell');
+    for (let i = 1; i < titles.length; i++) {
+      const [a, b] = [titles[i - 1]!, titles[i]!];
+      assert.ok(asciiLower(a) <= asciiLower(b), `${a} before ${b}`);
+    }
+  } finally {
+    await h.close();
+  }
+});
+
+test('tibia_search with types and no query still leaves out inactive pages by default', async () => {
+  const h = await connect();
+  try {
+    const res = await h.client.callTool({ name: 'tibia_search', arguments: { types: ['spell'] } });
+    assert.equal((res.structuredContent as ListOut).totalMatches, 195);
+  } finally {
+    await h.close();
+  }
+});
+
+test('tibia_search counts a type listed twice once', async () => {
+  const h = await connect();
+  try {
+    const res = await h.client.callTool({ name: 'tibia_search', arguments: { types: ['charm', 'charm'] } });
+    const data = res.structuredContent as ListOut;
+    assert.equal(data.totalMatches, 2);
+    assert.deepEqual(data.results.map((r) => r.title), ['Adrenaline Burst', 'Bless']);
+  } finally {
+    await h.close();
+  }
+});
+
+test('tibia_search with neither a query nor types asks for one', async () => {
+  const h = await connect();
+  try {
+    for (const args of [{}, { types: [] }]) {
+      const res = await h.client.callTool({ name: 'tibia_search', arguments: args });
+      assert.equal(res.isError, true, JSON.stringify(args));
+      const text = JSON.stringify(res.content);
+      assert.match(text, /name fragment/i, text);
+      assert.match(text, /types/, text);
+    }
+  } finally {
+    await h.close();
+  }
+});
+
+test('tibia_search rejects an empty query as a schema error', async () => {
+  const h = await connect();
+  try {
+    const res = await h.client.callTool({ name: 'tibia_search', arguments: { query: '', types: ['spell'] } });
+    assert.equal(res.isError, true);
+    assert.match(JSON.stringify(res.content), /validation/i, JSON.stringify(res.content));
+  } finally {
+    await h.close();
+  }
+});
+
+test('tibia_search describes both orders and the listing example', async () => {
+  const h = await connect();
+  try {
+    const { tools } = await h.client.listTools();
+    const description = tools.find((t) => t.name === 'tibia_search')!.description!;
+    assert.match(description, /shortest/i);
+    assert.match(description, /by title|title order/i);
+    assert.match(description, /list every mount/);
+  } finally {
+    await h.close();
+  }
+});

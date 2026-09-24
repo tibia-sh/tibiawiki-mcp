@@ -27,13 +27,15 @@ export const WEAK_TO = (column: string): string => `${column} > 100`;
 export const RESISTANT_TO = (column: string): string => `${column} < 100`;
 
 /**
- * The elements an item can resist: every element but healing, which no item resists.
- * An item's resistance is a percentage in `item_attribute`, where above 0 protects and
- * below 0 is a weakness. Two elements go by other names there.
+ * What an item can resist: every element but healing, which no item resists, plus mana
+ * drain and critical hits, which are no creature element. An item's resistance is a
+ * percentage in `item_attribute`, where above 0 protects and below 0 is a weakness.
+ * Four go by other names there.
  */
 export const ITEM_RESISTANCES = [
   'physical', 'earth', 'fire', 'ice', 'energy', 'death', 'holy', 'drown', 'lifedrain',
-] as const satisfies readonly Element[];
+  'manadrain', 'critical_hit',
+] as const;
 export type ItemResistance = (typeof ITEM_RESISTANCES)[number];
 const RESISTANCE_ATTRS: Record<ItemResistance, string> = {
   physical: 'resistance_physical',
@@ -45,6 +47,8 @@ const RESISTANCE_ATTRS: Record<ItemResistance, string> = {
   holy: 'resistance_holy',
   drown: 'resistance_drowning',
   lifedrain: 'resistance_life_drain',
+  manadrain: 'resistance_mana_drain',
+  critical_hit: 'resistance_critical_hit_chance',
 };
 export function resistanceAttribute(element: ItemResistance): string {
   if (!Object.hasOwn(RESISTANCE_ATTRS, element)) {

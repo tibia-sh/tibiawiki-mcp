@@ -48,7 +48,7 @@ export function registerFindItems(server: McpServer, handle: TibiaDb): void {
         armor_min: z.number().int().optional(),
         required_level_max: z.number().int().optional(),
         resistant_to: z.array(z.enum(ITEM_RESISTANCES)).optional()
-          .describe('Resists every listed element (resistance above 0).'),
+          .describe('Resists everything listed (resistance above 0).'),
         skill_bonus: z.array(z.enum(ITEM_SKILLS)).optional()
           .describe('Raises every listed skill.'),
         imbuement_slots_min: z.number().int().optional(),

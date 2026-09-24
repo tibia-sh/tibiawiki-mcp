@@ -17,9 +17,14 @@ test('every element maps to its modifier column', () => {
   assert.equal(modifierColumn('lifedrain'), 'modifier_lifedrain');
 });
 
-test('items resist every element but healing, under the wiki attribute names', () => {
-  assert.deepEqual([...ITEM_RESISTANCES], ELEMENTS.filter((e) => e !== 'healing'));
+test('items resist every element but healing, mana drain and critical hits, under the wiki names', () => {
+  assert.deepEqual(
+    [...ITEM_RESISTANCES],
+    [...ELEMENTS.filter((e) => e !== 'healing'), 'manadrain', 'critical_hit'],
+  );
   assert.equal(resistanceAttribute('fire'), 'resistance_fire');
+  assert.equal(resistanceAttribute('manadrain'), 'resistance_mana_drain');
+  assert.equal(resistanceAttribute('critical_hit'), 'resistance_critical_hit_chance');
   assert.equal(resistanceAttribute('lifedrain'), 'resistance_life_drain');
   assert.equal(resistanceAttribute('drown'), 'resistance_drowning');
 });

@@ -7,6 +7,7 @@ import {
   verbositySchema, SPELL_VOCATIONS, QUEST_REWARDS,
   DETAILED_CREATURE_FIELDS, DETAILED_ITEM_FIELDS, coerceAttribute, type EntityType,
   runsAtSchema, summonCostSchema, convinceCostSchema, GOLD_PER_KILL, goldPerKillSchema,
+  positionSchema, RASHID, RASHID_SCHEDULE, rashidScheduleSchema, rashidScheduleDay, buyerPlace,
 } from '../domain.ts';
 
 type Row = Record<string, unknown>;
@@ -111,7 +112,10 @@ const itemOut = z.object({
   proficiencyPerks: z.array(z.object({
     level: z.number().nullable(), effect: z.string().nullable(), skill: z.string().nullable(),
   })),
-  boughtBy: z.array(z.object({ npc: z.string(), price: z.number(), currency: z.string() })),
+  boughtBy: z.array(z.object({
+    npc: z.string(), price: z.number(), currency: z.string(),
+    city: z.string().nullable(), position: positionSchema,
+  })),
   sounds: z.array(z.string()),
   detail, source: sourceSchema,
 });
@@ -123,23 +127,15 @@ const npcOut = z.object({
   city: z.string().nullable(),
   subarea: z.string().nullable(),
   location: z.string().nullable(),
-  position: z.object({
-    x: z.number().nullable(), y: z.number().nullable(), z: z.number().nullable(),
-  }),
+  position: positionSchema,
   status: z.string().nullable(),
   jobs: z.array(z.string()),
   races: z.array(z.string()),
   destinations: z.array(z.object({
     name: z.string(), price: z.number().nullable(), notes: z.string().nullable(),
   })),
-  // Only Rashid has one; rashid_position.day is an integer 0-6 upstream and is
-  // mapped to weekday names here, since an integer means nothing to a caller.
-  rashidSchedule: z.array(z.object({
-    day: z.string(), city: z.string().nullable(), location: z.string().nullable(),
-    position: z.object({
-      x: z.number().nullable(), y: z.number().nullable(), z: z.number().nullable(),
-    }),
-  })).optional(),
+  // Only Rashid has one.
+  rashidSchedule: rashidScheduleSchema.optional(),
   buys: tradeSchema.describe('Items the player can sell to this NPC.'),
   sells: tradeSchema.describe('Items the player can buy from this NPC.'),
   detail, source: sourceSchema,
@@ -227,9 +223,7 @@ const houseOut = z.object({
   size: z.number().nullable(),
   rooms: z.number().nullable(),
   floors: z.number().nullable(),
-  position: z.object({
-    x: z.number().nullable(), y: z.number().nullable(), z: z.number().nullable(),
-  }),
+  position: positionSchema,
   isGuildhall: z.boolean().nullable(),
   status: z.string().nullable(),
   detail, source: sourceSchema,
@@ -418,7 +412,7 @@ export function registerGet(server: McpServer, handle: TibiaDb): void {
   const destinations = db.prepare(
     `select name, price, notes from npc_destination where npc_id = ?
      order by name asc, price asc`);
-  const rashid = db.prepare('select day, city, location, x, y, z from rashid_position order by day asc');
+  const rashid = db.prepare(RASHID_SCHEDULE);
   const dangers = db.prepare(
     `select c.title from quest_danger d join creature c on c.article_id = d.creature_id
      where d.quest_id = ? order by c.title asc`);
@@ -433,7 +427,8 @@ export function registerGet(server: McpServer, handle: TibiaDb): void {
   const boughtBy = (includeInactive: boolean) => {
     const status = statusClause('n', includeInactive);
     return db.prepare(
-      `select distinct n.title as npc, o.value as price, cur.title as currency
+      `select distinct n.title as npc, o.value as price, cur.title as currency,
+              n.city, n.x, n.y, n.z
          from npc_offer_buy o
          join npc n on n.article_id = o.npc_id
          join item cur on cur.article_id = o.currency_id
@@ -456,9 +451,6 @@ export function registerGet(server: McpServer, handle: TibiaDb): void {
     `select q.title, oq.unlock_type from outfit_quest oq join quest q on q.article_id = oq.quest_id
      where oq.outfit_id = ? order by q.title asc, oq.unlock_type asc`);
 
-  // tibiawiki-sql: "Day of the week, Monday starts at 0." Starting this array at
-  // Sunday shifted the entire schedule by one day.
-  const WEEKDAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
   // The real columns of creature_max_damage. ELEMENTS includes 'healing', which
   // this table does NOT have — emitting it produced a phantom `healing: null`.
   const DAMAGE_KEYS = [
@@ -570,6 +562,7 @@ export function registerGet(server: McpServer, handle: TibiaDb): void {
           })),
           boughtBy: boughtBy(includeInactive).all(row.article_id as number).map((o) => ({
             npc: String(o.npc), price: Number(o.price), currency: String(o.currency),
+            ...buyerPlace(String(o.npc), str(o.city), { x: num(o.x), y: num(o.y), z: num(o.z) }),
           })),
           sounds: itemSounds.all(row.article_id as number).map((r) => String(r.content)),
           source,
@@ -586,15 +579,7 @@ export function registerGet(server: McpServer, handle: TibiaDb): void {
           destinations: destinations.all(row.article_id as number).map((d) => ({
             name: String(d.name), price: num(d.price), notes: str(d.notes),
           })),
-          ...(title === 'Rashid'
-            ? {
-                rashidSchedule: rashid.all().map((r) => ({
-                  day: WEEKDAYS[Number(r.day)] ?? String(r.day),
-                  city: str(r.city), location: str(r.location),
-                  position: { x: num(r.x), y: num(r.y), z: num(r.z) },
-                })),
-              }
-            : {}),
+          ...(title === RASHID ? { rashidSchedule: rashid.all().map(rashidScheduleDay) } : {}),
           buys: npcTrade('npc_offer_buy', includeInactive).all(row.article_id as number).map(trade),
           sells: npcTrade('npc_offer_sell', includeInactive).all(row.article_id as number).map(trade),
           source,

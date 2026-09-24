@@ -53,14 +53,15 @@ You ask questions, and your assistant calls these:
 | Tool | Answers |
 |---|---|
 | `tibia_search` | "Is there a page called roughly X?" or "List every mount." |
-| `tibia_get` | "Tell me everything about X." X can be a creature, item, NPC, quest or spell. An item says which NPCs buy it and for how much, an NPC what it buys and sells |
-| `tibia_find_creatures` | "Which creatures match these stats?" |
-| `tibia_find_items` | "Which items match these stats?" Also by resistance, skill bonus, imbuement slots, weight and hands |
+| `tibia_get` | "Tell me everything about X." X can be a creature, item, NPC, quest or spell. An item says its client ID and which NPCs buy it, for how much and where. A creature says how it behaves, like when it flees, and its gold per kill. An NPC says what it buys and sells |
+| `tibia_find_creatures` | "Which creatures match these stats?" Also by behaviour, like seeing invisible or being pushable, and ranked by gold per kill |
+| `tibia_find_items` | "Which items match these stats?" Also by resistance, skill bonus, imbuement slots, weight, hands and client ID |
 | `tibia_find_spells` | "Which healing spells can a level 30 druid cast?" |
 | `tibia_find_quests` | "Which quests can a level 20 character do, and what do they give?" |
 | `tibia_find_houses` | "What is the cheapest house in Thais with two beds?" |
 | `tibia_how_to_obtain` | "Where do I get X?" Drops, vendors and quest rewards in one call |
 | `tibia_find_updates` | "What changed for knights in 2026?" Game updates by text and release date |
+| `tibia_where_to_sell` | "Where do I sell all this loot?" The NPC paying the most for each item, grouped by city |
 
 The server tells your assistant how to read the data, for example that a damage modifier of 100
 is neutral. [What the skill adds](https://github.com/tibia-sh/tibiawiki-mcp/blob/main/docs/USAGE.md#what-the-skill-adds)
@@ -70,8 +71,30 @@ lists the traps.
 
 The index is a snapshot. Every answer says when it was taken, as `indexGeneratedAt`. It ships as
 its own package, [`@tibia.sh/tibiawiki-data`](https://github.com/tibia-sh/tibiawiki-data), rebuilt
-every week and released when the wiki changed. A fresh install gets the newest one. The hosted
-server follows each release by itself.
+on Tuesdays and Fridays and released when the wiki changed. A fresh install gets the newest one.
+The hosted server follows each release by itself.
+
+## Take the whole index
+
+The tools answer questions. If you are building a loot filter, a hunt planner or a bot's data
+layer and want every row, install the index itself:
+
+```bash
+npm install @tibia.sh/tibiawiki-data
+```
+
+It exports `DB_PATH`, the absolute path to `index.db`, and `SCHEMA_VERSION`. Open the file
+read-only with any SQLite client. In Node 22.13 or later, `node:sqlite` does it:
+
+```js
+import { DatabaseSync } from 'node:sqlite'
+import { DB_PATH } from '@tibia.sh/tibiawiki-data'
+
+const db = new DatabaseSync(DB_PATH, { readOnly: true })
+```
+
+Its [README](https://github.com/tibia-sh/tibiawiki-data#readme) says what the tables hold and
+how the versions work. The data stays CC BY-SA, so credit TibiaWiki when you ship it.
 
 ## Why it exists
 

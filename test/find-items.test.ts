@@ -132,8 +132,11 @@ test('resistant_to with two elements needs both', () => withRealIndex(async (cli
   const headguard = byTitle(items, 'Alicorn Headguard');
   assert.ok(headguard, 'Alicorn Headguard resists fire 5 and ice 5');
   assert.equal(headguard.attributes.resistance_ice, '5');
-  // Magma Coat resists fire 8 but has ice -8.
+  // Magma Coat resists fire 8 but has ice -8. Bonfire Amulet resists fire and has no
+  // ice resistance, Crystal Boots resist ice and have no fire resistance.
   assert.equal(byTitle(items, 'Magma Coat'), undefined);
+  assert.equal(byTitle(items, 'Bonfire Amulet'), undefined);
+  assert.equal(byTitle(items, 'Crystal Boots'), undefined);
 }));
 
 test('lifedrain maps to the resistance_life_drain attribute', () => withRealIndex(async (client) => {
@@ -166,8 +169,9 @@ test('skill_bonus with two skills needs both', () => withRealIndex(async (client
   assert.ok(greaves, 'Falcon Greaves gives sword, axe and club');
   assert.equal(greaves.attributes.sword, '+3');
   assert.equal(greaves.attributes.axe, '+3');
-  // Ectoplasmic Shield gives axe and club but no sword.
+  // Ectoplasmic Shield gives axe and club but no sword, Earthheart Cuirass sword but no axe.
   assert.equal(byTitle(items, 'Ectoplasmic Shield'), undefined);
+  assert.equal(byTitle(items, 'Earthheart Cuirass'), undefined);
 }));
 
 test('imbuement_slots_min keeps items with at least that many slots', () => withRealIndex(async (client) => {
@@ -185,12 +189,12 @@ test('weight_max includes the boundary and excludes items without a weight', () 
   for (const r of at) assert.ok(r.weight !== null && r.weight <= 19, `${r.title} weighs ${r.weight}`);
   const below = await findAll(client, { weight_max: 18.9, vocation: 'sorcerer', armor_min: 8 });
   assert.equal(byTitle(below, 'Magma Legs'), undefined);
-  // No utility records a weight: Mailbox is one, and a weight cap drops them all.
+  // Utilities such as Mailbox record no weight, so a weight cap drops them.
   const utilities = await find(client, { item_class: 'Utilities', limit: 100 });
   assert.ok(utilities.totalMatches > 0);
-  assert.ok(utilities.results.every((r) => r.weight === null));
-  const capped = await find(client, { item_class: 'Utilities', weight_max: 100000 });
-  assert.equal(capped.totalMatches, 0);
+  const capped = await find(client, { item_class: 'Utilities', weight_max: 100000, limit: 100 });
+  assert.ok(capped.totalMatches < utilities.totalMatches);
+  for (const r of capped.results) assert.ok(r.weight !== null, `${r.title} has no weight`);
 }));
 
 test('hands filters one-handed from two-handed weapons', () => withRealIndex(async (client) => {

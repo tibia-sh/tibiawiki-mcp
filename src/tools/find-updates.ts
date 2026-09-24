@@ -2,6 +2,7 @@ import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/server';
 import type { TibiaDb } from '../db.ts';
 import { encodeCursor, decodeCursor } from '../cursor.ts';
+import { asciiLower } from '../domain.ts';
 
 const outputSchema = z.object({
   results: z.array(z.object({
@@ -41,12 +42,6 @@ const searchText = z.string()
   .trim()
   .min(1, 'must contain something other than spaces')
   .refine((s) => !/[\u0000-\u001f]/.test(s), 'must not contain a control character');
-
-/**
- * SQLite's lower() folds ASCII only, so the lines are folded the same way: a line is
- * returned exactly when the SQL filter would match it.
- */
-const asciiLower = (s: string): string => s.replace(/[A-Z]/g, (c) => c.toLowerCase());
 
 const isHighSurrogate = (code: number): boolean => code >= 0xd800 && code <= 0xdbff;
 const isLowSurrogate = (code: number): boolean => code >= 0xdc00 && code <= 0xdfff;

@@ -199,6 +199,12 @@ export function eavOperator(op: EavOperator): string {
 }
 
 /**
+ * Folds ASCII letters only, as SQLite's lower() and its nocase collation do, so text
+ * compared in JS matches or sorts exactly as the SQL would.
+ */
+export const asciiLower = (s: string): string => s.replace(/[A-Z]/g, (c) => c.toLowerCase());
+
+/**
  * Non-active rows are numerous (138 event, 45 unavailable, 39 deprecated creatures)
  * and must not surface as live answers. The alias is mandatory: every query in this
  * server joins at least two tables carrying a `status` column, and an unqualified

@@ -182,6 +182,50 @@ export const goldPerKillSchema = z.number().nullable().describe(
     'and items that sell only on the market count as 0.',
 );
 
+/** Map coordinates, each null where the wiki records none. */
+export const positionSchema = z.object({
+  x: z.number().nullable(), y: z.number().nullable(), z: z.number().nullable(),
+});
+type Position = z.infer<typeof positionSchema>;
+
+/**
+ * Rashid moves to another city every day, so the city and position the wiki records for
+ * him (Svargrond) are right one day a week. His week is in `rashid_position`.
+ */
+export const RASHID = 'Rashid';
+
+/** Rashid's week, Monday first, for `db.prepare` with no parameters. */
+export const RASHID_SCHEDULE =
+  'select day, city, location, x, y, z from rashid_position order by day asc';
+
+// tibiawiki-sql: "Day of the week, Monday starts at 0." Starting this array at
+// Sunday shifted the entire schedule by one day.
+const WEEKDAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+
+// rashid_position.day is an integer 0-6 upstream and is mapped to weekday names,
+// since an integer means nothing to a caller.
+export const rashidScheduleSchema = z.array(z.object({
+  day: z.string(), city: z.string().nullable(), location: z.string().nullable(),
+  position: positionSchema,
+}));
+
+/**
+ * One RASHID_SCHEDULE row as a `rashidScheduleSchema` entry. Every rashid_position column
+ * is NOT NULL, so plain String and Number convert it: the null-aware converters live in
+ * db.ts, which imports this module.
+ */
+export const rashidScheduleDay = (row: Record<string, unknown>) => ({
+  day: WEEKDAYS[Number(row.day)] ?? String(row.day),
+  city: String(row.city), location: String(row.location),
+  position: { x: Number(row.x), y: Number(row.y), z: Number(row.z) },
+});
+
+/** Where a buyer stands: its recorded city and position, or none for Rashid, who travels. */
+export const buyerPlace = (npc: string, city: string | null, position: Position) =>
+  npc === RASHID
+    ? { city: null, position: { x: null, y: null, z: null } }
+    : { city, position };
+
 export const CREATURE_SORTS = ['experience', 'hitpoints', 'title', 'gold_per_kill'] as const;
 export type CreatureSort = (typeof CREATURE_SORTS)[number];
 /** gold_per_kill needs the query to select GOLD_PER_KILL's column under that name. */

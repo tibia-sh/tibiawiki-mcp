@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { connect } from './harness.ts';
+import { DatabaseSync } from 'node:sqlite';
+import { connect, FIXTURE } from './harness.ts';
 
 const get = async (h: Awaited<ReturnType<typeof connect>>, name: string, type?: string, verbosity?: string) => {
   const res = await h.client.callTool({
@@ -173,14 +174,49 @@ const getInactive = async (h: Awaited<ReturnType<typeof connect>>, name: string,
 };
 
 // npc_offer_buy is the player selling to the NPC. No other tool reads it.
-test('an item lists the NPCs that buy it, highest price first', async () => {
+test('an item lists the NPCs that buy it, highest price first, with where they stand', async () => {
   const h = await connect();
   const shield = await get(h, 'Dragon Shield', 'item');
   assert.deepEqual(shield.boughtBy, [
-    { npc: "Nah'Bob", price: 4000, currency: 'Gold Coin' },
-    { npc: 'Shanar', price: 360, currency: 'Gold Coin' },
-    { npc: 'H.L.', price: 115, currency: 'Gold Coin' },
+    {
+      npc: "Nah'Bob", price: 4000, currency: 'Gold Coin',
+      city: 'Darashia', position: { x: 33104, y: 32520, z: 2 },
+    },
+    {
+      npc: 'Shanar', price: 360, currency: 'Gold Coin',
+      city: "Ab'Dendriel", position: { x: 32659, y: 31657, z: 8 },
+    },
+    {
+      npc: 'H.L.', price: 115, currency: 'Gold Coin',
+      city: 'Venore', position: { x: 32643, y: 32212, z: 7 },
+    },
   ]);
+  await h.close();
+});
+
+// Rashid's recorded city is Svargrond, where he stands one day a week. Reporting him
+// there would send a player to the wrong city on the other six.
+test('Rashid buys with no city or position, since he travels', async () => {
+  const db = new DatabaseSync(FIXTURE, { readOnly: true });
+  let item: string | undefined;
+  try {
+    const row = db.prepare(
+      `select i.title from npc_offer_buy o
+         join npc n on n.article_id = o.npc_id
+         join item i on i.article_id = o.item_id
+        where n.title = 'Rashid' and i.status = 'active'
+        order by i.title limit 1`,
+    ).get();
+    item = row === undefined ? undefined : String(row.title);
+  } finally {
+    db.close();
+  }
+  assert.ok(item, 'the fixture holds an active item Rashid buys');
+  const h = await connect();
+  const rashid = (await get(h, item, 'item')).boughtBy.find((o: any) => o.npc === 'Rashid');
+  assert.ok(rashid, `Rashid is among ${item}'s buyers`);
+  assert.equal(rashid.city, null);
+  assert.deepEqual(rashid.position, { x: null, y: null, z: null });
   await h.close();
 });
 
@@ -196,12 +232,17 @@ test('an item carries its client ID, and null where the wiki records none', asyn
 // shows the NPC title breaking it.
 test('an inactive buyer appears only with include_inactive', async () => {
   const h = await connect();
-  assert.deepEqual((await get(h, 'Demon Horn', 'item')).boughtBy, [
-    { npc: 'Fiona', price: 1000, currency: 'Gold Coin' },
-  ]);
+  const fiona = {
+    npc: 'Fiona', price: 1000, currency: 'Gold Coin',
+    city: 'Edron', position: { x: 33281, y: 31846, z: 5 },
+  };
+  assert.deepEqual((await get(h, 'Demon Horn', 'item')).boughtBy, [fiona]);
   assert.deepEqual((await getInactive(h, 'Demon Horn', 'item')).boughtBy, [
-    { npc: 'Fiona', price: 1000, currency: 'Gold Coin' },
-    { npc: 'Yasir', price: 1000, currency: 'Gold Coin' },
+    fiona,
+    {
+      npc: 'Yasir', price: 1000, currency: 'Gold Coin',
+      city: 'Carlin', position: { x: 32398, y: 31815, z: 6 },
+    },
   ]);
   await h.close();
 });

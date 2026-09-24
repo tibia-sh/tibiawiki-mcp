@@ -55,7 +55,7 @@ export function registerHowToObtain(server: McpServer, handle: TibiaDb): void {
        join npc n on n.article_id = o.npc_id
        left join item cur on cur.article_id = o.currency_id
        where o.item_id = ?` + (status ? ` and ${status}` : '') + `
-       order by o.value asc, n.title asc`,
+       order by o.value asc, n.title asc, currency asc`,
     );
   };
   const quests = (includeInactive: boolean) => {

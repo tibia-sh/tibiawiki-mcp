@@ -1,6 +1,11 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { connect } from './harness.ts';
+import { copyFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
+import { connect, connectTo, FIXTURE, tempDirs } from './harness.ts';
+
+const scratch = tempDirs('twmcp-obtain-');
 
 type ObtainOut = {
   item: string;
@@ -84,4 +89,32 @@ test('the item name resolves case-insensitively and echoes the canonical title',
   });
   assert.equal((res.structuredContent as ObtainOut).item, 'Steel Helmet');
   await h.close();
+});
+
+test('one NPC selling at one price in several currencies is ordered by currency', async () => {
+  // Asima sells Health Potion for 50 Gold Coin in the fixture. Two more offers at the
+  // same price, inserted out of order, leave the currency as the only difference.
+  const path = join(scratch(), 'index.db');
+  copyFileSync(FIXTURE, path);
+  const db = new DatabaseSync(path);
+  const insert = db.prepare(
+    `insert into npc_offer_sell (npc_id, item_id, value, currency_id)
+       select n.article_id, i.article_id, 50, c.article_id
+         from npc n, item i, item c
+        where n.title = 'Asima' and i.title = 'Health Potion' and c.title = ?`,
+  );
+  insert.run('Scarab Coin');
+  insert.run('Crystal Coin');
+  db.close();
+  const h = await connectTo(path);
+  try {
+    const res = await h.client.callTool({
+      name: 'tibia_how_to_obtain', arguments: { item_name: 'Health Potion' },
+    });
+    const data = res.structuredContent as ObtainOut;
+    const asima = data.soldByNpcs.filter((v) => v.npc === 'Asima').map((v) => v.currency);
+    assert.deepEqual(asima, ['Crystal Coin', 'Gold Coin', 'Scarab Coin']);
+  } finally {
+    await h.close();
+  }
 });

@@ -179,12 +179,15 @@ test('tibia_search lists two types merged in title order across page boundaries'
 test('tibia_search with a query counts a type listed twice once', async () => {
   const h = await connect();
   try {
-    const call = async (types: string[]) => (await h.client.callTool({
-      name: 'tibia_search', arguments: { query: 'e', types },
+    const call = async (args: Record<string, unknown>) => (await h.client.callTool({
+      name: 'tibia_search', arguments: args,
     })).structuredContent as ListOut;
-    const once = await call(['charm']);
-    const twice = await call(['charm', 'charm']);
+    const once = await call({ query: 'LESS', types: ['charm'] });
+    const twice = await call({ query: 'LESS', types: ['charm', 'charm'] });
+    const every = await call({ types: ['charm'] });
     assert.ok(once.totalMatches > 0, 'guard: the query matches a charm');
+    assert.ok(once.totalMatches < every.totalMatches, 'the query leaves some charms out');
+    for (const r of twice.results) assert.ok(asciiLower(r.title).includes('less'), r.title);
     assert.equal(twice.totalMatches, once.totalMatches);
     assert.deepEqual(twice.results, once.results);
   } finally {

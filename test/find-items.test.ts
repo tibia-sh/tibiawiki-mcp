@@ -153,6 +153,18 @@ test('lifedrain maps to the resistance_life_drain attribute', () => withRealInde
   assert.equal(byTitle(drown, 'Depth Galea')?.attributes.resistance_drowning, 100);
 }));
 
+test('manadrain and critical_hit map to their resistance attributes', () => withRealIndex(async (client) => {
+  const drain = await findAll(client, { resistant_to: ['manadrain'] });
+  assert.equal(byTitle(drain, 'Bronze Amulet')?.attributes.resistance_mana_drain, 20);
+  // Garlic Necklace resists life drain only.
+  assert.equal(byTitle(drain, 'Garlic Necklace'), undefined);
+  for (const r of drain) assert.ok((r.attributes.resistance_mana_drain as number) > 0, `${r.title}`);
+  const critical = await findAll(client, { resistant_to: ['critical_hit'] });
+  assert.equal(byTitle(critical, 'Cursed Coin')?.attributes.resistance_critical_hit_chance, 1);
+  assert.equal(byTitle(critical, 'Bronze Amulet'), undefined);
+  for (const r of critical) assert.ok((r.attributes.resistance_critical_hit_chance as number) > 0, `${r.title}`);
+}));
+
 test('tibia_get reports signed resistances and skill bonuses as numbers', () => withRealIndex(async (client) => {
   const legs = await client.callTool({ name: 'tibia_get', arguments: { name: 'Terra Legs' } });
   assert.equal((legs.structuredContent as any).attributes.resistance_fire, -6);

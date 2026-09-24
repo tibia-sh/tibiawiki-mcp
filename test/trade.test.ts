@@ -78,3 +78,12 @@ test('a duplicated offer row is listed once', () => withRealIndex(async (client)
   const satsu = await get(client, { name: 'Satsu', type: 'npc' });
   assert.equal(satsu.sells.filter((o: Offer) => o.item === 'Cocktail Glass').length, 1);
 }));
+
+test('tibia_how_to_obtain lists a duplicated seller once', () => withRealIndex(async (client) => {
+  const res = await client.callTool({
+    name: 'tibia_how_to_obtain', arguments: { item_name: 'Cocktail Glass' },
+  });
+  assert.notEqual(res.isError, true, JSON.stringify(res.content));
+  const sellers = (res.structuredContent as { soldByNpcs: Array<{ npc: string }> }).soldByNpcs;
+  assert.equal(sellers.filter((s) => s.npc === 'Satsu').length, 1);
+}));

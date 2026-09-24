@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/server';
-import type { TibiaDb } from '../db.ts';
+import { str, num, type TibiaDb } from '../db.ts';
 import { statusClause } from '../domain.ts';
 import { sourceBlock } from './get.ts';
 
@@ -99,13 +99,13 @@ export function registerHowToObtain(server: McpServer, handle: TibiaDb): void {
       const id = item.article_id;
       const droppedBy = dropped(include_inactive).all(id).map((r) => ({
         creature: String(r.creature),
-        chance: r.chance === null ? null : Number(r.chance),
-        min: r.lo === null ? null : Number(r.lo),
-        max: r.hi === null ? null : Number(r.hi),
+        chance: num(r.chance),
+        min: num(r.lo),
+        max: num(r.hi),
       }));
       const soldByNpcs = vendors(include_inactive).all(id).map((r) => ({
         npc: String(r.npc),
-        city: r.city === null ? null : String(r.city),
+        city: str(r.city),
         price: Number(r.price),
         currency: String(r.currency),
       }));

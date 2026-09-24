@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { renderArea, renderSpellShape, AREA_LEGEND } from '../area.ts';
 import type { McpServer } from '@modelcontextprotocol/server';
-import type { Provenance, TibiaDb } from '../db.ts';
+import { str, num, bool, type Provenance, type TibiaDb } from '../db.ts';
 import {
   ELEMENTS, ENTITY_TYPES, entityTypeSchema, entityTable, entityHasStatus, statusClause,
   verbositySchema, SPELL_VOCATIONS, QUEST_REWARDS,
@@ -9,9 +9,6 @@ import {
 } from '../domain.ts';
 
 type Row = Record<string, unknown>;
-const str = (v: unknown): string | null => (v === null || v === undefined ? null : String(v));
-const num = (v: unknown): number | null => (v === null || v === undefined ? null : Number(v));
-const bool = (v: unknown): boolean | null => (v === null || v === undefined ? null : Boolean(v));
 
 export function sourceBlock(title: string, p: Provenance) {
   return {
@@ -541,7 +538,7 @@ export function registerGet(server: McpServer, handle: TibiaDb): void {
           itemClass: str(row.item_class), itemType: str(row.item_type),
           typeSecondary: str(row.type_secondary), weight: num(row.weight),
           valueBuy: num(row.value_buy), valueSell: num(row.value_sell),
-          isMarketable: row.is_marketable === null ? null : Boolean(row.is_marketable),
+          isMarketable: bool(row.is_marketable),
           status: str(row.status), attributes: bag,
           keys: itemKeys.all(row.article_id as number).map((k) => ({
             title: String(k.title), number: num(k.number), name: str(k.name),
@@ -588,7 +585,7 @@ export function registerGet(server: McpServer, handle: TibiaDb): void {
         return {
           type: 'quest' as const, title, location: str(row.location),
           levelRequired: num(row.level_required), levelRecommended: num(row.level_recommended),
-          isPremium: row.is_premium === null ? null : Boolean(row.is_premium),
+          isPremium: bool(row.is_premium),
           questLog: bool(row.quest_log), legend: str(row.legend),
           status: str(row.status),
           dangers: dangers.all(row.article_id as number).map((r) => String(r.title)),
@@ -600,7 +597,7 @@ export function registerGet(server: McpServer, handle: TibiaDb): void {
           type: 'spell' as const, image: imageFor('spell', row), areaShape: spellShapeFor(row), title, words: str(row.words),
           spellType: str(row.spell_type), element: str(row.element),
           mana: num(row.mana), level: num(row.level), soul: num(row.soul),
-          isPremium: row.is_premium === null ? null : Boolean(row.is_premium),
+          isPremium: bool(row.is_premium),
           cooldown: num(row.cooldown), effect: str(row.effect),
           vocations: SPELL_VOCATIONS.filter((v) => Number(row[v]) === 1),
           isPromotion: bool(row.is_promotion), isWheelSpell: bool(row.is_wheel_spell),

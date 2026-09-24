@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/server';
-import type { TibiaDb } from '../db.ts';
+import { str, num, bool, type TibiaDb } from '../db.ts';
 import { QUEST_REWARDS, QUEST_SORTS, questSort, statusClause, likePattern } from '../domain.ts';
 import { encodeCursor, decodeCursor } from '../cursor.ts';
 
@@ -83,15 +83,13 @@ export function registerFindQuests(server: McpServer, handle: TibiaDb): void {
         .prepare(`select q.* from quest q ${clause} order by ${questSort(args.sort)} limit ? offset ?`)
         .all(...params, args.limit, offset);
 
-      const str = (v: unknown): string | null => (v === null ? null : String(v));
-      const num = (v: unknown): number | null => (v === null ? null : Number(v));
       const output = {
         results: rows.map((row) => ({
           title: String(row.title),
           location: str(row.location),
           levelRequired: num(row.level_required),
           levelRecommended: num(row.level_recommended),
-          isPremium: row.is_premium === null ? null : Boolean(row.is_premium),
+          isPremium: bool(row.is_premium),
           estimatedTime: str(row.estimated_time),
           rewards: rewards.all(row.article_id as number).map((r) => String(r.title)),
         })),

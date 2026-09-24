@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/server';
-import type { TibiaDb } from '../db.ts';
+import { str, num, bool, type TibiaDb } from '../db.ts';
 import { HOUSE_SORTS, houseSort, statusClause } from '../domain.ts';
 import { encodeCursor, decodeCursor } from '../cursor.ts';
 
@@ -80,18 +80,17 @@ export function registerFindHouses(server: McpServer, handle: TibiaDb): void {
         .prepare(`select h.* from house h ${clause} order by ${houseSort(args.sort)} limit ? offset ?`)
         .all(...params, args.limit, offset);
 
-      const num = (v: unknown): number | null => (v === null ? null : Number(v));
       const output = {
         results: rows.map((row) => ({
           title: String(row.title),
           city: String(row.city),
-          street: row.street === null ? null : String(row.street),
+          street: str(row.street),
           rent: num(row.rent),
           beds: num(row.beds),
           size: num(row.size),
           rooms: num(row.rooms),
           floors: num(row.floors),
-          isGuildhall: row.is_guildhall === null ? null : Boolean(row.is_guildhall),
+          isGuildhall: bool(row.is_guildhall),
         })),
         totalMatches: total.c,
         ...(offset + args.limit < total.c ? { nextCursor: encodeCursor(offset + args.limit) } : {}),

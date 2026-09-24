@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/server';
-import type { TibiaDb } from '../db.ts';
+import { str, num, type TibiaDb } from '../db.ts';
 import {
   ITEM_SORTS, itemSort, eavOperator, statusClause, coerceAttribute, REPORTED_ATTRS,
   ITEM_RESISTANCES, resistanceAttribute, ITEM_SKILLS, ITEM_HANDS, type EavOperator,
@@ -141,10 +141,10 @@ export function registerFindItems(server: McpServer, handle: TibiaDb): void {
           }
           return {
             title: String(row.title),
-            itemClass: row.item_class === null ? null : String(row.item_class),
-            itemType: row.item_type === null ? null : String(row.item_type),
-            weight: row.weight === null ? null : Number(row.weight),
-            valueBuy: row.value_buy === null ? null : Number(row.value_buy),
+            itemClass: str(row.item_class),
+            itemType: str(row.item_type),
+            weight: num(row.weight),
+            valueBuy: num(row.value_buy),
             attributes: bag,
           };
         }),

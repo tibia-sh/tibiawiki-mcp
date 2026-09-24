@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/server';
-import type { TibiaDb } from '../db.ts';
+import { str, num, bool, type TibiaDb } from '../db.ts';
 import {
   SPELL_ELEMENTS, SPELL_VOCATIONS, vocationColumn, SPELL_GROUPS, SPELL_TYPES,
   SPELL_SORTS, spellSort, statusClause,
@@ -95,9 +95,6 @@ export function registerFindSpells(server: McpServer, handle: TibiaDb): void {
         .prepare(`select s.* from spell s ${clause} order by ${spellSort(args.sort)} limit ? offset ?`)
         .all(...params, args.limit, offset);
 
-      const str = (v: unknown): string | null => (v === null ? null : String(v));
-      const num = (v: unknown): number | null => (v === null ? null : Number(v));
-      const bool = (v: unknown): boolean | null => (v === null ? null : Boolean(v));
       const output = {
         results: rows.map((row) => ({
           title: String(row.title),

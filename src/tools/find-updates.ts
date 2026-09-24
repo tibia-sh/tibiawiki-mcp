@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/server';
-import type { TibiaDb } from '../db.ts';
+import { str, type TibiaDb } from '../db.ts';
 import { encodeCursor, decodeCursor } from '../cursor.ts';
 import { asciiLower, likePattern } from '../domain.ts';
 
@@ -130,11 +130,11 @@ export function registerFindUpdates(server: McpServer, handle: TibiaDb): void {
       const output = {
         results: rows.map((row) => ({
           title: String(row.title),
-          name: row.name === null ? null : String(row.name),
-          releaseDate: row.release_date === null ? null : String(row.release_date),
-          version: row.version === null ? null : String(row.version),
-          updateType: row.type_primary === null ? null : String(row.type_primary),
-          summary: row.summary === null ? null : String(row.summary),
+          name: str(row.name),
+          releaseDate: str(row.release_date),
+          version: str(row.version),
+          updateType: str(row.type_primary),
+          summary: str(row.summary),
           matchingLines: needle === undefined || row.changes === null ? [] : String(row.changes)
             .split('\n')
             .filter((line) => asciiLower(line).includes(needle))

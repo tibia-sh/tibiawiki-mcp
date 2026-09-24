@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/server';
-import type { TibiaDb } from '../db.ts';
+import { str, num, type TibiaDb } from '../db.ts';
 import {
   ELEMENTS, elementSchema, modifierColumn, WEAK_TO, RESISTANT_TO,
   CREATURE_SORTS, creatureSort, statusClause, hitpointsExpr,
@@ -103,13 +103,13 @@ export function registerFindCreatures(server: McpServer, handle: TibiaDb): void 
           title: String(row.title),
           // 0 means unrecorded; report it as null rather than as a real value.
           hitpoints: !row.hitpoints ? null : Number(row.hitpoints),
-          experience: row.experience === null ? null : Number(row.experience),
-          bestiaryClass: row.bestiary_class === null ? null : String(row.bestiary_class),
+          experience: num(row.experience),
+          bestiaryClass: str(row.bestiary_class),
           isBoss: Boolean(row.is_boss),
           modifiers: Object.fromEntries(
             ELEMENTS.map((e) => {
               const v = row[`modifier_${e}`];
-              return [e, v === null || v === undefined ? null : Number(v)];
+              return [e, num(v)];
             }),
           ),
         })),

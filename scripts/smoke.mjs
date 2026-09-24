@@ -75,6 +75,7 @@ import { join, resolve } from 'node:path';
 const TOOL_NAMES = [
   'tibia_find_creatures', 'tibia_find_houses', 'tibia_find_items', 'tibia_find_quests',
   'tibia_find_spells', 'tibia_find_updates', 'tibia_get', 'tibia_how_to_obtain', 'tibia_search',
+  'tibia_where_to_sell',
 ];
 const TIMEOUT_MS = 120_000;
 

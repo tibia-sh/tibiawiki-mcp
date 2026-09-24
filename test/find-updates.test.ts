@@ -3,12 +3,9 @@ import assert from 'node:assert/strict';
 import { DatabaseSync } from 'node:sqlite';
 import { DB_PATH } from '@tibia.sh/tibiawiki-data';
 import type { Client } from '@modelcontextprotocol/client';
-import { likePattern } from '../src/domain.ts';
+import { asciiLower, likePattern } from '../src/domain.ts';
 import { excerpt } from '../src/tools/find-updates.ts';
 import { withRealIndex } from './harness.ts';
-
-/** The fold SQLite's lower() and NOCASE apply: ASCII letters only. */
-const asciiLower = (s: string): string => s.replace(/[A-Z]/g, (c) => c.toLowerCase());
 
 // The fixture holds two update pages, so these tests open the real packaged index, the
 // way regression.test.ts does. They assert facts about historical update pages, which

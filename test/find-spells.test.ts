@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { DatabaseSync } from 'node:sqlite';
 import type { Client } from '@modelcontextprotocol/client';
+import { SPELL_ELEMENTS } from '../src/domain.ts';
 import { connect, FIXTURE } from './harness.ts';
 
 type Spell = {
@@ -42,7 +43,7 @@ test('healing spells a level 30 druid can cast include Light Healing', async () 
   const h = await connect();
   try {
     const data = await find(h.client, {
-      vocation: 'druid', group: 'Healing', level_max: 30, limit: 100,
+      vocation: 'druid', group: 'healing', level_max: 30, limit: 100,
     });
     // Non-empty first: a universal assertion over an empty array passes vacuously.
     assert.ok(data.results.length >= 2, `expected >=2 matches, got ${data.results.length}`);
@@ -52,7 +53,7 @@ test('healing spells a level 30 druid can cast include Light Healing', async () 
     for (const r of data.results) {
       assert.ok(r.vocations.includes('druid'), `${r.title} vocations=${r.vocations}`);
       assert.ok(r.level !== null && r.level <= 30, `${r.title} level=${r.level}`);
-      assert.equal(r.group, 'Healing', r.title);
+      assert.equal(r.group, 'Healing', `${r.title}: the output keeps the wiki's capitals`);
     }
     assert.equal(data.totalMatches, data.results.length);
   } finally {
@@ -78,7 +79,7 @@ test('an element filter matches the capitalised column case-insensitively', asyn
 test('spell_type and is_premium filter the results', async () => {
   const h = await connect();
   try {
-    const runes = await findAll(h.client, { spell_type: 'Rune', limit: 100 });
+    const runes = await findAll(h.client, { spell_type: 'rune', limit: 100 });
     assert.ok(runes.length > 0);
     for (const r of runes) assert.equal(r.spellType, 'Rune', r.title);
     const free = await findAll(h.client, { is_premium: false, limit: 100 });
@@ -86,6 +87,18 @@ test('spell_type and is_premium filter the results', async () => {
     for (const r of free) assert.equal(r.isPremium, false, r.title);
   } finally {
     await h.close();
+  }
+});
+
+test('the spell elements are exactly the ones the spell table holds', () => {
+  const db = new DatabaseSync(FIXTURE, { readOnly: true });
+  try {
+    const held = (db.prepare(
+      'select distinct lower(element) e from spell where element is not null order by e',
+    ).all() as Array<{ e: string }>).map((r) => r.e);
+    assert.deepEqual([...SPELL_ELEMENTS].sort(), held);
+  } finally {
+    db.close();
   }
 });
 
@@ -173,13 +186,25 @@ test('an input outside its enum is a schema error', async () => {
   const h = await connect();
   try {
     for (const bad of [
-      { vocation: 'mage' }, { group: 'Summon' }, { element: 'lava' },
-      { spell_type: 'Wand' }, { sort: 'rowid' },
+      { vocation: 'mage' }, { group: 'summon' }, { group: 'Healing' }, { element: 'lava' },
+      { spell_type: 'wand' }, { spell_type: 'Rune' }, { sort: 'rowid' },
     ]) {
       const res = await h.client.callTool({ name: 'tibia_find_spells', arguments: bad });
       assert.equal(res.isError, true, `${JSON.stringify(bad)} must be rejected`);
       assert.match(JSON.stringify(res.content), /validation/i, JSON.stringify(res.content));
     }
+  } finally {
+    await h.close();
+  }
+});
+
+test('healing is not a spell element, and the error names the valid ones', async () => {
+  const h = await connect();
+  try {
+    const res = await h.client.callTool({ name: 'tibia_find_spells', arguments: { element: 'healing' } });
+    assert.equal(res.isError, true);
+    const text = JSON.stringify(res.content);
+    for (const e of SPELL_ELEMENTS) assert.ok(text.includes(e), `${e} is named in ${text}`);
   } finally {
     await h.close();
   }

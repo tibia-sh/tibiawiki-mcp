@@ -160,9 +160,20 @@ export function vocationColumn(vocation: SpellVocation): string {
   return vocation;
 }
 
-/** The values of `spell.group_spell` and `spell.spell_type`, as the wiki spells them. */
-export const SPELL_GROUPS = ['Attack', 'Healing', 'Support', 'Conjure'] as const;
-export const SPELL_TYPES = ['Instant', 'Rune'] as const;
+/**
+ * The elements `spell.element` holds, lowercased. Healing, drown and lifedrain are
+ * creature modifiers but no spell's element, so a healing spell is found by group.
+ */
+export const SPELL_ELEMENTS = [
+  'death', 'earth', 'energy', 'fire', 'holy', 'ice', 'physical',
+] as const satisfies readonly Element[];
+
+/**
+ * The values of `spell.group_spell` and `spell.spell_type`, lowercased like every
+ * other input. The columns hold them capitalised, so they match with collate nocase.
+ */
+export const SPELL_GROUPS = ['attack', 'healing', 'support', 'conjure'] as const;
+export const SPELL_TYPES = ['instant', 'rune'] as const;
 
 export const SPELL_SORTS = ['level', 'mana', 'title'] as const;
 export type SpellSort = (typeof SPELL_SORTS)[number];
@@ -178,7 +189,7 @@ export function spellSort(key: SpellSort): string {
   return SPELL_ORDER[key];
 }
 
-const EAV_OPERATORS ={ gt: '>', gte: '>=', lte: '<=' } as const;
+const EAV_OPERATORS = { gt: '>', gte: '>=', lte: '<=' } as const;
 export type EavOperator = keyof typeof EAV_OPERATORS;
 export function eavOperator(op: EavOperator): string {
   if (!Object.hasOwn(EAV_OPERATORS, op)) {

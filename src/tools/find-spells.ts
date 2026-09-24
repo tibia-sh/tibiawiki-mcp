@@ -2,7 +2,7 @@ import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/server';
 import type { TibiaDb } from '../db.ts';
 import {
-  elementSchema, SPELL_VOCATIONS, vocationColumn, SPELL_GROUPS, SPELL_TYPES,
+  SPELL_ELEMENTS, SPELL_VOCATIONS, vocationColumn, SPELL_GROUPS, SPELL_TYPES,
   SPELL_SORTS, spellSort, statusClause,
 } from '../domain.ts';
 import { encodeCursor, decodeCursor } from '../cursor.ts';
@@ -41,12 +41,16 @@ export function registerFindSpells(server: McpServer, handle: TibiaDb): void {
         vocation: z.enum(SPELL_VOCATIONS).optional(),
         level_max: z.number().int().optional().describe('Highest level the caster has.'),
         group: z.enum(SPELL_GROUPS).optional(),
-        element: elementSchema.optional(),
+        element: z.enum(SPELL_ELEMENTS).optional()
+          .describe('Damage element. For healing spells, use group.'),
         spell_type: z.enum(SPELL_TYPES).optional(),
         is_premium: z.boolean().optional(),
         include_inactive: z.boolean().default(false),
         sort: z.enum(SPELL_SORTS).default('level')
-          .describe('level and mana ascend, title is alphabetical.'),
+          .describe(
+            'level and mana ascend, title is alphabetical. Spells with a variable cost ' +
+            '(party spells) store mana 0, so they come first by mana.',
+          ),
         limit: z.number().int().min(1).max(100).default(25),
         cursor: z.string().optional(),
       }),
@@ -75,10 +79,10 @@ export function registerFindSpells(server: McpServer, handle: TibiaDb): void {
         params.push(value);
       };
       if (args.level_max !== undefined) bind('s.level <= ?', args.level_max);
-      if (args.group !== undefined) bind('s.group_spell = ?', args.group);
-      // The column holds "Fire", the element names are lowercase.
+      // The columns hold "Healing", "Fire" and "Rune", the inputs are lowercase.
+      if (args.group !== undefined) bind('s.group_spell = ? collate nocase', args.group);
       if (args.element !== undefined) bind('s.element = ? collate nocase', args.element);
-      if (args.spell_type !== undefined) bind('s.spell_type = ?', args.spell_type);
+      if (args.spell_type !== undefined) bind('s.spell_type = ? collate nocase', args.spell_type);
       if (args.is_premium !== undefined) bind('s.is_premium = ?', args.is_premium ? 1 : 0);
       const status = statusClause('s', args.include_inactive);
       if (status) where.push(status);

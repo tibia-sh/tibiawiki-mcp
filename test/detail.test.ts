@@ -218,8 +218,16 @@ test('a quest returns its dangers as creature names and its rewards', async () =
   // does. `Array.isArray` passed while a mutation replaced rewards wholesale with
   // [] — assert content, not shape.
   const lightbearer = await get(h, 'The Lightbearer', 'quest');
-  assert.equal(lightbearer.rewards.length, 8, 'The Lightbearer has 8 rewards');
+  // quest_reward holds its Ring of Healing twice, but it is one reward.
+  assert.equal(lightbearer.rewards.length, 7, 'The Lightbearer has 7 distinct rewards');
+  assert.equal(lightbearer.rewards.filter((r: string) => r === 'Ring of Healing').length, 1);
   assert.ok(lightbearer.rewards.every((r: string) => typeof r === 'string' && r.length > 0));
+  const found = await h.client.callTool({
+    name: 'tibia_find_quests', arguments: { location_contains: lightbearer.location },
+  });
+  const listed = (found.structuredContent as { results: Array<{ title: string; rewards: string[] }> })
+    .results.find((r) => r.title === 'The Lightbearer')!;
+  assert.deepEqual(lightbearer.rewards, listed.rewards, 'both tools list the same rewards');
   await h.close();
 });
 

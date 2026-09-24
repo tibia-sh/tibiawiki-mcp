@@ -123,6 +123,14 @@ export function entityHasStatus(type: EntityType): boolean {
 const nullsLast = (expr: string, direction: 'asc' | 'desc'): string =>
   `(${expr} is null), ${expr} ${direction}, title asc`;
 
+/**
+ * The values of `creature.bestiary_level`, lowercased like every other input. The
+ * column holds them capitalised, so they match with collate nocase.
+ */
+export const CREATURE_BESTIARY_LEVELS = [
+  'harmless', 'trivial', 'easy', 'medium', 'hard', 'challenging',
+] as const;
+
 export const CREATURE_SORTS = ['experience', 'hitpoints', 'title'] as const;
 export type CreatureSort = (typeof CREATURE_SORTS)[number];
 const CREATURE_ORDER: Record<CreatureSort, string> = {

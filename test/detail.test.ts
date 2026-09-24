@@ -22,6 +22,26 @@ test('a creature carries its abilities with damage ranges', async () => {
   await h.close();
 });
 
+test('a creature carries how it behaves', async () => {
+  const h = await connect();
+  const dragon = await get(h, 'Dragon');
+  assert.equal(dragon.runsAt, 300);
+  assert.equal(dragon.seesInvisible, true);
+  assert.equal(dragon.paralysable, true);
+  assert.equal(dragon.pushable, false);
+  assert.equal(dragon.pushObjects, true);
+  assert.equal(dragon.illusionable, true);
+  assert.equal(dragon.summonCost, 0);
+  assert.equal(dragon.convinceCost, 0);
+  assert.equal(dragon.bestiaryLevel, 'Medium');
+  const rotworm = await get(h, 'Rotworm');
+  assert.equal(rotworm.convinceCost, 305);
+  assert.equal(rotworm.summonCost, 0);
+  // The wiki records no flee threshold for Rotworm.
+  assert.equal(rotworm.runsAt, null);
+  await h.close();
+});
+
 // (creature_id, name) is NOT unique - The Plasmother has three rows all named
 // 'Poison Ball'. A join keyed on name alone would collapse them.
 test('duplicate ability names are all returned, not collapsed', async () => {

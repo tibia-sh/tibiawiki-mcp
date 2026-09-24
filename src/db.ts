@@ -35,7 +35,9 @@ export const REQUIRED_COLUMNS: Readonly<Record<string, readonly string[]>> = {
   creature: [
     'article_id', 'title', 'name', 'hitpoints', 'experience', 'armor', 'speed',
     'bestiary_class', 'bestiary_occurrence', 'is_boss', 'location', 'spawn_type',
-    'mitigation', 'walks_through', 'walks_around', 'status',
+    'mitigation', 'walks_through', 'walks_around', 'status', 'runs_at', 'sees_invisible',
+    'paralysable', 'pushable', 'push_objects', 'illusionable', 'summon_cost', 'convince_cost',
+    'bestiary_level',
     ...ELEMENTS.map((e) => `modifier_${e}`),
   ],
   item: [

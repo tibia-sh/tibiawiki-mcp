@@ -1,9 +1,9 @@
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/server';
-import { str, num, type TibiaDb } from '../db.ts';
+import { str, num, bool, type TibiaDb } from '../db.ts';
 import {
   ELEMENTS, elementSchema, modifierColumn, WEAK_TO, RESISTANT_TO,
-  CREATURE_SORTS, creatureSort, statusClause, hitpointsExpr,
+  CREATURE_BESTIARY_LEVELS, CREATURE_SORTS, creatureSort, statusClause, hitpointsExpr,
 } from '../domain.ts';
 import { encodeCursor, decodeCursor } from '../cursor.ts';
 
@@ -15,6 +15,12 @@ const outputSchema = z.object({
     bestiaryClass: z.string().nullable(),
     isBoss: z.boolean(),
     modifiers: z.record(z.string(), z.number().nullable()),
+    runsAt: z.number().nullable().describe('Flees at or below these hit points. 0: never flees.'),
+    seesInvisible: z.boolean().nullable(),
+    paralysable: z.boolean().nullable(),
+    pushable: z.boolean().nullable(),
+    summonCost: z.number().nullable().describe('Mana. 0: cannot be summoned.'),
+    convinceCost: z.number().nullable().describe('Mana. 0: cannot be convinced.'),
   })),
   totalMatches: z.number(),
   nextCursor: z.string().optional(),
@@ -33,7 +39,8 @@ export function registerFindCreatures(server: McpServer, handle: TibiaDb): void 
         'Find Tibia creatures matching stat filters. Damage modifiers are percentages where ' +
         '100 is neutral: "weak_to" means the creature takes MORE than 100% damage from that ' +
         'element, "resistant_to" means less. Use this for questions like "which creatures are ' +
-        'weak to fire and give over 500 experience".',
+        'weak to fire and give over 500 experience". Behaviour filters skip creatures whose ' +
+        'value is unrecorded.',
       inputSchema: z.object({
         weak_to: z.array(elementSchema).optional()
           .describe('Elements the creature takes extra damage from.'),
@@ -46,6 +53,12 @@ export function registerFindCreatures(server: McpServer, handle: TibiaDb): void 
           .describe('Creatures whose hitpoints are unrecorded are excluded from this filter.'),
         bestiary_class: z.string().optional().describe('e.g. "Dragon", "Human".'),
         is_boss: z.boolean().optional(),
+        sees_invisible: z.boolean().optional(),
+        paralysable: z.boolean().optional(),
+        pushable: z.boolean().optional(),
+        summonable: z.boolean().optional().describe('true: summon cost above 0. false: 0.'),
+        convinceable: z.boolean().optional().describe('true: convince cost above 0. false: 0.'),
+        bestiary_level: z.enum(CREATURE_BESTIARY_LEVELS).optional(),
         location_contains: z.string().optional().describe('Substring of the location text.'),
         include_inactive: z.boolean().default(false),
         sort: z.enum(CREATURE_SORTS).default('experience'),
@@ -83,6 +96,14 @@ export function registerFindCreatures(server: McpServer, handle: TibiaDb): void 
       if (args.hitpoints_max !== undefined) bind(`${hitpointsExpr('c')} <= ?`, args.hitpoints_max);
       if (args.bestiary_class !== undefined) bind('c.bestiary_class = ? collate nocase', args.bestiary_class);
       if (args.is_boss !== undefined) bind('c.is_boss = ?', args.is_boss ? 1 : 0);
+      // The wiki records these as 0 or 1, or not at all, so an unrecorded one never matches.
+      if (args.sees_invisible !== undefined) bind('c.sees_invisible = ?', args.sees_invisible ? 1 : 0);
+      if (args.paralysable !== undefined) bind('c.paralysable = ?', args.paralysable ? 1 : 0);
+      if (args.pushable !== undefined) bind('c.pushable = ?', args.pushable ? 1 : 0);
+      // A cost of 0 is the wiki's way of saying it cannot be done.
+      if (args.summonable !== undefined) where.push(`c.summon_cost ${args.summonable ? '> 0' : '= 0'}`);
+      if (args.convinceable !== undefined) where.push(`c.convince_cost ${args.convinceable ? '> 0' : '= 0'}`);
+      if (args.bestiary_level !== undefined) bind('c.bestiary_level = ? collate nocase', args.bestiary_level);
       if (args.location_contains !== undefined) {
         bind('c.location like ? collate nocase', `%${args.location_contains}%`);
       }
@@ -112,6 +133,12 @@ export function registerFindCreatures(server: McpServer, handle: TibiaDb): void 
               return [e, num(v)];
             }),
           ),
+          runsAt: num(row.runs_at),
+          seesInvisible: bool(row.sees_invisible),
+          paralysable: bool(row.paralysable),
+          pushable: bool(row.pushable),
+          summonCost: num(row.summon_cost),
+          convinceCost: num(row.convince_cost),
         })),
         totalMatches: total.c,
         ...(offset + args.limit < total.c ? { nextCursor: encodeCursor(offset + args.limit) } : {}),

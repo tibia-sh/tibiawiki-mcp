@@ -7,6 +7,14 @@ import { ELEMENTS } from './domain.ts';
 export type Provenance = { version: string; generatedAt: string };
 export type TibiaDb = { db: DatabaseSync; provenance: Provenance; close(): void };
 
+/**
+ * A column value as the tools report it: SQL null stays null, and anything else becomes
+ * the type the output schema declares. undefined, a column the row lacks, counts as null.
+ */
+export const str = (v: unknown): string | null => (v === null || v === undefined ? null : String(v));
+export const num = (v: unknown): number | null => (v === null || v === undefined ? null : Number(v));
+export const bool = (v: unknown): boolean | null => (v === null || v === undefined ? null : Boolean(v));
+
 /** Thrown when the index opens but does not have the shape every tool assumes. */
 export class SchemaError extends Error {}
 

@@ -44,10 +44,12 @@ export function registerHowToObtain(server: McpServer, handle: TibiaDb): void {
   };
   // npc_offer_sell is the NPC selling TO the player. This is the obtaining
   // direction; npc_offer_buy is the player selling to the NPC, at a lower price.
+  // The table holds exact duplicate rows (Satsu's Cocktail Glass nine times), hence
+  // `distinct`.
   const vendors = (includeInactive: boolean) => {
     const status = statusClause('n', includeInactive);
     return db.prepare(
-      `select n.title as npc, n.city, o.value as price,
+      `select distinct n.title as npc, n.city, o.value as price,
               coalesce(cur.title, 'Gold Coin') as currency
        from npc_offer_sell o
        join npc n on n.article_id = o.npc_id

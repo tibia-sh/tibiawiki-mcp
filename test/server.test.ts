@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  CONVINCE_COST_MEANING, GOLD_PER_KILL_MEANING, IMAGE_MEANING, RASHID_PLACE_MEANING,
+  CONVINCE_COST_MEANING, FARE_MEANING, GOLD_PER_KILL_MEANING, IMAGE_MEANING, RASHID_PLACE_MEANING,
   RUNS_AT_MEANING, SUMMON_COST_MEANING, inGameNameSchema, inGamePluralSchema, inGameArticleSchema,
 } from '../src/domain.ts';
 import { CAPABILITIES } from '../src/server.ts';
@@ -71,6 +71,7 @@ test('the instructions tell a model what the zeros and nulls in results mean', a
     `goldPerKill: ${GOLD_PER_KILL_MEANING}`,
     `image: ${IMAGE_MEANING}`,
     RASHID_PLACE_MEANING,
+    FARE_MEANING,
   ]) {
     assert.ok(instructions.includes(meaning), `the instructions lack: ${meaning}`);
   }
@@ -79,6 +80,7 @@ test('the instructions tell a model what the zeros and nulls in results mean', a
   assert.match(CONVINCE_COST_MEANING, /0: cannot be convinced/);
   assert.match(GOLD_PER_KILL_MEANING, /^Estimated/);
   assert.match(RASHID_PLACE_MEANING, /city and position coordinates are null/);
+  assert.match(FARE_MEANING, /0: free or not recorded/);
 });
 
 test('each meaning in the instructions is the description of its output fields', async () => {
@@ -89,6 +91,7 @@ test('each meaning in the instructions is the description of its output fields',
   const creature = output('tibia_find_creatures').properties.results.items.properties;
   const boughtBy = branch('item').boughtBy.items.properties;
   const city = output('tibia_where_to_sell').properties.cities.items.properties;
+  const route = output('tibia_find_travel').properties.results.items.properties;
   for (const [where, description, meaning] of [
     ['tibia_find_creatures runsAt', creature.runsAt.description, RUNS_AT_MEANING],
     ['tibia_find_creatures summonCost', creature.summonCost.description, SUMMON_COST_MEANING],
@@ -104,6 +107,9 @@ test('each meaning in the instructions is the description of its output fields',
     ['tibia_where_to_sell city', city.city.description, RASHID_PLACE_MEANING],
     ['tibia_where_to_sell position',
       city.buyers.items.properties.position.description, RASHID_PLACE_MEANING],
+    ['tibia_get destinations price',
+      branch('npc').destinations.items.properties.price.description, FARE_MEANING],
+    ['tibia_find_travel price', route.price.description, FARE_MEANING],
   ] as const) {
     assert.equal(description, meaning, where);
   }
@@ -316,6 +322,7 @@ test('every paged tool refuses a cursor offset past a safe integer', async () =>
     ['tibia_find_spells', {}],
     ['tibia_find_quests', {}],
     ['tibia_find_houses', {}],
+    ['tibia_find_travel', { to: 'Carlin' }],
     ['tibia_find_updates', {}],
   ] as const) {
     const res = await h.client.callTool({ name, arguments: { ...args, cursor: huge } });

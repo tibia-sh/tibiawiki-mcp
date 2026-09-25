@@ -8,7 +8,7 @@ import {
   DETAILED_CREATURE_FIELDS, DETAILED_ITEM_FIELDS, coerceAttribute, type EntityType,
   runsAtSchema, summonCostSchema, convinceCostSchema, GOLD_PER_KILL, goldPerKillSchema,
   positionSchema, RASHID, RASHID_SCHEDULE, rashidScheduleSchema, rashidScheduleDay, buyerPlace,
-  buyerCitySchema, buyerPositionSchema, IMAGE_MEANING,
+  buyerCitySchema, buyerPositionSchema, IMAGE_MEANING, fareSchema,
   inGameNameSchema, inGamePluralSchema, inGameArticleSchema,
 } from '../domain.ts';
 
@@ -142,7 +142,7 @@ const npcOut = z.object({
   jobs: z.array(z.string()),
   races: z.array(z.string()),
   destinations: z.array(z.object({
-    name: z.string(), price: z.number().nullable(), notes: z.string().nullable(),
+    name: z.string(), price: fareSchema, notes: z.string().nullable(),
   })),
   // Only Rashid has one.
   rashidSchedule: rashidScheduleSchema.optional(),

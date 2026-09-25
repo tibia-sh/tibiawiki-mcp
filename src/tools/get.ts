@@ -8,6 +8,7 @@ import {
   DETAILED_CREATURE_FIELDS, DETAILED_ITEM_FIELDS, coerceAttribute, type EntityType,
   runsAtSchema, summonCostSchema, convinceCostSchema, GOLD_PER_KILL, goldPerKillSchema,
   positionSchema, RASHID, RASHID_SCHEDULE, rashidScheduleSchema, rashidScheduleDay, buyerPlace,
+  buyerCitySchema, buyerPositionSchema, IMAGE_MEANING,
 } from '../domain.ts';
 
 type Row = Record<string, unknown>;
@@ -38,7 +39,7 @@ const imageSchema = z.object({
   width: z.number(),
   height: z.number(),
   mimeType: z.string(),
-}).nullable().describe('Sprite image link. Dimensions are pixels, not map squares.');
+}).nullable().describe(IMAGE_MEANING);
 
 const creatureOut = z.object({
   type: z.literal('creature'),
@@ -114,7 +115,7 @@ const itemOut = z.object({
   })),
   boughtBy: z.array(z.object({
     npc: z.string(), price: z.number(), currency: z.string(),
-    city: z.string().nullable(), position: positionSchema,
+    city: buyerCitySchema, position: buyerPositionSchema,
   })),
   sounds: z.array(z.string()),
   detail, source: sourceSchema,

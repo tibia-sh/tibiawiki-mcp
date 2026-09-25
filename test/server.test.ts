@@ -1,7 +1,33 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import {
+  CONVINCE_COST_MEANING, GOLD_PER_KILL_MEANING, IMAGE_MEANING, RASHID_PLACE_MEANING,
+  RUNS_AT_MEANING, SUMMON_COST_MEANING,
+} from '../src/domain.ts';
 import { CAPABILITIES } from '../src/server.ts';
-import { connect } from './harness.ts';
+import { connect, connectTo, FIXTURE } from './harness.ts';
+
+/**
+ * Claude Code cuts server instructions and each tool description at 2,048 characters,
+ * silently (CLAUDE_CODE_MAX_MCP_DESCRIPTION_LENGTH), and a cut drops the end.
+ */
+const CLAUDE_CODE_CUT = 2048;
+const LICENCE = 'licensed CC BY-SA.';
+
+/**
+ * The `initialize` instructions and `tools/list` of a server on the fixture that reports
+ * the provenance of a real index, since the instructions carry it and its length counts.
+ */
+async function realisticHandshake() {
+  const h = await connectTo(FIXTURE, {
+    generatedAt: '2026-09-24T00:58:39.504571+00:00', version: '9.0.0',
+  });
+  try {
+    return { instructions: String(h.client.getInstructions()), tools: (await h.client.listTools()).tools };
+  } finally {
+    await h.close();
+  }
+}
 
 test('tools/list advertises tibia_get as read-only', async () => {
   const h = await connect();
@@ -20,6 +46,67 @@ test('the server instructions carry provenance and the CC-BY-SA attribution', as
   assert.match(String(instructions), /CipSoft/);
   assert.match(String(instructions), /9\.0\.0/);
   await h.close();
+});
+
+test('Claude Code\'s cut drops neither the instructions\' end nor any tool description\'s', async () => {
+  const { instructions, tools } = await realisticHandshake();
+  assert.ok(instructions.length <= CLAUDE_CODE_CUT, `instructions: ${instructions.length} characters`);
+  const licence = instructions.indexOf(LICENCE);
+  assert.ok(licence !== -1, 'the instructions carry the licence');
+  assert.ok(licence + LICENCE.length <= CLAUDE_CODE_CUT, 'the licence falls inside the cut');
+  for (const tool of tools) {
+    const length = (tool.description ?? '').length;
+    assert.ok(length <= CLAUDE_CODE_CUT, `${tool.name}'s description is ${length} characters`);
+  }
+});
+
+// A host gives the model the instructions and the input schemas, not the output schemas,
+// so a meaning a model needs to read a result has to reach it through the instructions.
+test('the instructions tell a model what the zeros and nulls in results mean', async () => {
+  const { instructions } = await realisticHandshake();
+  for (const meaning of [
+    `runsAt: ${RUNS_AT_MEANING}`,
+    `summonCost: ${SUMMON_COST_MEANING}`,
+    `convinceCost: ${CONVINCE_COST_MEANING}`,
+    `goldPerKill: ${GOLD_PER_KILL_MEANING}`,
+    `image: ${IMAGE_MEANING}`,
+    RASHID_PLACE_MEANING,
+  ]) {
+    assert.ok(instructions.includes(meaning), `the instructions lack: ${meaning}`);
+  }
+  assert.match(RUNS_AT_MEANING, /0: never flees/);
+  assert.match(SUMMON_COST_MEANING, /0: cannot be summoned/);
+  assert.match(CONVINCE_COST_MEANING, /0: cannot be convinced/);
+  assert.match(GOLD_PER_KILL_MEANING, /^Estimated/);
+  assert.match(RASHID_PLACE_MEANING, /city and position are null for Rashid/);
+});
+
+test('each meaning in the instructions is the description of its output fields', async () => {
+  const { tools } = await realisticHandshake();
+  const output = (name: string): any => tools.find((t) => t.name === name)!.outputSchema;
+  const branch = (type: string): any => output('tibia_get').oneOf
+    .find((b: any) => b.properties.type.const === type).properties;
+  const creature = output('tibia_find_creatures').properties.results.items.properties;
+  const boughtBy = branch('item').boughtBy.items.properties;
+  const city = output('tibia_where_to_sell').properties.cities.items.properties;
+  for (const [where, description, meaning] of [
+    ['tibia_find_creatures runsAt', creature.runsAt.description, RUNS_AT_MEANING],
+    ['tibia_find_creatures summonCost', creature.summonCost.description, SUMMON_COST_MEANING],
+    ['tibia_find_creatures convinceCost', creature.convinceCost.description, CONVINCE_COST_MEANING],
+    ['tibia_find_creatures goldPerKill', creature.goldPerKill.description, GOLD_PER_KILL_MEANING],
+    ['tibia_get runsAt', branch('creature').runsAt.description, RUNS_AT_MEANING],
+    ['tibia_get summonCost', branch('creature').summonCost.description, SUMMON_COST_MEANING],
+    ['tibia_get convinceCost', branch('creature').convinceCost.description, CONVINCE_COST_MEANING],
+    ['tibia_get goldPerKill', branch('creature').goldPerKill.description, GOLD_PER_KILL_MEANING],
+    ['tibia_get image', branch('creature').image.description, IMAGE_MEANING],
+    ['tibia_get boughtBy city', boughtBy.city.description, RASHID_PLACE_MEANING],
+    ['tibia_get boughtBy position', boughtBy.position.description, RASHID_PLACE_MEANING],
+    ['tibia_where_to_sell city', city.city.description, RASHID_PLACE_MEANING],
+    ['tibia_where_to_sell position',
+      city.buyers.items.properties.position.description, RASHID_PLACE_MEANING],
+  ] as const) {
+    assert.equal(description, meaning, where);
+  }
 });
 
 test('the server tells clients its tool list never changes', async () => {

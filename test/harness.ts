@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { DB_PATH } from '@tibia.sh/tibiawiki-data';
 import { InMemoryTransport } from '@modelcontextprotocol/server';
 import { Client, type Tool } from '@modelcontextprotocol/client';
-import { openDb } from '../src/db.ts';
+import { openDb, type Provenance } from '../src/db.ts';
 import { createServer } from '../src/server.ts';
 
 export const FIXTURE = new URL('./fixtures/tibiawiki-fixture.db', import.meta.url).pathname;
@@ -61,10 +61,13 @@ export async function withRealIndex<T>(fn: (client: Client) => Promise<T>): Prom
   }
 }
 
-/** A client on the index at `path`, for tests that build a scratch copy of the fixture. */
-export async function connectTo(path: string) {
+/**
+ * A client on the index at `path`, for tests that build a scratch copy of the fixture.
+ * `provenance` stands in for the index's own, for tests that measure text it lengthens.
+ */
+export async function connectTo(path: string, provenance?: Provenance) {
   const handle = openDb(path);
-  const server = createServer(handle);
+  const server = createServer(provenance ? { ...handle, provenance } : handle);
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
   await server.connect(serverTransport);
   const client = new Client({ name: 'test-harness', version: '1.0.0' });
@@ -102,7 +105,7 @@ export const MODEL_FACING_BUDGET = 16_000;
  *
  * Output schemas cost Claude Code's model nothing, but some hosts load every schema into
  * context, and every client carries the full answer over the wire. On the fixture the
- * total is 45,469 bytes, 31,313 of them output schemas, most of it `tibia_get`'s
+ * total is 46,027 bytes, 31,871 of them output schemas, most of it `tibia_get`'s
  * fourteen-member union. 64,000 is about 40% above that, which leaves room for output
  * schemas to grow while still catching runaway growth.
  */

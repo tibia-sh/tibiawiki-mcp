@@ -33,10 +33,9 @@ const GLYPHS: Record<number, string> = { 0: '.', 1: '#', 2: '@', 3: '*' };
 export const AREA_LEGEND =
   'Grid of map tiles, row-major, as the caster faces. ' +
   "'.' unaffected tile, '#' effect tile, '@' the caster, '*' the target tile, " +
-  "digits 4-8 extra sprite layers (a second effect the scene draws), '?' an " +
-  'unrecognised value. effectTiles counts effect tiles only. effectOnCaster says ' +
-  'whether the caster is caught in its own effect; it is stated by the wiki, not ' +
-  'read off the grid.';
+  "digits 4-8 a second effect the scene draws on extra sprite layers, '?' an " +
+  'unrecognised value. effectTiles counts effect tiles only. effectOnCaster, from the ' +
+  'wiki rather than the grid, says whether the caster is caught in its own effect.';
 
 function glyph(value: number): string {
   if (Object.hasOwn(GLYPHS, value)) return GLYPHS[value]!;

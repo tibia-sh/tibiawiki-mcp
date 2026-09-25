@@ -60,6 +60,16 @@ test('Claude Code\'s cut drops neither the instructions\' end nor any tool descr
   }
 });
 
+// The facts that no other test pins, so trimming the instructions cannot drop them.
+test('the instructions keep the snapshot, modifier and spell-area caveats', async () => {
+  const { instructions } = await realisticHandshake();
+  assert.match(instructions, /not live game state/);
+  assert.match(instructions, /Damage modifiers are percentages where 100 is neutral/);
+  assert.match(instructions, /above 100 the creature takes extra damage/);
+  assert.match(instructions, /present for a minority of spells/);
+  assert.match(instructions, /creature area glyphs do not apply/);
+});
+
 // A host gives the model the instructions and the input schemas, not the output schemas,
 // so a meaning a model needs to read a result has to reach it through the instructions.
 test('the instructions tell a model what the zeros and nulls in results mean', async () => {

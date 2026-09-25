@@ -45,17 +45,13 @@ export const CAPABILITIES = Object.freeze({ tools: Object.freeze({ listChanged: 
 export const ATTRIBUTION =
   'Data from TibiaWiki (https://tibia.fandom.com), licensed CC BY-SA. ' +
   'Tibia is made by CipSoft; game content and images are copyright CipSoft GmbH. ' +
-    'Images are linked from TibiaWiki, not stored or redistributed by this server; '+
-    'each image carries a descriptionUrl, the wiki page holding its licence and author. ' +
-    'A spell may carry areaShape: the tiles it covers, DERIVED by decoding the wiki\'s ' +
-    'own animation rather than read from tile data, and present for a minority of spells. ' +
-    'It marks affected tiles only - it does not distinguish the caster or target tile, and ' +
-    'is not caster-relative, so the glyph vocabulary of a creature ability area does not ' +
-    'apply to it. The wiki page carrying that image\'s licence and author is ' +
-    'https://tibia.fandom.com/wiki/File: followed by sourceImage with spaces ' +
-    'replaced by underscores. ' +
-    'corroborated means a second image of the same spell agreed; false does ' +
-    'not mean unsupported, since most uncorroborated shapes match other spells\' images.';
+  'Images are linked from TibiaWiki, not stored or redistributed. Each image\'s ' +
+  'descriptionUrl is its licence page. For a spell\'s areaShape, that page is ' +
+  'https://tibia.fandom.com/wiki/File: followed by sourceImage with spaces replaced by ' +
+  'underscores. areaShape is DERIVED by decoding the wiki\'s animation and present for a ' +
+  'minority of spells. It marks affected tiles only, does not distinguish the caster or ' +
+  'target tile and is not caster-relative, so creature area glyphs do not apply. ' +
+  'corroborated means a second image agreed, and false does not mean unsupported.';
 
 /**
  * What result fields mean, in the words of their output schemas: a host gives the model
@@ -79,9 +75,9 @@ export function createServer(handle: TibiaDb): McpServer {
       capabilities: CAPABILITIES,
       instructions:
         'TibiaWiki knowledge base: a snapshot of the wiki generated ' +
-        `${provenance.generatedAt} by tibiawiki-sql ${provenance.version}. It reflects the wiki ` +
-        'as of that time, not live game or server state. Damage modifiers are percentages where ' +
-        '100 is neutral: above 100 the creature takes extra damage from that element. ' +
+        `${provenance.generatedAt} by tibiawiki-sql ${provenance.version}, not live game state. ` +
+        'Damage modifiers are percentages where 100 is neutral and above 100 the creature takes ' +
+        'extra damage from that element. ' +
         FIELD_MEANINGS + ATTRIBUTION,
     },
   );

@@ -125,8 +125,9 @@ test('an output schema adds to the total but not to what the model reads', () =>
   assert.equal(measureToolsList([small, large]).modelFacing, 2 * expected);
 });
 
-// A description that still named five types would send a client looking for houses
-// or imbuements somewhere else entirely.
+// A tool that still named five types would send a client looking for houses or
+// imbuements somewhere else entirely. The descriptions no longer list the kinds of
+// page: the input enums do, and the input schema reaches the model like a description.
 test('the lookup tools advertise every entity type they accept', async () => {
   const handle = openDb(FIXTURE);
   const server = createServer(handle);
@@ -135,14 +136,15 @@ test('the lookup tools advertise every entity type they accept', async () => {
   const client = new Client({ name: 'desc', version: '1.0.0' });
   await client.connect(ct);
   const { tools } = await client.listTools();
-  for (const name of ['tibia_get', 'tibia_search']) {
+  const enums: Record<string, (tool: Tool) => unknown> = {
+    tibia_get: (tool) => (tool.inputSchema.properties as any).type.enum,
+    tibia_search: (tool) => (tool.inputSchema.properties as any).types.items.enum,
+  };
+  for (const [name, enumOf] of Object.entries(enums)) {
     const tool = tools.find((t) => t.name === name)!;
-    const description = tool.description!;
-    const missing = ENTITY_TYPES.filter((t) => !description.toLowerCase().includes(t));
-    assert.deepEqual(missing, [], `${name} does not mention: ${missing.join(', ')}`);
-    // The input schema ships to the model too. A `.describe()` saying "all five"
-    // passed this test while the description was correct, because only the
-    // description was read.
+    assert.deepEqual(enumOf(tool), [...ENTITY_TYPES], `${name} does not enumerate every entity type`);
+    // A `.describe()` saying "all five" once passed while the list was complete,
+    // because only the list was read.
     const schema = JSON.stringify(tool.inputSchema ?? {}).toLowerCase();
     assert.ok(!/all five|five kinds|five types/.test(schema),
       `${name} inputSchema still claims five entity types`);

@@ -94,10 +94,11 @@ export async function connectTo(path: string, provenance?: Provenance) {
  * There, output schemas do not reach the model, so they do not count here. Other hosts
  * were not checked.
  *
- * On the fixture the helper measures 15,115 bytes model-facing, names included.
+ * On the fixture the helper measures 14,738 bytes model-facing, names included.
  * This is the number meant to force the conversation: if you approach it, trim a
  * description before you raise it. The server instructions are no escape hatch, since
- * they have their own 2,048-character cap in test/server.test.ts and little room left.
+ * they have their own 2,048-character cap in test/server.test.ts, and with a real
+ * index's provenance they measure 1,554 characters.
  */
 export const MODEL_FACING_BUDGET = 16_000;
 
@@ -106,7 +107,7 @@ export const MODEL_FACING_BUDGET = 16_000;
  *
  * Output schemas cost Claude Code's model nothing, but some hosts load every schema into
  * context, and every client carries the full answer over the wire. On the fixture the
- * total is 53,486 bytes, 36,920 of them output schemas, most of it `tibia_get`'s
+ * total is 53,107 bytes, 36,920 of them output schemas, most of it `tibia_get`'s
  * fourteen-member union. 64,000 is about 20% above that, which leaves room for output
  * schemas to grow while still catching runaway growth.
  */

@@ -4,7 +4,7 @@ import { str, num, bool, type TibiaDb } from '../db.ts';
 import {
   ITEM_SORTS, itemSort, eavOperator, statusClause, coerceAttribute, REPORTED_ATTRS,
   ITEM_RESISTANCES, resistanceAttribute, ITEM_SKILLS, ITEM_HANDS, type EavOperator,
-  inGameNameSchema,
+  inGameNameSchema, SPELL_ELEMENTS, ITEM_LEECHES, leechAttribute,
 } from '../domain.ts';
 import { encodeCursor, decodeCursor } from '../cursor.ts';
 
@@ -59,6 +59,8 @@ export function registerFindItems(server: McpServer, handle: TibiaDb): void {
         imbuement_slots_min: z.number().int().optional(),
         weight_max: z.number().optional().describe('In oz. Items without a weight never match.'),
         hands: z.enum(ITEM_HANDS).optional(),
+        damage_type: z.enum(SPELL_ELEMENTS).optional().describe('Weapon element.'),
+        leech: z.array(z.enum(ITEM_LEECHES)).optional().describe('Leeches everything listed.'),
         is_stackable: z.boolean().optional(),
         is_pickupable: z.boolean().optional(),
         client_ids: z.array(z.number().int().positive()).min(1).max(100).optional()
@@ -130,6 +132,9 @@ export function registerFindItems(server: McpServer, handle: TibiaDb): void {
       if (args.imbuement_slots_min !== undefined) numeric('imbuement_slots', 'gte', args.imbuement_slots_min);
       if (args.weight_max !== undefined) bind('i.weight <= ?', args.weight_max);
       if (args.hands !== undefined) equals('hands', args.hands);
+      if (args.damage_type !== undefined) equals('damage_type', args.damage_type);
+      // Leech amounts read "5%", and the cast reads the leading integer.
+      for (const leech of args.leech ?? []) numeric(leechAttribute(leech), 'gt', 0);
       // Both are 0 or 1 in every item row.
       if (args.is_stackable !== undefined) bind('i.is_stackable = ?', args.is_stackable ? 1 : 0);
       if (args.is_pickupable !== undefined) bind('i.is_pickupable = ?', args.is_pickupable ? 1 : 0);

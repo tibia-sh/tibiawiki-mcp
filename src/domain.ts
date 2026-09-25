@@ -58,6 +58,23 @@ export function resistanceAttribute(element: ItemResistance): string {
   return RESISTANCE_ATTRS[element];
 }
 
+/**
+ * The leeches an item can carry, lowercased, and the attribute recording each. The
+ * attributes hold a percentage such as "5%", read by its leading integer.
+ */
+export const ITEM_LEECHES = ['life', 'mana'] as const;
+export type ItemLeech = (typeof ITEM_LEECHES)[number];
+const LEECH_ATTRS: Record<ItemLeech, string> = {
+  life: 'hp_leech_amount',
+  mana: 'mana_leech_amount',
+};
+export function leechAttribute(leech: ItemLeech): string {
+  if (!Object.hasOwn(LEECH_ATTRS, leech)) {
+    throw new Error(`Unknown leech: ${String(leech)}`);
+  }
+  return LEECH_ATTRS[leech];
+}
+
 /** The skill bonus attributes of an item, each a signed number such as "+2". */
 export const ITEM_SKILLS = [
   'magic_level', 'sword', 'axe', 'club', 'distance', 'fist', 'shielding',
@@ -674,12 +691,13 @@ export const DETAILED_ITEM_FIELDS = ['flavor_text'] as const;
  * `cast('33 +3' as integer)` is 33, so `defense_min: 33` still matches.
  */
 export const NUMERIC_ATTRS: readonly string[] = [
-  'attack', 'defense', 'armor', 'required_level', 'imbuement_slots',
+  'attack', 'defense', 'armor', 'required_level', 'imbuement_slots', 'range',
   ...Object.values(RESISTANCE_ATTRS), ...ITEM_SKILLS,
 ];
 
 export const REPORTED_ATTRS: ReadonlySet<string> = new Set<string>([
-  ...NUMERIC_ATTRS, 'required_vocation', 'weapon_type', 'hands',
+  ...NUMERIC_ATTRS, 'required_vocation', 'weapon_type', 'hands', 'damage_type',
+  ...Object.values(LEECH_ATTRS),
 ]);
 
 export function coerceAttribute(name: string, value: unknown): string | number {

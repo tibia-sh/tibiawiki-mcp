@@ -2,6 +2,10 @@ import { readFileSync } from 'node:fs';
 import { z } from 'zod';
 import { McpServer } from '@modelcontextprotocol/server';
 import type { TibiaDb } from './db.ts';
+import {
+  CONVINCE_COST_MEANING, GOLD_PER_KILL_MEANING, IMAGE_MEANING, RASHID_PLACE_MEANING,
+  RUNS_AT_MEANING, SUMMON_COST_MEANING,
+} from './domain.ts';
 import { registerGet, NAME as GET } from './tools/get.ts';
 import { registerSearch, NAME as SEARCH } from './tools/search.ts';
 import { registerFindCreatures, NAME as FIND_CREATURES } from './tools/find-creatures.ts';
@@ -51,6 +55,15 @@ export const ATTRIBUTION =
     'corroborated means a second image of the same spell agreed; false does ' +
     'not mean unsupported, since most uncorroborated shapes match other spells\' images.';
 
+/**
+ * What result fields mean, in the words of their output schemas: a host gives the model
+ * these instructions, not the output schemas.
+ */
+const FIELD_MEANINGS =
+  `What result fields mean. runsAt: ${RUNS_AT_MEANING} summonCost: ${SUMMON_COST_MEANING} ` +
+  `convinceCost: ${CONVINCE_COST_MEANING} goldPerKill: ${GOLD_PER_KILL_MEANING} ` +
+  `image: ${IMAGE_MEANING} ${RASHID_PLACE_MEANING} `;
+
 export const TOOL_NAMES = [
   GET, SEARCH, FIND_CREATURES, FIND_ITEMS, FIND_SPELLS, FIND_QUESTS, FIND_HOUSES, HOW_TO_OBTAIN,
   FIND_UPDATES, WHERE_TO_SELL,
@@ -67,7 +80,7 @@ export function createServer(handle: TibiaDb): McpServer {
         `${provenance.generatedAt} by tibiawiki-sql ${provenance.version}. It reflects the wiki ` +
         'as of that time, not live game or server state. Damage modifiers are percentages where ' +
         '100 is neutral: above 100 the creature takes extra damage from that element. ' +
-        ATTRIBUTION,
+        FIELD_MEANINGS + ATTRIBUTION,
     },
   );
 

@@ -132,13 +132,29 @@ export const CREATURE_BESTIARY_LEVELS = [
 ] as const;
 
 /**
+ * What a model needs to read a result correctly, written once. Each text is the description
+ * of its output fields and a sentence of the server instructions: a host gives the model the
+ * instructions and the input schemas, not the output schemas, so the instructions are where
+ * the model learns it, and sharing the text keeps the two from drifting.
+ */
+export const RUNS_AT_MEANING = 'Hit points at which it flees. 0: never flees.';
+export const SUMMON_COST_MEANING = 'Mana. 0: cannot be summoned.';
+export const CONVINCE_COST_MEANING = 'Mana. 0: cannot be convinced.';
+export const GOLD_PER_KILL_MEANING =
+  'Estimated gross loot value at NPC prices. Drops without a recorded chance are left out, ' +
+  'and items that sell only on the market count as 0.';
+export const IMAGE_MEANING = 'Sprite image link. Dimensions are pixels, not map squares.';
+export const RASHID_PLACE_MEANING =
+  "A buyer's city and position are null for Rashid, who moves city daily. His NPC page and " +
+  'tibia_where_to_sell give his week as rashidSchedule.';
+
+/**
  * Creature numbers the wiki gives a meaning at 0, described once for every tool that
  * reports them. The value is reported as the wiki records it.
  */
-export const runsAtSchema = z.number().nullable()
-  .describe('Hit points at which it flees. 0: never flees.');
-export const summonCostSchema = z.number().nullable().describe('Mana. 0: cannot be summoned.');
-export const convinceCostSchema = z.number().nullable().describe('Mana. 0: cannot be convinced.');
+export const runsAtSchema = z.number().nullable().describe(RUNS_AT_MEANING);
+export const summonCostSchema = z.number().nullable().describe(SUMMON_COST_MEANING);
+export const convinceCostSchema = z.number().nullable().describe(CONVINCE_COST_MEANING);
 
 /**
  * The best gold price an NPC pays for each item, as a subquery with one row per item:
@@ -177,10 +193,7 @@ export const GOLD_PER_KILL =
     where d.chance is not null
     group by d.creature_id`;
 
-export const goldPerKillSchema = z.number().nullable().describe(
-  'Estimated gross loot value at NPC prices. Drops without a recorded chance are left out, ' +
-    'and items that sell only on the market count as 0.',
-);
+export const goldPerKillSchema = z.number().nullable().describe(GOLD_PER_KILL_MEANING);
 
 /** Map coordinates, each null where the wiki records none. */
 export const positionSchema = z.object({
@@ -219,6 +232,10 @@ export const rashidScheduleDay = (row: Record<string, unknown>) => ({
   city: String(row.city), location: String(row.location),
   position: { x: Number(row.x), y: Number(row.y), z: Number(row.z) },
 });
+
+/** A buyer's city and position, as `buyerPlace` reports them. */
+export const buyerCitySchema = z.string().nullable().describe(RASHID_PLACE_MEANING);
+export const buyerPositionSchema = positionSchema.describe(RASHID_PLACE_MEANING);
 
 /** Where a buyer stands: its recorded city and position, or none for Rashid, who travels. */
 export const buyerPlace = (npc: string, city: string | null, position: Position) =>

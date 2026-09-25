@@ -2,13 +2,13 @@ import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/server';
 import { str, num, type TibiaDb } from '../db.ts';
 import {
-  asciiLower, BEST_GOLD_PRICE, buyerPlace, positionSchema, RASHID, RASHID_SCHEDULE,
-  rashidScheduleSchema, rashidScheduleDay,
+  asciiLower, BEST_GOLD_PRICE, buyerCitySchema, buyerPlace, buyerPositionSchema, RASHID,
+  RASHID_SCHEDULE, rashidScheduleSchema, rashidScheduleDay,
 } from '../domain.ts';
 
 const buyerSchema = z.object({
   npc: z.string(),
-  position: positionSchema,
+  position: buyerPositionSchema,
   rashidSchedule: rashidScheduleSchema.optional(),
   items: z.array(z.object({ item: z.string(), price: z.number() })),
 });
@@ -16,7 +16,7 @@ type Buyer = z.infer<typeof buyerSchema>;
 
 const outputSchema = z.object({
   cities: z.array(z.object({
-    city: z.string().nullable().describe('null for Rashid, who moves daily: see rashidSchedule.'),
+    city: buyerCitySchema,
     buyers: z.array(buyerSchema),
   })),
   noGoldBuyer: z.array(z.string()).describe('Items no active NPC buys for gold.'),

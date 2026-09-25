@@ -184,18 +184,27 @@ export const BEST_GOLD_PRICE =
    ) where rank = 1`;
 
 /**
+ * What each coin is worth in gold, by item title. The titles hold no quote, so GOLD_PER_KILL
+ * writes them into its SQL as literals.
+ */
+const COIN_FACE_VALUES: Readonly<Record<string, number>> = {
+  'Gold Coin': 1, 'Platinum Coin': 100, 'Crystal Coin': 10000,
+};
+
+/**
  * Estimated gold per kill, as a subquery with one row per creature that has a drop with a
  * recorded chance: `creature_id` and `gold_per_kill`. Each such drop is worth
  * chance / 100 x average amount x unit value, summed and rounded to an integer. The amount
  * is `max` when `min` is 0, since tibiawiki-sql stores an amount written without a range
- * as `min` 0, and the midpoint of the range otherwise. Coins count at face value, any other
- * item at its BEST_GOLD_PRICE, and an item with neither counts 0.
+ * as `min` 0, and the midpoint of the range otherwise. Coins count at COIN_FACE_VALUES, any
+ * other item at its BEST_GOLD_PRICE, and an item with neither counts 0.
  */
 export const GOLD_PER_KILL =
   `select d.creature_id, cast(round(sum(d.chance / 100.0
             * (case when d.min = 0 then d.max else (d.min + d.max) / 2.0 end)
-            * coalesce(case i.title when 'Gold Coin' then 1 when 'Platinum Coin' then 100
-                                    when 'Crystal Coin' then 10000 end, best.price, 0)
+            * coalesce(case i.title ${Object.entries(COIN_FACE_VALUES)
+                .map(([title, value]) => `when '${title}' then ${value}`).join(' ')} end,
+                       best.price, 0)
           )) as integer) as gold_per_kill
      from creature_drop d
      join item i on i.article_id = d.item_id

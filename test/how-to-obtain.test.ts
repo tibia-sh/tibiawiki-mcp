@@ -107,6 +107,21 @@ test('the name the game prints answers for its item', async () => {
   });
 });
 
+test('a plural the index does not record answers for its item', async () => {
+  const h = await connect();
+  try {
+    for (const [name, title] of [['gold coins', 'Gold Coin'], ['scarab coins', 'Scarab Coin']]) {
+      const res = await h.client.callTool({ name: 'tibia_how_to_obtain', arguments: { item_name: name } });
+      assert.notEqual(res.isError, true, JSON.stringify(res.content));
+      assert.equal((res.structuredContent as ObtainOut).item, title);
+    }
+    const res = await h.client.callTool({ name: 'tibia_how_to_obtain', arguments: { item_name: 'blorbs' } });
+    assert.equal(res.isError, true);
+  } finally {
+    await h.close();
+  }
+});
+
 test('a name two items print is an error naming both', async () => {
   const h = await connect();
   try {

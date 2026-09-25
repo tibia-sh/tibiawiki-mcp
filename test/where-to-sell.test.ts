@@ -86,6 +86,18 @@ test('a name the game prints sells as its item, under the name the caller wrote'
   }
 });
 
+test('a plural the index does not record sells as its item', async () => {
+  const answer = await whereToSell(['gold coins', 'scarab coins']);
+  const sold = answer.cities.flatMap((c) => c.buyers.flatMap((b) => b.items));
+  assert.deepEqual(
+    [...sold.map((i) => i.item), ...answer.noGoldBuyer].sort(byFold),
+    ['Gold Coin', 'Scarab Coin'],
+  );
+  for (const i of sold) assert.equal(i.input, `${asciiLower(i.item)}s`);
+  assert.deepEqual(answer.unknownItems, []);
+  assert.deepEqual(answer.ambiguousItems, []);
+});
+
 test('two names for an item with no buyer list it once', async () => {
   await withRealIndex(async (client) => {
     const answer = await askWhereToSell(client, ['Lifefluid', 'vial of lifefluid']);

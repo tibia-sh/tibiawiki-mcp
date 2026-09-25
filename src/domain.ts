@@ -463,7 +463,7 @@ const firstFound = (...pools: NameRow[][]): NameRow[] => pools.find((p) => p.len
  * Otherwise, with `dropsOf`, the items with that title, actual_name or plural that a
  * creature in it drops. Failing that, the first step that finds anything: the title,
  * whatever the status (titles are unique), then the actual_name of active items, then
- * their plural.
+ * their plural, then the name read as a plural, as with a count above 1.
  *
  * `dropsOf` holds creature article ids: one creature, or each creature an ambiguous
  * creature name could mean. Names that begin with an article or a number are decorations,
@@ -476,7 +476,7 @@ export function resolveItemName(
 ): ResolvedItem[] {
   const folded = asciiLower(name);
   const counted = count !== undefined && count > 1;
-  const singulars = counted ? singularForms(folded) : [];
+  const singulars = singularForms(folded);
   const isSingular = (text: string | null) => text !== null && singulars.includes(text);
   const fold = (v: unknown) => (v === null ? null : asciiLower(String(v)));
   const rows = db.prepare(ITEM_NAME_ROWS)
@@ -496,16 +496,23 @@ export function resolveItemName(
   const byName = rows.filter((r) => r.byName);
   const byPlural = rows.filter((r) => r.byPlural);
 
+  const asPlural = (): NameRow[] => {
+    let pool = firstFound(rows.filter((r) => r.byPlural || r.bySingular), byTitle, byName);
+    if (dropsOf) pool = narrow(pool, (r) => r.dropped);
+    if (pool.length > 1) pool = narrow(pool, (r) => r.stackable);
+    return pool;
+  };
+
   let found: NameRow[];
   if (counted) {
-    found = firstFound(rows.filter((r) => r.byPlural || r.bySingular), byTitle, byName);
-    if (dropsOf) found = narrow(found, (r) => r.dropped);
-    if (found.length > 1) found = narrow(found, (r) => r.stackable);
+    found = asPlural();
   } else {
     const dropped = dropsOf
       ? rows.filter((r) => r.dropped && (r.byTitle || r.byName || r.byPlural))
       : [];
     found = firstFound(dropped, byTitle, byName, byPlural);
+    // A plural written without a count ("gold coins"), once nothing else matches.
+    if (found.length === 0) found = asPlural();
   }
   // By title as the nocase collation orders it, then exactly.
   const byCode = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);

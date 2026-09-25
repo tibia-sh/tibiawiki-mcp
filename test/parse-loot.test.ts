@@ -18,22 +18,30 @@ type Line = {
   note: string | null;
   items: Entry[];
 };
-type Answer = {
-  lines: Line[];
+type Compact = {
   totals: {
     items: Array<{ item: string; count: number; value: number | null }>;
     gold: number; unresolved: number; unpriced: number;
   };
+  unresolvedEntries: Array<{ line: number; text: string; candidates: string[] }>;
   unparsed: string[];
   indexGeneratedAt: string;
 };
+type Answer = Compact & { lines: Line[] };
 
-async function askParseLoot(client: Client, text: string): Promise<Answer> {
-  const res = await client.callTool({ name: 'tibia_parse_loot', arguments: { text } });
+async function callParseLoot(client: Client, args: Record<string, unknown>): Promise<Compact> {
+  const res = await client.callTool({ name: 'tibia_parse_loot', arguments: args });
   // The server checks structuredContent against the output schema, so a success is
   // also a schema check.
   assert.notEqual(res.isError, true, `expected success, got: ${JSON.stringify(res.content)}`);
-  return res.structuredContent as Answer;
+  return res.structuredContent as Compact;
+}
+
+/** The answer with each line's items, which most tests read. */
+async function askParseLoot(client: Client, text: string): Promise<Answer> {
+  const answer = await callParseLoot(client, { text, include_lines: true });
+  assert.ok('lines' in answer, 'include_lines gives the lines');
+  return answer as Answer;
 }
 
 async function parseLoot(text: string): Promise<Answer> {
@@ -121,6 +129,29 @@ test('a loot line gives its creature, note, items, client IDs, prices and totals
   assert.match(answer.indexGeneratedAt, /\S/);
 });
 
+test('by default the answer leaves out the lines and names each unresolved entry', async () => {
+  const text = 'Loot of a dragon: a book, 2 gold coins\n\nhello\r\nLoot of a dragon: 0 gold coins, a blorb.';
+  const h = await connect();
+  try {
+    for (const args of [{ text }, { text, include_lines: false }]) {
+      const answer = await callParseLoot(h.client, args);
+      assert.deepEqual(Object.keys(answer).sort(),
+        ['indexGeneratedAt', 'totals', 'unparsed', 'unresolvedEntries']);
+      assert.deepEqual(answer.unresolvedEntries, [
+        { line: 1, text: 'a book', candidates: ['Book (Brown)', 'Book (Gemmed)'] },
+        { line: 4, text: '0 gold coins', candidates: [] },
+        { line: 4, text: 'a blorb', candidates: [] },
+      ]);
+      assert.deepEqual(answer.totals, {
+        items: [{ item: 'Gold Coin', count: 2, value: 2 }], gold: 2, unresolved: 3, unpriced: 0,
+      });
+      assert.deepEqual(answer.unparsed, ['hello']);
+    }
+  } finally {
+    await h.close();
+  }
+});
+
 test('coins count at face value', async () => {
   const answer = await parseLoot('Loot of a dragon: 3 platinum coins, a crystal coin, 5 gold coins');
   assert.deepEqual(answer.lines[0]!.items.map((e) => [e.item, e.unitPrice, e.value]), [
@@ -177,6 +208,9 @@ test('a count of 0, over 1,000,000 or not an integer is unresolved, and the rest
     items: [{ item: 'Gold Coin', count: 1000000, value: 1000000 }],
     gold: 1000000, unresolved: 4, unpriced: 0,
   });
+  assert.deepEqual(answer.unresolvedEntries.map((e) => [e.line, e.text]), [
+    [1, '0 gold coins'], [1, '1000001 gold coins'], [1, '2.5 gold coins'], [1, '-3 gold coins'],
+  ]);
 });
 
 // Review Focus 2: what the creature does not settle stays out of the totals.
@@ -194,6 +228,10 @@ test('an ambiguous item the creature does not settle and an unknown item stay un
   assert.deepEqual(answer.totals, {
     items: [{ item: 'Gold Coin', count: 2, value: 2 }], gold: 2, unresolved: 2, unpriced: 0,
   });
+  assert.deepEqual(answer.unresolvedEntries, [
+    { line: 1, text: 'a book', candidates: ['Book (Brown)', 'Book (Gemmed)'] },
+    { line: 1, text: 'a blorb', candidates: [] },
+  ]);
 });
 
 test('an unknown creature is reported, and its items resolve without it', async () => {

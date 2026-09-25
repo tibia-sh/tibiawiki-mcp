@@ -26,13 +26,18 @@ const lineSchema = z.object({
 type Line = z.infer<typeof lineSchema>;
 
 const outputSchema = z.object({
-  lines: z.array(lineSchema),
+  lines: z.array(lineSchema).optional().describe('Each loot line, with include_lines.'),
   totals: z.object({
     items: z.array(z.object({ item: z.string(), count: z.number(), value: z.number().nullable() })),
     gold: z.number().describe('Sum of the priced values.'),
     unresolved: z.number().describe('Entries with no single item.'),
     unpriced: z.number().describe('Entries of an item with no price.'),
   }),
+  unresolvedEntries: z.array(z.object({
+    line: z.number().describe('Line number in the input, from 1.'),
+    text: z.string(),
+    candidates: candidatesSchema,
+  })).describe('Entries with no single item.'),
   unparsed: z.array(z.string()).describe('Lines that are no loot message.'),
   indexGeneratedAt: z.string(),
 });
@@ -78,22 +83,24 @@ export function registerParseLoot(server: McpServer, handle: TibiaDb): void {
     {
       description:
         'Parses loot messages as the game prints them, one per line, such as "12:34 Loot of ' +
-        'a dragon: 2 small diamonds, a steel shield (active prey bonus)." Gives each item ' +
-        'with its count, client ID and value, and totals. Prices are NPC prices in gold, ' +
-        'coins at face value. Other lines come back as unparsed.',
+        'a dragon: 2 small diamonds, a steel shield (active prey bonus)." Gives totals by ' +
+        'item with count and value, and the entries it cannot resolve. Prices are NPC prices ' +
+        'in gold, coins at face value. Other lines come back as unparsed.',
       inputSchema: z.object({
         text: z.string().min(1).max(20_000).describe('Loot messages, one per line.'),
+        include_lines: z.boolean().default(false)
+          .describe('Also give each line with its items, client IDs and prices.'),
       }),
       outputSchema,
       annotations: { readOnlyHint: true, openWorldHint: false },
     },
-    async ({ text }) => {
+    async ({ text, include_lines }) => {
       const lines: Line[] = [];
       const unparsed: string[] = [];
       const resolved: Array<{ entry: Entry; articleId: number }> = [];
-      let unresolved = 0;
+      const unresolvedEntries: Array<{ line: number; text: string; candidates: string[] }> = [];
 
-      for (const raw of text.split(/\r\n|\r|\n/)) {
+      for (const [index, raw] of text.split(/\r\n|\r|\n/).entries()) {
         const line = raw.trim();
         if (line === '') continue;
         const match = LOOT_LINE.exec(line);
@@ -119,8 +126,13 @@ export function registerParseLoot(server: McpServer, handle: TibiaDb): void {
             candidates: matches.length > 1 ? matches.map((i) => i.title) : [],
             clientId: null, unitPrice: null, value: null,
           };
-          if (matches.length === 1) resolved.push({ entry, articleId: matches[0]!.articleId });
-          else unresolved += 1;
+          if (matches.length === 1) {
+            resolved.push({ entry, articleId: matches[0]!.articleId });
+          } else {
+            unresolvedEntries.push({
+              line: index + 1, text: entryText, candidates: entry.candidates,
+            });
+          }
           items.push(entry);
         }
         lines.push({
@@ -158,11 +170,12 @@ export function registerParseLoot(server: McpServer, handle: TibiaDb): void {
       }
 
       const output = {
-        lines,
+        ...(include_lines ? { lines } : {}),
         totals: {
           items: [...totals.values()].sort((a, b) => titleOrder(a.item, b.item)),
-          gold, unresolved, unpriced,
+          gold, unresolved: unresolvedEntries.length, unpriced,
         },
+        unresolvedEntries,
         unparsed,
         indexGeneratedAt: provenance.generatedAt,
       };

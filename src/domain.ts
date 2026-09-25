@@ -162,7 +162,8 @@ export const convinceCostSchema = z.number().nullable().describe(CONVINCE_COST_M
  */
 export const inGameNameSchema = z.string().nullable().describe('Name as the game prints it.');
 export const inGamePluralSchema = z.string().nullable().describe('Plural as the game prints it.');
-export const inGameArticleSchema = z.string().nullable().describe('Article the game prints before the name.');
+export const inGameArticleSchema = z.string().nullable()
+  .describe('Article the game prints before the name. Null: none, as for bosses.');
 
 /**
  * The best gold price an NPC pays for each item, as a subquery with one row per item:

@@ -11,7 +11,7 @@ import {
 import { connect, connectTo, FIXTURE, tempDirs, withRealIndex } from './harness.ts';
 
 type Creature = {
-  title: string; hitpoints: number | null; experience: number | null;
+  title: string; name: string | null; hitpoints: number | null; experience: number | null;
   bestiaryClass: string | null; modifiers: Record<string, number | null>;
   runsAt: number | null; seesInvisible: boolean | null; paralysable: boolean | null;
   pushable: boolean | null; summonCost: number | null; convinceCost: number | null;
@@ -195,11 +195,12 @@ test('filters combine, and totalMatches reflects the filter not the page', async
   await h.close();
 });
 
-test('a result row carries how the creature behaves', async () => {
+test('a result row carries its in-game name and how the creature behaves', async () => {
   const h = await connect();
   try {
     const dragon = (await findAll(h.client, { bestiary_class: 'Dragon' })).find((c) => c.title === 'Dragon');
     assert.ok(dragon, 'guard: Dragon is in the fixture');
+    assert.equal(dragon.name, 'dragon');
     assert.equal(dragon.runsAt, 300);
     assert.equal(dragon.seesInvisible, true);
     assert.equal(dragon.paralysable, true);

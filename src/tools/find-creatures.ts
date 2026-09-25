@@ -5,12 +5,14 @@ import {
   ELEMENTS, elementSchema, modifierColumn, WEAK_TO, RESISTANT_TO,
   CREATURE_BESTIARY_LEVELS, CREATURE_SORTS, creatureSort, statusClause, hitpointsExpr, likePattern,
   runsAtSchema, summonCostSchema, convinceCostSchema, GOLD_PER_KILL, goldPerKillSchema,
+  inGameNameSchema,
 } from '../domain.ts';
 import { encodeCursor, decodeCursor } from '../cursor.ts';
 
 const outputSchema = z.object({
   results: z.array(z.object({
     title: z.string(),
+    name: inGameNameSchema,
     hitpoints: z.number().nullable(),
     experience: z.number().nullable(),
     bestiaryClass: z.string().nullable(),
@@ -130,6 +132,7 @@ export function registerFindCreatures(server: McpServer, handle: TibiaDb): void 
       const output = {
         results: rows.map((row) => ({
           title: String(row.title),
+          name: str(row.name),
           // 0 means unrecorded; report it as null rather than as a real value.
           hitpoints: !row.hitpoints ? null : Number(row.hitpoints),
           experience: num(row.experience),

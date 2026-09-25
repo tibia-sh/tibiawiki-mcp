@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   CONVINCE_COST_MEANING, GOLD_PER_KILL_MEANING, IMAGE_MEANING, RASHID_PLACE_MEANING,
-  RUNS_AT_MEANING, SUMMON_COST_MEANING,
+  RUNS_AT_MEANING, SUMMON_COST_MEANING, inGameNameSchema, inGamePluralSchema, inGameArticleSchema,
 } from '../src/domain.ts';
 import { CAPABILITIES } from '../src/server.ts';
 import { connect, connectTo, FIXTURE } from './harness.ts';
@@ -106,6 +106,28 @@ test('each meaning in the instructions is the description of its output fields',
       city.buyers.items.properties.position.description, RASHID_PLACE_MEANING],
   ] as const) {
     assert.equal(description, meaning, where);
+  }
+});
+
+test('each in-game name field has one description in every tool', async () => {
+  const { tools } = await realisticHandshake();
+  const output = (name: string): any => tools.find((t) => t.name === name)!.outputSchema;
+  const branch = (type: string): any => output('tibia_get').oneOf
+    .find((b: any) => b.properties.type.const === type).properties;
+  const row = (name: string): any => output(name).properties.results.items.properties;
+  for (const schema of [inGameNameSchema, inGamePluralSchema, inGameArticleSchema]) {
+    assert.ok(schema.description, 'guard: the schema has a description');
+  }
+  for (const [where, description, schema] of [
+    ['tibia_get item actualName', branch('item').actualName.description, inGameNameSchema],
+    ['tibia_get item plural', branch('item').plural.description, inGamePluralSchema],
+    ['tibia_get creature name', branch('creature').name.description, inGameNameSchema],
+    ['tibia_get creature plural', branch('creature').plural.description, inGamePluralSchema],
+    ['tibia_get creature article', branch('creature').article.description, inGameArticleSchema],
+    ['tibia_find_items actualName', row('tibia_find_items').actualName.description, inGameNameSchema],
+    ['tibia_find_creatures name', row('tibia_find_creatures').name.description, inGameNameSchema],
+  ] as const) {
+    assert.equal(description, schema.description, where);
   }
 });
 

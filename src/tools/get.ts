@@ -9,6 +9,7 @@ import {
   runsAtSchema, summonCostSchema, convinceCostSchema, GOLD_PER_KILL, goldPerKillSchema,
   positionSchema, RASHID, RASHID_SCHEDULE, rashidScheduleSchema, rashidScheduleDay, buyerPlace,
   buyerCitySchema, buyerPositionSchema, IMAGE_MEANING,
+  inGameNameSchema, inGamePluralSchema, inGameArticleSchema,
 } from '../domain.ts';
 
 type Row = Record<string, unknown>;
@@ -45,6 +46,9 @@ const creatureOut = z.object({
   type: z.literal('creature'),
   image: imageSchema,
   title: z.string(),
+  name: inGameNameSchema,
+  plural: inGamePluralSchema,
+  article: inGameArticleSchema,
   hitpoints: z.number().nullable(),
   experience: z.number().nullable(),
   armor: z.number().nullable(),
@@ -91,6 +95,8 @@ const itemOut = z.object({
   type: z.literal('item'),
   image: imageSchema,
   title: z.string(),
+  actualName: inGameNameSchema,
+  plural: inGamePluralSchema,
   itemClass: z.string().nullable(),
   itemType: z.string().nullable(),
   typeSecondary: z.string().nullable(),
@@ -98,6 +104,9 @@ const itemOut = z.object({
   valueBuy: z.number().nullable(),
   valueSell: z.number().nullable(),
   isMarketable: z.boolean().nullable(),
+  isStackable: z.boolean().nullable(),
+  isPickupable: z.boolean().nullable(),
+  isImmobile: z.boolean().nullable(),
   clientId: z.number().nullable(),
   status: z.string().nullable(),
   attributes: z.record(z.string(), z.union([z.string(), z.number()])),
@@ -503,6 +512,7 @@ export function registerGet(server: McpServer, handle: TibiaDb): void {
       case 'creature':
         return withDetail({
           type: 'creature' as const, image: imageFor('creature', row), title,
+          name: str(row.name), plural: str(row.plural), article: str(row.article),
           // 0 means unrecorded (see hitpointsExpr in domain.ts), so report null.
           hitpoints: row.hitpoints ? num(row.hitpoints) : null,
           experience: num(row.experience),
@@ -546,10 +556,13 @@ export function registerGet(server: McpServer, handle: TibiaDb): void {
         }
         return withDetail({
           type: 'item' as const, image: imageFor('item', row), title,
+          actualName: str(row.actual_name), plural: str(row.plural),
           itemClass: str(row.item_class), itemType: str(row.item_type),
           typeSecondary: str(row.type_secondary), weight: num(row.weight),
           valueBuy: num(row.value_buy), valueSell: num(row.value_sell),
-          isMarketable: bool(row.is_marketable), clientId: num(row.client_id),
+          isMarketable: bool(row.is_marketable), isStackable: bool(row.is_stackable),
+          isPickupable: bool(row.is_pickupable), isImmobile: bool(row.is_immobile),
+          clientId: num(row.client_id),
           status: str(row.status), attributes: bag,
           keys: itemKeys.all(row.article_id as number).map((k) => ({
             title: String(k.title), number: num(k.number), name: str(k.name),

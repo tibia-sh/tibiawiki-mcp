@@ -1,9 +1,10 @@
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/server';
-import { str, num, type TibiaDb } from '../db.ts';
+import { str, num, bool, type TibiaDb } from '../db.ts';
 import {
   ITEM_SORTS, itemSort, eavOperator, statusClause, coerceAttribute, REPORTED_ATTRS,
   ITEM_RESISTANCES, resistanceAttribute, ITEM_SKILLS, ITEM_HANDS, type EavOperator,
+  inGameNameSchema,
 } from '../domain.ts';
 import { encodeCursor, decodeCursor } from '../cursor.ts';
 
@@ -11,11 +12,14 @@ import { encodeCursor, decodeCursor } from '../cursor.ts';
 const outputSchema = z.object({
   results: z.array(z.object({
     title: z.string(),
+    actualName: inGameNameSchema,
     itemClass: z.string().nullable(),
     itemType: z.string().nullable(),
     weight: z.number().nullable(),
     valueBuy: z.number().nullable(),
     clientId: z.number().nullable(),
+    isStackable: z.boolean().nullable(),
+    isPickupable: z.boolean().nullable(),
     attributes: z.record(z.string(), z.union([z.string(), z.number()])),
   })),
   totalMatches: z.number(),
@@ -55,6 +59,8 @@ export function registerFindItems(server: McpServer, handle: TibiaDb): void {
         imbuement_slots_min: z.number().int().optional(),
         weight_max: z.number().optional().describe('In oz. Items without a weight never match.'),
         hands: z.enum(ITEM_HANDS).optional(),
+        is_stackable: z.boolean().optional(),
+        is_pickupable: z.boolean().optional(),
         client_ids: z.array(z.number().int().positive()).min(1).max(100).optional()
           .describe('The item\'s client ID, any listed. Item variants can share one.'),
         include_inactive: z.boolean().default(false),
@@ -124,6 +130,9 @@ export function registerFindItems(server: McpServer, handle: TibiaDb): void {
       if (args.imbuement_slots_min !== undefined) numeric('imbuement_slots', 'gte', args.imbuement_slots_min);
       if (args.weight_max !== undefined) bind('i.weight <= ?', args.weight_max);
       if (args.hands !== undefined) equals('hands', args.hands);
+      // Both are 0 or 1 in every item row.
+      if (args.is_stackable !== undefined) bind('i.is_stackable = ?', args.is_stackable ? 1 : 0);
+      if (args.is_pickupable !== undefined) bind('i.is_pickupable = ?', args.is_pickupable ? 1 : 0);
       if (args.client_ids !== undefined) {
         where.push(`i.client_id in (${args.client_ids.map(() => '?').join(', ')})`);
         params.push(...args.client_ids);
@@ -148,11 +157,14 @@ export function registerFindItems(server: McpServer, handle: TibiaDb): void {
           }
           return {
             title: String(row.title),
+            actualName: str(row.actual_name),
             itemClass: str(row.item_class),
             itemType: str(row.item_type),
             weight: num(row.weight),
             valueBuy: num(row.value_buy),
             clientId: num(row.client_id),
+            isStackable: bool(row.is_stackable),
+            isPickupable: bool(row.is_pickupable),
             attributes: bag,
           };
         }),

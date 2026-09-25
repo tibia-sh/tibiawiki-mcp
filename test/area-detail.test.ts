@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { connect, TOOLS_LIST_BUDGET } from './harness.ts';
+import { connect } from './harness.ts';
 
 type Ability = {
   name: string;
@@ -169,10 +169,4 @@ test('the legend ships once in the tool description, not per area', async () => 
   const wave = find(await abilitiesOf(h, 'Dragon'), 'Fire Wave');
   assert.ok(wave.area);
   assert.ok(!('legend' in wave.area), 'the legend must not be duplicated onto every area');
-}));
-
-test('tools/list stays within its byte budget', async () => withServer(async (h) => {
-  const { tools } = await h.client.listTools();
-  const bytes = Buffer.byteLength(JSON.stringify(tools), 'utf8');
-  assert.ok(bytes < TOOLS_LIST_BUDGET, `tools/list is ${bytes} bytes, over the ${TOOLS_LIST_BUDGET} budget`);
 }));

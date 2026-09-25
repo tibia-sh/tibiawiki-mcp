@@ -308,6 +308,30 @@ test('a counted plural resolves to the item the creature drops', async () => {
   });
 });
 
+// The grammar splits entries on ", ", reads a trailing " (" as a note and ends the creature
+// at its first ":", so no name the game prints may hold one. Creature titles are checked for
+// ", " and ":" only: the wiki disambiguates them with " (" ("Primal Pack Beast (Sulphider)"),
+// which is harmless before the colon.
+test('no name the game prints holds a delimiter of the loot grammar', () => {
+  const holds = (column: string, delimiters: string[]) =>
+    `(${delimiters.map((d) => `instr(${column}, '${d}') > 0`).join(' or ')})`;
+  const all = [', ', ' (', ':'];
+  for (const path of [FIXTURE, DB_PATH]) {
+    const [counts] = rows(path,
+      `select (select count(*) from item where status = 'active') as items,
+              (select count(*) from creature where status = 'active') as creatures`);
+    assert.ok(Number(counts?.items) > 0 && Number(counts?.creatures) > 0, `guard: ${path} has rows`);
+    const found = rows(path,
+      `select 'item' as kind, title from item
+        where status = 'active' and (${holds('actual_name', all)} or ${holds('plural', all)})
+       union all
+       select 'creature', title from creature
+        where status = 'active'
+          and (${holds('name', all)} or ${holds('plural', all)} or ${holds('title', [', ', ':'])})`);
+    assert.deepEqual(found, [], path);
+  }
+});
+
 test('text over 20,000 characters is refused', async () => {
   const h = await connect();
   try {

@@ -46,12 +46,13 @@ export const ATTRIBUTION =
   'Data from TibiaWiki (https://tibia.fandom.com), licensed CC BY-SA. ' +
   'Tibia is made by CipSoft; game content and images are copyright CipSoft GmbH. ' +
   'Images are linked from TibiaWiki, not stored or redistributed. Each image\'s ' +
-  'descriptionUrl is its licence page. For a spell\'s areaShape, that page is ' +
+  'descriptionUrl is its licence and author page. For a spell\'s areaShape, that page is ' +
   'https://tibia.fandom.com/wiki/File: followed by sourceImage with spaces replaced by ' +
   'underscores. areaShape is DERIVED by decoding the wiki\'s animation and present for a ' +
   'minority of spells. It marks affected tiles only, does not distinguish the caster or ' +
   'target tile and is not caster-relative, so creature area glyphs do not apply. ' +
-  'corroborated means a second image agreed, and false does not mean unsupported.';
+  'corroborated means a second image of the same spell agreed, and false does not mean ' +
+  'unsupported.';
 
 /**
  * What result fields mean, in the words of their output schemas: a host gives the model

@@ -2,7 +2,7 @@ import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/server';
 import { num, type TibiaDb } from '../db.ts';
 import {
-  asciiLower, BEST_GOLD_PRICE, coinFaceValue, resolveItemName, statusClause,
+  BEST_GOLD_PRICE, coinFaceValue, resolveCreatureName, resolveItemName, titleOrder,
 } from '../domain.ts';
 
 const candidatesSchema = z.array(z.string()).describe('Titles it may mean, when more than one.');
@@ -62,35 +62,14 @@ function readEntry(text: string): { name: string; count: number } | null {
   return count >= 1 && count <= MAX_COUNT ? { name: counted[2]!, count } : null;
 }
 
-/** By title as the nocase collation orders it, then exactly. */
-const byTitle = (a: string, b: string): number => {
-  const [fa, fb] = [asciiLower(a), asciiLower(b)];
-  return fa < fb ? -1 : fa > fb ? 1 : a < b ? -1 : a > b ? 1 : 0;
-};
-
 export function registerParseLoot(server: McpServer, handle: TibiaDb): void {
   const { db, provenance } = handle;
-  // The creatures a name means: by title whatever the status, else the name or plural of
-  // active creatures. Title and name compare nocase by their column collation.
-  const creatures = db.prepare(
-    `select article_id, title, title = ?1 as by_title, name = ?1 as by_name
-       from creature c
-      where title = ?1
-         or (${statusClause('c', false)} and (name = ?1 or plural = ?1 collate nocase))
-      order by title`);
   // BEST_GOLD_PRICE ranks every offer, so it runs once for the whole text.
   const itemFacts = db.prepare(
     `select i.article_id, i.client_id, best.price
        from item i
        left join (${BEST_GOLD_PRICE}) best on best.item_id = i.article_id
       where i.article_id in (select value from json_each(?))`);
-
-  const resolveCreature = (name: string): Array<{ articleId: number; title: string }> => {
-    const found = creatures.all(name);
-    const pick = (key: 'by_title' | 'by_name') => found.filter((r) => r[key] === 1);
-    const chosen = [pick('by_title'), pick('by_name'), found].find((p) => p.length > 0) ?? [];
-    return chosen.map((r) => ({ articleId: Number(r.article_id), title: String(r.title) }));
-  };
 
   server.registerTool(
     NAME,
@@ -123,9 +102,9 @@ export function registerParseLoot(server: McpServer, handle: TibiaDb): void {
         const [, creatureText, itemsText, note] = match;
         // A name the game prints may itself begin with "a" ("a greedy eye"), so the whole
         // text is tried before the text without its article.
-        let found = resolveCreature(creatureText!);
+        let found = resolveCreatureName(db, creatureText!);
         const bare = /^an? (.+)$/.exec(creatureText!)?.[1];
-        if (found.length === 0 && bare !== undefined) found = resolveCreature(bare);
+        if (found.length === 0 && bare !== undefined) found = resolveCreatureName(db, bare);
         const dropsOf = found.length > 0 ? new Set(found.map((c) => c.articleId)) : undefined;
 
         const items: Entry[] = [];
@@ -179,7 +158,7 @@ export function registerParseLoot(server: McpServer, handle: TibiaDb): void {
       const output = {
         lines,
         totals: {
-          items: [...totals.values()].sort((a, b) => byTitle(a.item, b.item)),
+          items: [...totals.values()].sort((a, b) => titleOrder(a.item, b.item)),
           gold, unresolved, unpriced,
         },
         unparsed,

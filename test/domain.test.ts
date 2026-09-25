@@ -235,6 +235,15 @@ test('every singular form is tried, on the word before " of " or else the last w
   }
 });
 
+test('a name without a count that matches nothing else is tried as a plural', () => {
+  resolving(FIXTURE, (titles) => {
+    for (const count of [undefined, 0, 1]) {
+      assert.deepEqual(titles('gold coins', { count }), ['Gold Coin'], `count ${count}`);
+      assert.deepEqual(titles('Scarab Coins', { count }), ['Scarab Coin'], `count ${count}`);
+    }
+  });
+});
+
 test('a nonsense name or plural stays unresolved', () => {
   resolving(FIXTURE, (titles) => {
     assert.deepEqual(titles('blorbs', { count: 3 }), []);

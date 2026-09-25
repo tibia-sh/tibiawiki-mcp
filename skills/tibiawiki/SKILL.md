@@ -36,7 +36,9 @@ closest match leads. Guessing a name and getting an error costs a round trip. Fo
 **Three tools take the names the game prints.** `tibia_where_to_sell`,
 `tibia_how_to_obtain` and `tibia_parse_loot` accept in-game names like "vial of
 lifefluid", recorded plurals and English plurals like "gold coins". An exact title
-wins. A name several items share comes back as candidates, never a guess:
+wins in the first two. In a loot line the count and the creature weigh in first, so
+"3 gold nuggets" is the stackable Gold Nugget and "a treasure map" from a pirate is the
+pirate map. A name several items still share comes back as candidates, never a guess:
 `ambiguousItems` in `tibia_where_to_sell`, an error listing them in
 `tibia_how_to_obtain`, and `unresolvedEntries` in `tibia_parse_loot`, which first
 keeps what the named creature drops. Pick one and call again, or ask the user.

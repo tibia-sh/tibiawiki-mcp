@@ -3,7 +3,7 @@ import type { McpServer } from '@modelcontextprotocol/server';
 import type { TibiaDb } from '../db.ts';
 import {
   ENTITY_TYPES, entityTypeSchema, entityTable, entityHasStatus, statusClause, asciiLower,
-  type EntityType,
+  likePattern, type EntityType,
 } from '../domain.ts';
 import { encodeCursor, decodeCursor } from '../cursor.ts';
 
@@ -21,7 +21,8 @@ export function registerSearch(server: McpServer, handle: TibiaDb): void {
 
   // One prepared statement per (type, status) pair. Table names come from the
   // closed map in domain.ts and are never interpolated from user input. A null
-  // pattern lists every page of the type.
+  // pattern lists every page of the type. Patterns come from likePattern, so %, _ and
+  // a backslash in a query match themselves.
   const statements = new Map<string, ReturnType<typeof db.prepare>>();
   for (const type of ENTITY_TYPES) {
     for (const includeInactive of [false, true]) {
@@ -31,13 +32,14 @@ export function registerSearch(server: McpServer, handle: TibiaDb): void {
       const status = entityHasStatus(type) ? statusClause('t', includeInactive) : '';
       // An item also matches by the name and plural the game prints, one row per item.
       const inGame = type === 'item'
-        ? ' or t.actual_name like ?1 collate nocase or t.plural like ?1 collate nocase'
+        ? " or t.actual_name like ?1 collate nocase escape '\\'" +
+          " or t.plural like ?1 collate nocase escape '\\'"
         : '';
       statements.set(
         `${type}:${includeInactive}`,
         db.prepare(
           `select t.title from "${entityTable(type)}" t
-           where (?1 is null or t.title like ?1 collate nocase${inGame})` +
+           where (?1 is null or t.title like ?1 collate nocase escape '\\'${inGame})` +
             (status ? ` and ${status}` : ''),
         ),
       );
@@ -94,7 +96,7 @@ export function registerSearch(server: McpServer, handle: TibiaDb): void {
       }
 
       const wanted: readonly EntityType[] = types ? [...new Set(types)] : ENTITY_TYPES;
-      const pattern = query === undefined ? null : `%${query}%`;
+      const pattern = query === undefined ? null : likePattern(query);
       const all: Array<{ title: string; type: EntityType }> = [];
       for (const type of wanted) {
         const stmt = statements.get(`${type}:${include_inactive}`)!;

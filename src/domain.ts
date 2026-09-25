@@ -157,6 +157,14 @@ export const summonCostSchema = z.number().nullable().describe(SUMMON_COST_MEANI
 export const convinceCostSchema = z.number().nullable().describe(CONVINCE_COST_MEANING);
 
 /**
+ * Names as the game prints them in look, loot and kill messages, which can differ from the
+ * wiki title: Lifefluid prints as "vial of lifefluid". Null where the wiki records none.
+ */
+export const inGameNameSchema = z.string().nullable().describe('Name as the game prints it.');
+export const inGamePluralSchema = z.string().nullable().describe('Plural as the game prints it.');
+export const inGameArticleSchema = z.string().nullable().describe('Article the game prints before the name.');
+
+/**
  * The best gold price an NPC pays for each item, as a subquery with one row per item:
  * `item_id`, `npc_id` (the buyer) and `price`. The price is the highest `npc_offer_buy.value`
  * in Gold Coin from an active NPC, and a tie goes to the NPC whose title comes first.

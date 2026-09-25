@@ -35,12 +35,13 @@ export const REQUIRED_COLUMNS: Readonly<Record<string, readonly string[]>> = {
     'bestiary_class', 'bestiary_occurrence', 'is_boss', 'location', 'spawn_type',
     'mitigation', 'walks_through', 'walks_around', 'status', 'runs_at', 'sees_invisible',
     'paralysable', 'pushable', 'push_objects', 'illusionable', 'summon_cost', 'convince_cost',
-    'bestiary_level',
+    'bestiary_level', 'plural', 'article',
     ...ELEMENTS.map((e) => `modifier_${e}`),
   ],
   item: [
     'article_id', 'title', 'item_class', 'item_type', 'type_secondary', 'weight',
     'value_buy', 'value_sell', 'is_marketable', 'flavor_text', 'status', 'client_id',
+    'actual_name', 'plural', 'is_stackable', 'is_pickupable', 'is_immobile',
   ],
   item_attribute: ['item_id', 'name', 'value'],
   // Written by the build-time enrichment pass, not by the generator.

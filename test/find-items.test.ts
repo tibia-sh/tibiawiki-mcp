@@ -12,6 +12,7 @@ const scratch = tempDirs('twmcp-find-items-');
 type ItemsOut = {
   results: Array<{
     title: string; itemClass: string | null; weight: number | null; clientId: number | null;
+    actualName: string | null; isStackable: boolean | null; isPickupable: boolean | null;
     attributes: Record<string, string | number>;
   }>;
   totalMatches: number;
@@ -367,4 +368,55 @@ test('an ID two item variants share returns every variant', () => withRealIndex(
   } finally {
     db.close();
   }
+}));
+
+test('a result row carries the in-game name and the stack and pickup flags', () => onFixture(async (client) => {
+  const data = await find(client, { client_ids: [3031, 3416] });
+  const gold = byTitle(data.results, 'Gold Coin');
+  assert.ok(gold, 'guard: Gold Coin is found');
+  assert.equal(gold.actualName, 'gold coin');
+  assert.equal(gold.isStackable, true);
+  assert.equal(gold.isPickupable, true);
+  assert.equal(byTitle(data.results, 'Dragon Shield')?.isStackable, false);
+}));
+
+test('is_stackable keeps stackable items when true and the rest when false', () => onFixture(async (client) => {
+  // Gold Coin stacks, Dragon Shield does not.
+  const stacking = await find(client, { client_ids: [3031, 3416], is_stackable: true });
+  assert.deepEqual(stacking.results.map((r) => r.title), ['Gold Coin']);
+  const single = await find(client, { client_ids: [3031, 3416], is_stackable: false });
+  assert.deepEqual(single.results.map((r) => r.title), ['Dragon Shield']);
+  for (const r of (await find(client, { is_stackable: true, limit: 100 })).results) {
+    assert.equal(r.isStackable, true, r.title);
+  }
+  for (const r of (await find(client, { is_stackable: false, limit: 100 })).results) {
+    assert.equal(r.isStackable, false, r.title);
+  }
+}));
+
+// The fixture holds no item that cannot be picked up, so this runs on the real index.
+test('is_pickupable keeps pickupable items when true and the rest when false', () => withRealIndex(async (client) => {
+  const db = new DatabaseSync(DB_PATH, { readOnly: true });
+  let fixed: { title: string; itemType: string } | undefined;
+  try {
+    const row = db.prepare(
+      `select title, item_type from item
+        where is_pickupable = 0 and status = 'active' and item_type is not null
+        order by title limit 1`,
+    ).get();
+    fixed = row === undefined ? undefined : { title: String(row.title), itemType: String(row.item_type) };
+  } finally {
+    db.close();
+  }
+  assert.ok(fixed, 'the index holds an active item that cannot be picked up');
+  const unpickable = await findAll(client, { is_pickupable: false, item_type: fixed.itemType });
+  assert.equal(byTitle(unpickable, fixed.title)?.isPickupable, false);
+  for (const r of unpickable) assert.equal(r.isPickupable, false, r.title);
+  const coins = await findAll(client, { is_pickupable: false, client_ids: [3031] });
+  assert.equal(byTitle(coins, 'Gold Coin'), undefined, 'Gold Coin can be picked up');
+  const pickable = await findAll(client, { is_pickupable: true, item_type: fixed.itemType });
+  assert.equal(byTitle(pickable, fixed.title), undefined);
+  for (const r of pickable) assert.equal(r.isPickupable, true, r.title);
+  const gold = await findAll(client, { is_pickupable: true, client_ids: [3031] });
+  assert.equal(byTitle(gold, 'Gold Coin')?.isPickupable, true);
 }));

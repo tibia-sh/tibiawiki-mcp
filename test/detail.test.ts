@@ -1,7 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { DatabaseSync } from 'node:sqlite';
-import { connect, FIXTURE } from './harness.ts';
+import { DB_PATH } from '@tibia.sh/tibiawiki-data';
+import { connect, FIXTURE, withRealIndex } from './harness.ts';
 
 const get = async (h: Awaited<ReturnType<typeof connect>>, name: string, type?: string, verbosity?: string) => {
   const res = await h.client.callTool({
@@ -227,6 +228,59 @@ test('an item carries its client ID, and null where the wiki records none', asyn
   assert.equal((await get(h, 'Mud', 'item')).clientId, null);
   await h.close();
 });
+
+test('a creature carries the name, plural and article the game prints', async () => {
+  const h = await connect();
+  const dragon = await get(h, 'Dragon');
+  assert.equal(dragon.name, 'dragon');
+  assert.equal(dragon.plural, 'dragons');
+  assert.equal(dragon.article, 'a');
+  await h.close();
+});
+
+test('an item carries its in-game name and its stack and pickup flags', async () => {
+  const h = await connect();
+  const gold = await get(h, 'Gold Coin', 'item');
+  assert.equal(gold.actualName, 'gold coin');
+  // The wiki records no plural for Gold Coin.
+  assert.equal(gold.plural, null);
+  assert.equal(gold.isStackable, true);
+  assert.equal(gold.isPickupable, true);
+  assert.equal(gold.isImmobile, false);
+  const ruby = await get(h, 'Small Ruby', 'item');
+  assert.equal(ruby.plural, 'small rubies');
+  assert.equal((await get(h, 'Dragon Shield', 'item')).isStackable, false);
+  await h.close();
+});
+
+test('an in-game name differs from the title where the game prints another', () => withRealIndex(async (client) => {
+  const res = await client.callTool({ name: 'tibia_get', arguments: { name: 'Lifefluid', type: 'item' } });
+  assert.notEqual(res.isError, true, JSON.stringify(res.content));
+  const lifefluid = res.structuredContent as Record<string, unknown>;
+  assert.equal(lifefluid.actualName, 'vial of lifefluid');
+  assert.equal(lifefluid.plural, 'vials of lifefluid');
+}));
+
+test('an immobile item that cannot be picked up says so', () => withRealIndex(async (client) => {
+  const db = new DatabaseSync(DB_PATH, { readOnly: true });
+  let title: string | undefined;
+  try {
+    const row = db.prepare(
+      `select title from item
+        where is_immobile = 1 and is_pickupable = 0 and status = 'active'
+        order by title limit 1`,
+    ).get();
+    title = row === undefined ? undefined : String(row.title);
+  } finally {
+    db.close();
+  }
+  assert.ok(title, 'the index holds an active immobile item');
+  const res = await client.callTool({ name: 'tibia_get', arguments: { name: title, type: 'item' } });
+  assert.notEqual(res.isError, true, JSON.stringify(res.content));
+  const item = res.structuredContent as Record<string, unknown>;
+  assert.equal(item.isImmobile, true);
+  assert.equal(item.isPickupable, false);
+}));
 
 // Yasir is an event NPC. Fiona buys Demon Horn at the same price, so the tie also
 // shows the NPC title breaking it.

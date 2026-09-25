@@ -18,7 +18,7 @@ import { FIXTURE, tempDirs } from './harness.ts';
  * the transport answers and how it drains is covered in process, by http.test.ts and http-drain.test.ts.
  */
 
-const USAGE = 'Usage: tibiawiki-mcp [serve [--http [--host <address>] [--port <number>]]|build-index|index-digest <path>]';
+const USAGE = 'Usage: tibiawiki-mcp [serve [--http [--host <address>] [--port <number>]]|build-index]';
 
 /** The startup line, with the port the server bound. Other lines, such as the SDK's own warning, may come first. */
 const STARTUP = /^tibiawiki-mcp listening on http:\/\/127\.0\.0\.1:(\d+)\/mcp, index generated \S+ by tibiawiki-sql \S+$/m;
@@ -322,6 +322,17 @@ for (const { args, reason } of [
     assert.match(lines[usage - 1] ?? '', reason);
   });
 }
+
+// The data repo computes its own digest now, so the server no longer knows `index-digest`.
+test('index-digest is an unknown command: it prints the usage and exits 2', () => {
+  const run = cli(['index-digest', FIXTURE]);
+  assert.equal(run.status, 2, `stderr was: ${run.stderr}`);
+  assert.equal(run.stdout, '');
+  const lines = run.stderr.split('\n');
+  const reason = lines.indexOf('tibiawiki-mcp: Unknown command: index-digest');
+  assert.ok(reason >= 0, `stderr was: ${run.stderr}`);
+  assert.equal(lines[reason + 1], USAGE);
+});
 
 for (const host of ['::1', '127.0.0.1']) {
   test(`serve --http --host ${host} passes the flag check`, () => {

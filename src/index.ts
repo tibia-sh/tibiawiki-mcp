@@ -5,7 +5,7 @@ import { openDb, type TibiaDb } from './db.ts';
 import type { HttpServing } from './http.ts';
 import { createServer, createUnavailableServer } from './server.ts';
 
-const USAGE = 'Usage: tibiawiki-mcp [serve [--http [--host <address>] [--port <number>]]|build-index|index-digest <path>]';
+const USAGE = 'Usage: tibiawiki-mcp [serve [--http [--host <address>] [--port <number>]]|build-index]';
 const command = process.argv[2] ?? 'serve';
 
 /**
@@ -100,19 +100,6 @@ if (command === 'build-index') {
     process.stderr.write(`Index written to ${path}\n`);
   } catch (error) {
     reportError((error as Error).message, 1);
-  }
-} else if (command === 'index-digest') {
-  // Captured by the data repo's drift job, so stdout carries the digest and nothing else.
-  const [path, ...extra] = process.argv.slice(3);
-  if (!path || extra.length > 0) {
-    reportError(`index-digest takes exactly one index path\n${USAGE}`, 2);
-  } else {
-    const { indexDigest } = await import('./indexer/digest.ts');
-    try {
-      process.stdout.write(`${indexDigest(path)}\n`);
-    } catch (error) {
-      reportError((error as Error).message, 1);
-    }
   }
 } else if (command === 'serve') {
   const flags = parseServeFlags(process.argv.slice(3));

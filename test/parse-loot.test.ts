@@ -152,6 +152,24 @@ test('by default the answer leaves out the lines and names each unresolved entry
   }
 });
 
+test('one item across lines sums its value into one total', async () => {
+  const answer = await parseLoot(
+    'Loot of a dragon: 2 small diamonds, a steel shield\n' +
+    '12:05 Loot of a dragon: a small diamond, 3 green dragon scales.');
+  const prices = goldPrices(FIXTURE, ['Small Diamond', 'Steel Shield', 'Green Dragon Scale']);
+  assert.equal(prices.size, 3, 'guard: each item has a gold buyer');
+  const [diamond, shield, scale] =
+    [prices.get('Small Diamond')!, prices.get('Steel Shield')!, prices.get('Green Dragon Scale')!];
+  assert.deepEqual(answer.totals, {
+    items: [
+      { item: 'Green Dragon Scale', count: 3, value: 3 * scale },
+      { item: 'Small Diamond', count: 3, value: 3 * diamond },
+      { item: 'Steel Shield', count: 1, value: shield },
+    ],
+    gold: 3 * diamond + shield + 3 * scale, unresolved: 0, unpriced: 0,
+  });
+});
+
 test('coins count at face value', async () => {
   const answer = await parseLoot('Loot of a dragon: 3 platinum coins, a crystal coin, 5 gold coins');
   assert.deepEqual(answer.lines[0]!.items.map((e) => [e.item, e.unitPrice, e.value]), [

@@ -337,3 +337,27 @@ test('a creature keeps the matches it drops, and one that drops none keeps them 
     db.close();
   }
 });
+
+test('the resolver narrows by drops before stackable, and tries actual_name before plural', () => {
+  const db = new DatabaseSync(':memory:');
+  try {
+    db.exec(`create table item (article_id integer primary key, title text collate nocase,
+               actual_name text, plural text, status text, is_stackable integer);
+             create table creature_drop (creature_id integer, item_id integer);
+             insert into item values
+               (1, 'Shell', 'shell', null, 'active', 1),
+               (2, 'Shell (Rare)', 'shell', null, 'active', 0),
+               (3, 'Wand Bundle', 'wands', null, 'active', 0),
+               (4, 'Wand', 'wand', 'wands', 'active', 1);
+             insert into creature_drop values (10, 2);`);
+    const titles = (name: string, opts?: Parameters<typeof resolveItemName>[2]) =>
+      resolveItemName(db, name, opts).map((r) => r.title);
+    // The creature drops only the one that does not stack.
+    assert.deepEqual(titles('shells', { count: 2, dropsOf: new Set([10]) }), ['Shell (Rare)']);
+    assert.deepEqual(titles('shells', { count: 2 }), ['Shell']);
+    // "wands" is one item's actual_name and another's recorded plural.
+    assert.deepEqual(titles('wands'), ['Wand Bundle']);
+  } finally {
+    db.close();
+  }
+});

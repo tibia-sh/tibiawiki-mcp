@@ -52,16 +52,18 @@ You ask questions, and your assistant calls these:
 
 | Tool | Answers |
 |---|---|
-| `tibia_search` | "Is there a page called roughly X?" or "List every mount." |
-| `tibia_get` | "Tell me everything about X." X can be a creature, item, NPC, quest or spell. An item says its client ID and which NPCs buy it, for how much and where. A creature says how it behaves, like when it flees, and its gold per kill. An NPC says what it buys and sells |
+| `tibia_search` | "Is there a page called roughly X?" or "List every mount." Items also match by the name or plural the game prints, like "vial of lifefluid" |
+| `tibia_get` | "Tell me everything about X." X is a wiki title, and can be a creature, item, NPC, quest or spell. An item says its client ID, the name and plural the game prints, whether it stacks, can be picked up or is immobile, and which NPCs buy it, for how much and where. A creature says its name as the game prints it, how it behaves, like when it flees, and its gold per kill. An NPC says what it buys and sells |
 | `tibia_find_creatures` | "Which creatures match these stats?" Also by behaviour, like seeing invisible or being pushable, and ranked by gold per kill |
-| `tibia_find_items` | "Which items match these stats?" Also by resistance, skill bonus, imbuement slots, weight, hands and client ID |
+| `tibia_find_items` | "Which items match these stats?" Also by resistance, skill bonus, imbuement slots, weight, hands, client ID, weapon element, life or mana leech, and whether it stacks or can be picked up |
 | `tibia_find_spells` | "Which healing spells can a level 30 druid cast?" |
 | `tibia_find_quests` | "Which quests can a level 20 character do, and what do they give?" |
 | `tibia_find_houses` | "What is the cheapest house in Thais with two beds?" |
-| `tibia_how_to_obtain` | "Where do I get X?" Drops, vendors and quest rewards in one call |
+| `tibia_how_to_obtain` | "Where do I get X?" Drops, vendors and quest rewards in one call. X can be the wiki title or the name the game prints |
 | `tibia_find_updates` | "What changed for knights in 2026?" Game updates by text and release date |
-| `tibia_where_to_sell` | "Where do I sell all this loot?" The NPC paying the most for each item, grouped by city |
+| `tibia_where_to_sell` | "Where do I sell all this loot?" The NPC paying the most for each item, grouped by city. It takes the names the game prints too, like "gold coins", and lists a name several items share with those items |
+| `tibia_parse_loot` | "What is this loot worth?" Paste loot messages as the game prints them and get each item's count, client ID and NPC value in gold |
+| `tibia_find_travel` | "Which boat goes to Svargrond, and for how much?" Boat and carpet routes to a place or from a city, with fares. Each row is one leg, not a planned journey |
 
 The server tells your assistant how to read the data, for example that a damage modifier of 100
 is neutral. [What the skill adds](https://github.com/tibia-sh/tibiawiki-mcp/blob/main/docs/USAGE.md#what-the-skill-adds)

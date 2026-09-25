@@ -1,11 +1,11 @@
 ---
 name: tibiawiki
-description: Use when answering questions about Tibia — creatures, items, loot, NPCs, quests, spells, imbuements, houses, achievements, mounts, outfits, worlds or game updates — using the tibiawiki MCP server. Covers how to resolve names, how to read damage modifiers, and the data quirks that produce wrong answers if ignored.
+description: Use when answering questions about Tibia creatures, items, loot messages, NPCs, travel routes, quests, spells, imbuements, houses, achievements, mounts, outfits, worlds or game updates with the tibiawiki MCP server. Covers how to resolve names, how to read damage modifiers, and the data quirks that produce wrong answers if ignored.
 ---
 
 # Querying TibiaWiki
 
-Ten tools over an **offline snapshot** of TibiaWiki. Every response carries
+Twelve tools over an **offline snapshot** of TibiaWiki. Every response carries
 `indexGeneratedAt`. The data reflects the wiki at that moment, not live game or
 server state. Say so when it matters (a recently changed creature, a new update).
 
@@ -16,18 +16,43 @@ server state. Say so when it matters (a recently changed creature, a new update)
 | The exact page name, given something approximate, or every page of a type | `tibia_search` |
 | Everything about one named page | `tibia_get` |
 | Creatures matching stats | `tibia_find_creatures` |
-| Items matching stats | `tibia_find_items` |
+| Items matching stats, weapon element, leech or stackability | `tibia_find_items` |
 | Spells by vocation, level, group or element | `tibia_find_spells` |
 | Quests by level, premium, Rookgaard or location | `tibia_find_quests` |
 | Houses by city, rent, beds or size | `tibia_find_houses` |
 | Where an item comes from | `tibia_how_to_obtain` |
 | What changed in the game, and when | `tibia_find_updates` |
 | Where to sell a list of loot | `tibia_where_to_sell` |
+| What pasted loot messages hold and are worth | `tibia_parse_loot` |
+| Boat and carpet routes to a place or from a city | `tibia_find_travel` |
 
-**Resolve names before fetching.** `tibia_get` takes an exact page name. If the user
-says "dragonlord" or "that fire dragon", call `tibia_search` first. Results are
-ordered shortest-name-first, so the closest match leads. Guessing a name and getting
-an error costs a round trip. For "list every mount", pass `types` and no `query`.
+**Resolve names before fetching.** `tibia_get` takes an exact page name, the wiki
+title. If the user says "dragonlord", "that fire dragon" or a name the game prints,
+call `tibia_search` first. It matches titles by substring, and for items also the
+in-game name and recorded plural. Results are ordered shortest-name-first, so the
+closest match leads. Guessing a name and getting an error costs a round trip. For
+"list every mount", pass `types` and no `query`.
+
+**Three tools take the names the game prints.** `tibia_where_to_sell`,
+`tibia_how_to_obtain` and `tibia_parse_loot` accept in-game names like "vial of
+lifefluid", recorded plurals and English plurals like "gold coins". An exact title
+wins. A name several items share comes back as candidates, never a guess:
+`ambiguousItems` in `tibia_where_to_sell`, an error listing them in
+`tibia_how_to_obtain`, and `unresolvedEntries` in `tibia_parse_loot`, which first
+keeps what the named creature drops. Pick one and call again, or ask the user.
+
+**Parse loot with `tibia_parse_loot`.** Pass loot messages as the game prints them,
+one per line, timestamps and notes like "(active prey bonus)" included. `totals`
+gives each item's count and value and the `gold` sum, coins at face value and other
+items at their best NPC price. Pass `include_lines: true` for each line's items with
+client IDs and unit prices. `unresolvedEntries` and `unparsed` list the first 100,
+and the counts in `totals` cover them all.
+
+**Travel rows are single legs.** `tibia_find_travel` takes `to`, `from_city` or both,
+exact names in any case. Each row gives the NPC, its recorded city and position, the
+fare and `notes`. It does not plan journeys, so chain legs yourself. The index records
+no start per route and some NPCs work from more than one place, so read notes such as
+"From Meriana". A fare of 0 means free or not recorded, and `sort: "price"` puts it last.
 
 **Prefer `tibia_how_to_obtain` over two lookups.** It returns creature drops with
 chances, NPC vendors with prices, and quest rewards in one call. Reaching for
@@ -99,9 +124,11 @@ NPC, and without a type the call returns an error asking you to choose.
 `tibia_get` returns more than the headline stats:
 
 - **creature**: `abilities` with damage ranges and an `area` grid (below),
-  `maxDamage` per element and total, `loot` with chances
+  `maxDamage` per element and total, `loot` with chances, and the `name`, `plural`
+  and `article` the game prints
 - **item**: EAV `attributes` (attack, defense, required level), `keys`, `storeOffers`,
-  `proficiencyPerks`, `boughtBy`
+  `proficiencyPerks`, `boughtBy`, the `actualName` and `plural` the game prints, and
+  `isStackable`, `isPickupable` and `isImmobile`
 - **npc**: `jobs`, `races`, `destinations` (travel with fares), `buys`, `sells`. Rashid
   also carries `rashidSchedule`, his seven-day rotation
 - **quest**: `dangers` as creature names, `rewards`

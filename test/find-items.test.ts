@@ -420,3 +420,91 @@ test('is_pickupable keeps pickupable items when true and the rest when false', (
   const gold = await findAll(client, { is_pickupable: true, client_ids: [3031] });
   assert.equal(byTitle(gold, 'Gold Coin')?.isPickupable, true);
 }));
+
+/** Active item titles an independent query over the real index returns, sorted. */
+function activeTitles(sql: string, keep: (row: Record<string, unknown>) => boolean = () => true): string[] {
+  const db = new DatabaseSync(DB_PATH, { readOnly: true });
+  try {
+    return db.prepare(sql).all().filter(keep).map((row) => String(row.title)).sort();
+  } finally {
+    db.close();
+  }
+}
+
+test('damage_type keeps the weapons of that element as recorded', () => onFixture(async (client) => {
+  const fire = await find(client, { damage_type: 'fire' });
+  assert.deepEqual(fire.results.map((r) => r.title), ['Wand of Inferno']);
+  assert.equal(fire.results[0]?.attributes.damage_type, 'Fire');
+  assert.equal(fire.results[0]?.attributes.range, 3);
+  const physical = await find(client, { damage_type: 'physical' });
+  assert.deepEqual(physical.results.map((r) => r.title), ['Crypt Bile']);
+  assert.equal((await find(client, { damage_type: 'ice' })).totalMatches, 0);
+}));
+
+test('damage_type ice matches every ice weapon, lowercase rows included', () => withRealIndex(async (client) => {
+  const expected = activeTitles(
+    `select i.title from item i join item_attribute a on a.item_id = i.article_id
+      where a.name = 'damage_type' and lower(a.value) = 'ice' and i.status = 'active'`,
+  );
+  const lowercase = activeTitles(
+    `select i.title from item i join item_attribute a on a.item_id = i.article_id
+      where a.name = 'damage_type' and a.value = 'ice' and i.status = 'active'`,
+  );
+  assert.ok(lowercase.length > 0, 'the index records an active ice weapon in lowercase');
+  const items = await findAll(client, { damage_type: 'ice' });
+  const titles = items.map((r) => r.title).sort();
+  assert.deepEqual(titles, expected);
+  for (const title of lowercase) assert.ok(titles.includes(title), `${title} is recorded as "ice"`);
+  for (const r of items) assert.equal(String(r.attributes.damage_type).toLowerCase(), 'ice', r.title);
+  assert.equal(byTitle(items, 'Wand of Inferno'), undefined, 'a fire wand is not ice');
+  assert.equal(byTitle(items, 'Rod of Carving'), undefined, 'inactive by default');
+  const all = await findAll(client, { damage_type: 'ice', include_inactive: true });
+  assert.ok(byTitle(all, 'Rod of Carving'), 'include_inactive adds the unavailable rods');
+}));
+
+const leeching = (attr: string) => activeTitles(
+  `select i.title, a.value from item i join item_attribute a on a.item_id = i.article_id
+    where a.name = '${attr}' and i.status = 'active'`,
+  (row) => Number.parseInt(String(row.value), 10) > 0,
+);
+
+test('leech mana keeps items with a positive mana leech', () => withRealIndex(async (client) => {
+  const items = await findAll(client, { leech: ['mana'] });
+  assert.deepEqual(items.map((r) => r.title).sort(), leeching('mana_leech_amount'));
+  // cast('5%' as integer) is 5 in SQLite, so the filter reads the leading integer.
+  for (const r of items) {
+    assert.ok(Number.parseInt(String(r.attributes.mana_leech_amount), 10) > 0, r.title);
+  }
+  assert.equal(byTitle(items, 'Siphoning Inferniarch Flail')?.attributes.mana_leech_amount, '10%');
+  assert.equal(byTitle(items, 'Cobra Rod'), undefined, 'Cobra Rod leeches life only');
+}));
+
+test('leech life keeps items with a positive life leech', () => withRealIndex(async (client) => {
+  const items = await findAll(client, { leech: ['life'] });
+  assert.deepEqual(items.map((r) => r.title).sort(), leeching('hp_leech_amount'));
+  assert.equal(byTitle(items, 'Cobra Rod')?.attributes.hp_leech_amount, '18%');
+  assert.equal(byTitle(items, 'Siphoning Inferniarch Flail'), undefined, 'it leeches mana only');
+}));
+
+test('leech life and mana needs both', () => withRealIndex(async (client) => {
+  const mana = new Set(leeching('mana_leech_amount'));
+  const expected = leeching('hp_leech_amount').filter((t) => mana.has(t));
+  assert.ok(expected.length > 0, 'the index holds items that leech both');
+  const items = await findAll(client, { leech: ['life', 'mana'] });
+  assert.deepEqual(items.map((r) => r.title).sort(), expected);
+  const blade = byTitle(items, 'Sanguine Blade');
+  assert.equal(blade?.attributes.hp_leech_amount, '3%');
+  assert.equal(blade?.attributes.mana_leech_amount, '1%');
+  assert.equal(byTitle(items, 'Cobra Rod'), undefined, 'life only');
+  assert.equal(byTitle(items, 'Siphoning Inferniarch Flail'), undefined, 'mana only');
+}));
+
+test('a range the wiki gives as "?" is reported as text', () => withRealIndex(async (client) => {
+  const unknown = activeTitles(
+    `select i.title from item i join item_attribute a on a.item_id = i.article_id
+      where a.name = 'range' and a.value = '?' and i.status = 'active'`,
+  );
+  assert.ok(unknown.includes('Throwing Cake'), `got ${JSON.stringify(unknown)}`);
+  const data = await find(client, { client_ids: [904] });
+  assert.equal(byTitle(data.results, 'Throwing Cake')?.attributes.range, '?');
+}));

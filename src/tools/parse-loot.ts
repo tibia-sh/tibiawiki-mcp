@@ -14,7 +14,7 @@ const entrySchema = z.object({
   candidates: candidatesSchema,
   clientId: z.number().nullable(),
   unitPrice: z.number().nullable().describe('Coin face value, else best NPC price in gold.'),
-  value: z.number().nullable(),
+  value: z.number().nullable().describe('Null: no price, or too large to add exactly.'),
 });
 type Entry = z.infer<typeof entrySchema>;
 
@@ -31,7 +31,7 @@ const outputSchema = z.object({
     items: z.array(z.object({ item: z.string(), count: z.number(), value: z.number().nullable() })),
     gold: z.number().describe('Sum of the priced values.'),
     unresolved: z.number().describe('Entries with no single item.'),
-    unpriced: z.number().describe('Entries of an item with no price.'),
+    unpriced: z.number().describe('Entries of an item with no value.'),
   }),
   unresolvedEntries: z.array(z.object({
     line: z.number().describe('Line number in the input, from 1.'),
@@ -158,15 +158,22 @@ export function registerParseLoot(server: McpServer, handle: TibiaDb): void {
         const count = entry.count!;
         entry.clientId = clientId;
         entry.unitPrice = coinFaceValue(item) ?? price;
-        entry.value = entry.unitPrice === null ? null : entry.unitPrice * count;
-        if (entry.value === null) unpriced += 1;
-        else gold += entry.value;
-        const total = totals.get(item);
-        if (total) {
-          total.count += count;
-          if (total.value !== null && entry.value !== null) total.value += entry.value;
+        const value = entry.unitPrice === null ? null : entry.unitPrice * count;
+        // A value past 2^53 - 1, alone or added to the gold, would no longer be exact. The item
+        // total is part of the gold, so it stays exact too.
+        entry.value = value !== null && Number.isSafeInteger(value) &&
+          Number.isSafeInteger(gold + value) ? value : null;
+        let total = totals.get(item);
+        if (!total) {
+          total = { item, count: 0, value: null };
+          totals.set(item, total);
+        }
+        total.count += count;
+        if (entry.value === null) {
+          unpriced += 1;
         } else {
-          totals.set(item, { item, count, value: entry.value });
+          gold += entry.value;
+          total.value = (total.value ?? 0) + entry.value;
         }
       }
 

@@ -283,6 +283,40 @@ test('a creature name several creatures share settles items by what any of them 
   }
 });
 
+test('a value that would leave the exact integers is left out and counts as unpriced', async () => {
+  const path = join(scratch(), 'huge-price.db');
+  copyFileSync(FIXTURE, path);
+  const huge = 4_000_000_000_000_000;
+  const db = new DatabaseSync(path);
+  try {
+    const changed = db.prepare(
+      `update npc_offer_buy set value = ?
+        where item_id = (select article_id from item where title = 'Steel Shield')`).run(huge);
+    assert.ok(Number(changed.changes) > 0, 'guard: someone buys Steel Shield');
+  } finally {
+    db.close();
+  }
+  const h = await connectTo(path);
+  try {
+    // The second entry alone, and the last one added to the running total, pass 2^53 - 1.
+    const answer = await askParseLoot(h.client,
+      'Loot of a dragon: a steel shield, 3 steel shields, a steel shield, 5 gold coins, a steel shield');
+    assert.deepEqual(answer.lines[0]!.items.map((e) => [e.unitPrice, e.value]), [
+      [huge, huge], [huge, null], [huge, huge], [1, 5], [huge, null],
+    ]);
+    assert.deepEqual(answer.totals, {
+      items: [
+        { item: 'Gold Coin', count: 5, value: 5 },
+        { item: 'Steel Shield', count: 6, value: 2 * huge },
+      ],
+      gold: 2 * huge + 5, unresolved: 0, unpriced: 2,
+    });
+    assert.ok(Number.isSafeInteger(answer.totals.gold));
+  } finally {
+    await h.close();
+  }
+});
+
 test('a creature resolves by its name the game prints, article and all', async () => {
   await withRealIndex(async (client) => {
     const [eye] = rows(DB_PATH, `select name from creature where title = 'A Greedy Eye'`);

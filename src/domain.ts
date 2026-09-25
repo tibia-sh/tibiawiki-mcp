@@ -145,7 +145,7 @@ export const GOLD_PER_KILL_MEANING =
   'and items that sell only on the market count as 0.';
 export const IMAGE_MEANING = 'Sprite image link. Dimensions are pixels, not map squares.';
 export const RASHID_PLACE_MEANING =
-  "A buyer's city and position are null for Rashid, who moves city daily. His NPC page and " +
+  "For Rashid, who moves city daily, a buyer's city and position coordinates are null. His NPC page and " +
   'tibia_where_to_sell give his week as rashidSchedule.';
 
 /**

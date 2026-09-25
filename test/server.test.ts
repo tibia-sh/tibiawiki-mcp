@@ -78,7 +78,7 @@ test('the instructions tell a model what the zeros and nulls in results mean', a
   assert.match(SUMMON_COST_MEANING, /0: cannot be summoned/);
   assert.match(CONVINCE_COST_MEANING, /0: cannot be convinced/);
   assert.match(GOLD_PER_KILL_MEANING, /^Estimated/);
-  assert.match(RASHID_PLACE_MEANING, /city and position are null for Rashid/);
+  assert.match(RASHID_PLACE_MEANING, /city and position coordinates are null/);
 });
 
 test('each meaning in the instructions is the description of its output fields', async () => {

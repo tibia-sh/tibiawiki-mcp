@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { DatabaseSync } from 'node:sqlite';
 import type { Client } from '@modelcontextprotocol/client';
+import { DB_PATH } from '@tibia.sh/tibiawiki-data';
 import { connect, FIXTURE, withRealIndex } from './harness.ts';
 import { asciiLower } from '../src/domain.ts';
 
@@ -98,10 +99,34 @@ test('a plural the index does not record sells as its item', async () => {
   assert.deepEqual(answer.ambiguousItems, []);
 });
 
+// An active item you can carry that no active NPC buys for gold, printed under a name no
+// other item goes by.
 test('two names for an item with no buyer list it once', async () => {
+  const db = new DatabaseSync(DB_PATH, { readOnly: true });
+  let found: Record<string, unknown> | undefined;
+  try {
+    found = db.prepare(
+      `select i.title, i.actual_name from item i
+        where i.status = 'active' and i.is_pickupable = 1
+          and i.actual_name <> i.title collate nocase
+          and not exists (select 1 from npc_offer_buy o
+                            join npc n on n.article_id = o.npc_id
+                            join item c on c.article_id = o.currency_id
+                           where o.item_id = i.article_id and n.status = 'active'
+                             and c.title = 'Gold Coin')
+          and not exists (select 1 from item j where j.article_id <> i.article_id
+                             and (j.title = i.actual_name
+                                  or j.actual_name = i.actual_name collate nocase
+                                  or j.plural = i.actual_name collate nocase))
+        order by i.title limit 1`).get();
+  } finally {
+    db.close();
+  }
+  assert.ok(found, 'guard: the index holds an item no active NPC buys, with its own in-game name');
+  const [title, printed] = [String(found.title), String(found.actual_name)];
   await withRealIndex(async (client) => {
-    const answer = await askWhereToSell(client, ['Lifefluid', 'vial of lifefluid']);
-    assert.deepEqual(answer.noGoldBuyer, ['Lifefluid']);
+    const answer = await askWhereToSell(client, [title, printed]);
+    assert.deepEqual(answer.noGoldBuyer, [title]);
     assert.deepEqual(answer.cities, []);
     assert.deepEqual(answer.unknownItems, []);
   });

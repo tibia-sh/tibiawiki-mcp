@@ -41,9 +41,11 @@ export const NAME = 'tibia_parse_loot';
 
 /**
  * A loot message: an optional HH:MM or HH:MM:SS timestamp, "Loot of <creature>: <items>",
- * an optional " (<note>)" and an optional full stop.
+ * an optional " (<note>)" and an optional full stop. No creature name holds a colon, so the
+ * creature ends at the first one, which keeps a line that is no match from backtracking
+ * over every colon in it.
  */
-const LOOT_LINE = /^(?:\d{2}:\d{2}(?::\d{2})? )?Loot of (.+?): (.+?)(?: \(([^()]*)\))?\.?$/;
+const LOOT_LINE = /^(?:\d{2}:\d{2}(?::\d{2})? )?Loot of ([^:]+): (.+?)(?: \(([^()]*)\))?\.?$/;
 
 /** The largest count read, which keeps every value and total an exact integer. */
 const MAX_COUNT = 1_000_000;

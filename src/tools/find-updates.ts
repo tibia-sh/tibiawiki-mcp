@@ -73,10 +73,10 @@ export function registerFindUpdates(server: McpServer, handle: TibiaDb): void {
     {
       description:
         'Find Tibia game updates by text and release date, for questions like "what changed ' +
-        'for knights in 2026". Matches the text, case-insensitive for ASCII letters, in an ' +
-        'update\'s title, name, summary and change list, newest first, and returns the ' +
-        'matching change lines. For the full changes, call tibia_get with type "update" and the ' +
-        'returned title.',
+        'for knights in 2026" or "which update added X". Matches the text, case-insensitive ' +
+        'for ASCII letters, in an update\'s title, name, summary and change list, newest first, ' +
+        'and returns the matching change lines. For the full changes, call tibia_get with type ' +
+        '"update" and the returned title.',
       inputSchema: z.object({
         text: searchText.optional().describe('Literal substring, e.g. "knight".'),
         released_after: releaseDate.optional().describe('YYYY-MM-DD, inclusive.'),

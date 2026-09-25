@@ -1,5 +1,32 @@
 # Changelog
 
+## [0.11.0](https://github.com/tibia-sh/tibiawiki-mcp/compare/v0.10.1...v0.11.0) (2026-09-25)
+
+
+### Features
+
+* expose in-game names and item flags ([800c756](https://github.com/tibia-sh/tibiawiki-mcp/commit/800c75659258795ff1a70ed875fb562beec00de4))
+* filter items by element and leech ([101870b](https://github.com/tibia-sh/tibiawiki-mcp/commit/101870b9ea3533ec8a0708646fd4e315c6e7a94c))
+* find boat and carpet routes ([af16676](https://github.com/tibia-sh/tibiawiki-mcp/commit/af166760b51d7d470392c11bb87084d7d36f89e5))
+* parse loot messages ([a9ff524](https://github.com/tibia-sh/tibiawiki-mcp/commit/a9ff5247ddcb951fb3fb594c89376fd0e02cfafa))
+* resolve names the game prints ([40a03b1](https://github.com/tibia-sh/tibiawiki-mcp/commit/40a03b17f46d708781838bbd48882787ad649734))
+
+
+### Bug Fixes
+
+* cap the loot lists at 100 ([8a2699c](https://github.com/tibia-sh/tibiawiki-mcp/commit/8a2699c2809833289787b28ccdc014ef47d4a5db))
+* keep loot results compact by default ([52c8bde](https://github.com/tibia-sh/tibiawiki-mcp/commit/52c8bde5c0534540e79cc649bffec61de3dd4d13))
+* keep loot totals exact ([581be35](https://github.com/tibia-sh/tibiawiki-mcp/commit/581be35b2ac89aaead49121e26f3f0c8efc8ae59))
+* retry an unmatched name as a plural ([c94a7dc](https://github.com/tibia-sh/tibiawiki-mcp/commit/c94a7dc3c005c1a261567e2ea1f4c27cd7b3d158))
+* say a null article means none ([f386729](https://github.com/tibia-sh/tibiawiki-mcp/commit/f38672910eb21c2339ca7c0834a1d41dee463266))
+
+
+### Performance Improvements
+
+* index creature names in memory ([7be4769](https://github.com/tibia-sh/tibiawiki-mcp/commit/7be476925b82c3998b29996d33f724c6b614ffe5))
+* index item names in memory ([87dff34](https://github.com/tibia-sh/tibiawiki-mcp/commit/87dff34f0a6bbf734e988b988f8b6752d4271a1f))
+* stop the loot line match at one colon ([05235c0](https://github.com/tibia-sh/tibiawiki-mcp/commit/05235c01556f6a5e86a03f309bb02275dff6a574))
+
 ## [0.10.1](https://github.com/tibia-sh/tibiawiki-mcp/compare/v0.10.0...v0.10.1) (2026-09-25)
 
 

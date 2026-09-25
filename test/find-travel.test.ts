@@ -4,6 +4,7 @@ import { copyFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import type { Client } from '@modelcontextprotocol/client';
+import { DB_PATH } from '@tibia.sh/tibiawiki-data';
 import { FARE_MEANING } from '../src/domain.ts';
 import { connect, connectTo, FIXTURE, tempDirs, withRealIndex } from './harness.ts';
 
@@ -203,6 +204,112 @@ test('tibia_get and tibia_find_travel agree on Anderson\'s free ride and what it
       output('tibia_find_travel').properties.results.items.properties.price.description, FARE_MEANING);
     assert.match(FARE_MEANING, /0: free or not recorded, see notes/);
   });
+});
+
+/**
+ * The active routes an index holds for one filter, in the order the brief sets, written here
+ * apart from the tool's own ORDER BY: price puts positive fares ascending and every other fare
+ * after them, and both sorts then run by NPC, destination, fare and notes.
+ */
+function expectedRoutes(path: string, filter: { to?: string; from_city?: string },
+  sort: 'price' | 'npc'): Route[] {
+  const where = ["n.status = 'active'"];
+  const params: string[] = [];
+  if (filter.to !== undefined) {
+    where.push('d.name = ? collate nocase');
+    params.push(filter.to);
+  }
+  if (filter.from_city !== undefined) {
+    where.push('n.city = ? collate nocase');
+    params.push(filter.from_city);
+  }
+  const fare = sort === 'price' ? 'case when d.price > 0 then d.price end asc nulls last, ' : '';
+  const db = new DatabaseSync(path, { readOnly: true });
+  try {
+    return db.prepare(
+      `select distinct n.title, n.city, n.subarea, n.location, n.x, n.y, n.z, d.name, d.price, d.notes
+         from npc_destination d join npc n on n.article_id = d.npc_id
+        where ${where.join(' and ')}
+        order by ${fare}n.title, d.name, d.price, d.notes`,
+    ).all(...params).map((r) => ({
+      npc: String(r.title), city: r.city as string | null, subarea: r.subarea as string | null,
+      location: r.location as string | null,
+      position: { x: r.x as number | null, y: r.y as number | null, z: r.z as number | null },
+      to: String(r.name), price: r.price as number | null, notes: r.notes as string | null,
+    }));
+  } finally {
+    db.close();
+  }
+}
+
+/** Every value of one column over the active routes, to query the tool once per value. */
+function routeValues(path: string, column: 'n.city' | 'd.name'): string[] {
+  const db = new DatabaseSync(path, { readOnly: true });
+  try {
+    return (db.prepare(
+      `select distinct ${column} v from npc_destination d join npc n on n.article_id = d.npc_id
+        where n.status = 'active' and ${column} is not null order by v`,
+    ).all() as Array<{ v: string }>).map((r) => r.v);
+  } finally {
+    db.close();
+  }
+}
+
+test('every active route pages in the brief\'s full order, by city and by destination', async () => {
+  const all = expectedRoutes(DB_PATH, {}, 'npc');
+  assert.ok(all.length > 100, `guard: the index holds ${all.length} active routes`);
+  await withRealIndex(async (client) => {
+    for (const sort of ['price', 'npc'] as const) {
+      for (const [key, column] of [['from_city', 'n.city'], ['to', 'd.name']] as const) {
+        let seen = 0;
+        for (const value of routeValues(DB_PATH, column)) {
+          const filter = { [key]: value };
+          const paged = await findAll(client, { ...filter, sort, limit: 4 });
+          assert.deepEqual(paged, expectedRoutes(DB_PATH, filter, sort), `${sort} ${key} ${value}`);
+          seen += paged.length;
+        }
+        assert.equal(seen, all.length, `${sort} ${key}: the queries cover every active route`);
+      }
+    }
+    const sebastian = expectedRoutes(DB_PATH, { to: 'Liberty Bay' }, 'npc')
+      .filter((r) => r.npc === 'Sebastian');
+    assert.deepEqual(sebastian.map((r) => r.notes), ['From Meriana', 'From Nargor'],
+      'guard: Sebastian\'s two Liberty Bay rows are covered');
+  });
+});
+
+test('routes that differ only in notes page in notes order', async () => {
+  // No recorded NPC has two routes to one place at one fare, so this copy gives Captain
+  // Bluebear two more Carlin routes at 110 and another Targuna route at 0.
+  const path = join(scratch(), 'notes.db');
+  copyFileSync(FIXTURE, path);
+  const db = new DatabaseSync(path);
+  try {
+    db.exec(`insert into npc_destination (npc_id, name, price, notes)
+      select article_id, 'Carlin', 110, 'From Venore' from npc where title = 'Captain Bluebear'
+      union all
+      select article_id, 'Carlin', 110, 'From Edron' from npc where title = 'Captain Bluebear'
+      union all
+      select article_id, 'Targuna', 0, 'A second note' from npc where title = 'Captain Bluebear'`);
+  } finally {
+    db.close();
+  }
+  const h = await connectTo(path);
+  try {
+    for (const sort of ['price', 'npc'] as const) {
+      for (const filter of [{ from_city: 'Thais' }, { to: 'Carlin' }, { to: 'Targuna' }]) {
+        const paged = await findAll(h.client, { ...filter, sort, limit: 2 });
+        assert.deepEqual(paged, expectedRoutes(path, filter, sort), `${sort} ${JSON.stringify(filter)}`);
+      }
+      const carlin = await findAll(h.client, { to: 'Carlin', sort, limit: 1 });
+      assert.deepEqual(carlin.map((r) => r.notes), [null, 'From Edron', 'From Venore'], sort);
+      const targuna = await findAll(h.client, { to: 'Targuna', sort, limit: 1 });
+      assert.deepEqual(targuna.map((r) => r.notes),
+        ['A second note', 'After paying 5,000 or providing a Sail Pass'], sort);
+    }
+  } finally {
+    await h.close();
+  }
 });
 
 test('non-active NPCs\' routes are excluded by default', async () => {

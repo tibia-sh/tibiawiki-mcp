@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.11.1](https://github.com/tibia-sh/tibiawiki-mcp/compare/v0.11.0...v0.11.1) (2026-09-25)
+
+
+### Bug Fixes
+
+* keep three meanings in the trim ([b9d6b93](https://github.com/tibia-sh/tibiawiki-mcp/commit/b9d6b9362b59f17e82d59ea719740cee42ae4d2c))
+* match search queries literally ([15ccc57](https://github.com/tibia-sh/tibiawiki-mcp/commit/15ccc57d0dd9b9e7323a89bd96cff8194eca0c0d))
+* size the request cap from the loot limit ([ca9e56d](https://github.com/tibia-sh/tibiawiki-mcp/commit/ca9e56d486c7a6b6756695aa26dd56e6a14b60f4))
+* trim the instructions and descriptions ([92d4834](https://github.com/tibia-sh/tibiawiki-mcp/commit/92d48341909cfbac9785682afc72bc5cca38ccbb))
+
 ## [0.11.0](https://github.com/tibia-sh/tibiawiki-mcp/compare/v0.10.1...v0.11.0) (2026-09-25)
 
 

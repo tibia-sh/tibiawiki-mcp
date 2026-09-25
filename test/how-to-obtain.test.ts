@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { copyFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
-import { connect, connectTo, FIXTURE, tempDirs } from './harness.ts';
+import { connect, connectTo, FIXTURE, tempDirs, withRealIndex } from './harness.ts';
 
 const scratch = tempDirs('twmcp-obtain-');
 
@@ -89,6 +89,35 @@ test('the item name resolves case-insensitively and echoes the canonical title',
   });
   assert.equal((res.structuredContent as ObtainOut).item, 'Steel Helmet');
   await h.close();
+});
+
+test('the name the game prints answers for its item', async () => {
+  const h = await connect();
+  try {
+    const res = await h.client.callTool({ name: 'tibia_how_to_obtain', arguments: { item_name: 'amber' } });
+    assert.equal((res.structuredContent as ObtainOut).item, 'Amber (Item)');
+  } finally {
+    await h.close();
+  }
+  await withRealIndex(async (client) => {
+    const res = await client.callTool({
+      name: 'tibia_how_to_obtain', arguments: { item_name: 'Vial of Lifefluid' },
+    });
+    assert.equal((res.structuredContent as ObtainOut).item, 'Lifefluid');
+  });
+});
+
+test('a name two items print is an error naming both', async () => {
+  const h = await connect();
+  try {
+    const res = await h.client.callTool({ name: 'tibia_how_to_obtain', arguments: { item_name: 'book' } });
+    assert.equal(res.isError, true);
+    const text = (res.content as Array<{ text: string }>)[0]!.text;
+    assert.match(text, /Book \(Brown\)/);
+    assert.match(text, /Book \(Gemmed\)/);
+  } finally {
+    await h.close();
+  }
 });
 
 test('one NPC selling at one price in several currencies is ordered by currency', async () => {

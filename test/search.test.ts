@@ -233,3 +233,26 @@ test('tibia_search describes both orders and the listing example', async () => {
     await h.close();
   }
 });
+
+test('an item also matches by the name and plural the game prints, once under its title', async () => {
+  const h = await connect();
+  try {
+    const search = async (query: string) => {
+      const res = await h.client.callTool({ name: 'tibia_search', arguments: { query, types: ['item'] } });
+      return (res.structuredContent as SearchOut).results.map((r) => r.title);
+    };
+    // "small rub" is in Small Ruby's title, name and plural.
+    assert.deepEqual((await search('small rub')).filter((t) => t === 'Small Ruby'), ['Small Ruby']);
+    assert.ok((await search('small rubies')).includes('Small Ruby'), 'by plural');
+    assert.ok((await search('AMBER')).includes('Amber (Item)'), 'by title');
+  } finally {
+    await h.close();
+  }
+  await withRealIndex(async (client) => {
+    const res = await client.callTool({ name: 'tibia_search', arguments: { query: 'vials of life' } });
+    assert.deepEqual(
+      (res.structuredContent as SearchOut).results.filter((r) => r.title === 'Lifefluid'),
+      [{ title: 'Lifefluid', type: 'item' }],
+    );
+  });
+});

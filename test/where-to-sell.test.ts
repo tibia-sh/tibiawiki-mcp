@@ -1,25 +1,36 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { DatabaseSync } from 'node:sqlite';
-import { connect, FIXTURE } from './harness.ts';
+import type { Client } from '@modelcontextprotocol/client';
+import { connect, FIXTURE, withRealIndex } from './harness.ts';
 import { asciiLower } from '../src/domain.ts';
 
-type Item = { item: string; price: number };
+type Item = { item: string; input: string; price: number };
 type Buyer = { npc: string; position: unknown; rashidSchedule?: Array<{ day: string }>; items: Item[] };
 type City = { city: string | null; buyers: Buyer[] };
-type Answer = { cities: City[]; noGoldBuyer: string[]; unknownItems: string[]; indexGeneratedAt: string };
+type Answer = {
+  cities: City[];
+  noGoldBuyer: string[];
+  unknownItems: string[];
+  ambiguousItems: Array<{ input: string; candidates: string[] }>;
+  indexGeneratedAt: string;
+};
 
 async function whereToSell(items: string[]): Promise<Answer> {
   const h = await connect();
   try {
-    const res = await h.client.callTool({ name: 'tibia_where_to_sell', arguments: { items } });
-    // The server checks structuredContent against the output schema, so a success is
-    // also a schema check.
-    assert.notEqual(res.isError, true, `expected success, got: ${JSON.stringify(res.content)}`);
-    return res.structuredContent as Answer;
+    return await askWhereToSell(h.client, items);
   } finally {
     await h.close();
   }
+}
+
+async function askWhereToSell(client: Client, items: string[]): Promise<Answer> {
+  const res = await client.callTool({ name: 'tibia_where_to_sell', arguments: { items } });
+  // The server checks structuredContent against the output schema, so a success is
+  // also a schema check.
+  assert.notEqual(res.isError, true, `expected success, got: ${JSON.stringify(res.content)}`);
+  return res.structuredContent as Answer;
 }
 
 function fixtureRows(sql: string): Array<Record<string, unknown>> {
@@ -41,11 +52,12 @@ test('an item sells to its best buyer, under his city, with his position', async
     buyers: [{
       npc: "Nah'Bob",
       position: { x: 33104, y: 32520, z: 2 },
-      items: [{ item: 'Dragon Shield', price: 4000 }],
+      items: [{ item: 'Dragon Shield', input: 'Dragon Shield', price: 4000 }],
     }],
   }]);
   assert.deepEqual(answer.noGoldBuyer, []);
   assert.deepEqual(answer.unknownItems, []);
+  assert.deepEqual(answer.ambiguousItems, []);
   assert.match(answer.indexGeneratedAt, /\S/);
 });
 
@@ -56,10 +68,39 @@ test('a name in any case counts once, and a name that is no item does not fail t
     buyers: [{
       npc: "Nah'Bob",
       position: { x: 33104, y: 32520, z: 2 },
-      items: [{ item: 'Dragon Shield', price: 4000 }],
+      items: [{ item: 'Dragon Shield', input: 'dragon shield', price: 4000 }],
     }],
   }]);
   assert.deepEqual(answer.unknownItems, ['Not An Item', 'Also Missing']);
+});
+
+test('a name the game prints sells as its item, under the name the caller wrote', async () => {
+  const [amber] = fixtureRows(`select actual_name from item where title = 'Amber (Item)'`);
+  assert.equal(amber?.actual_name, 'amber', 'guard: Amber (Item) prints as "amber"');
+  const orders = [[['amber', 'Amber (Item)'], 'amber'], [['Amber (Item)', 'amber'], 'Amber (Item)']] as const;
+  for (const [items, input] of orders) {
+    const answer = await whereToSell([...items]);
+    const sold = answer.cities.flatMap((c) => c.buyers.flatMap((b) => b.items));
+    assert.deepEqual(sold.map((i) => [i.item, i.input]), [['Amber (Item)', input]], `once, as ${input}`);
+    assert.deepEqual(answer.unknownItems, []);
+  }
+});
+
+test('two names for an item with no buyer list it once', async () => {
+  await withRealIndex(async (client) => {
+    const answer = await askWhereToSell(client, ['Lifefluid', 'vial of lifefluid']);
+    assert.deepEqual(answer.noGoldBuyer, ['Lifefluid']);
+    assert.deepEqual(answer.cities, []);
+    assert.deepEqual(answer.unknownItems, []);
+  });
+});
+
+test('a name two items print is ambiguous, not unknown', async () => {
+  const answer = await whereToSell(['book', 'Dragon Shield', 'Book']);
+  assert.deepEqual(answer.ambiguousItems, [{ input: 'book', candidates: ['Book (Brown)', 'Book (Gemmed)'] }]);
+  assert.deepEqual(answer.unknownItems, []);
+  const sold = answer.cities.flatMap((c) => c.buyers.flatMap((b) => b.items.map((i) => i.item)));
+  assert.deepEqual(sold, ['Dragon Shield']);
 });
 
 // Yasir is an event NPC, so an item only he buys has no active buyer.

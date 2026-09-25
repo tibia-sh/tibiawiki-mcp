@@ -261,6 +261,14 @@ test('an in-game name differs from the title where the game prints another', () 
   assert.equal(lifefluid.plural, 'vials of lifefluid');
 }));
 
+test('tibia_get takes page names only, and points to tibia_search for in-game names', () => withRealIndex(async (client) => {
+  const res = await client.callTool({ name: 'tibia_get', arguments: { name: 'vial of lifefluid' } });
+  assert.equal(res.isError, true);
+  assert.match((res.content as Array<{ text: string }>)[0]!.text, /tibia_search/);
+  const { tools } = await client.listTools();
+  assert.match(tools.find((t) => t.name === 'tibia_get')?.description ?? '', /tibia_search[^.]*in-game name/);
+}));
+
 test('an immobile item that cannot be picked up says so', () => withRealIndex(async (client) => {
   const db = new DatabaseSync(DB_PATH, { readOnly: true });
   let title: string | undefined;

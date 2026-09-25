@@ -719,7 +719,8 @@ export function registerGet(server: McpServer, handle: TibiaDb): void {
         'abilities and max damage), item (with the NPCs that buy it), npc (with what it buys ' +
         'and sells), quest, spell, achievement, house, imbuement, ' +
         'charm, mount, outfit, book, world or update. Takes an exact page name — use ' +
-        'tibia_search first if it is uncertain, or tibia_find_updates for an update page. ' +
+        'tibia_search first if it is uncertain or an in-game name, or tibia_find_updates for an ' +
+        'update page. ' +
         'Pass `type` to disambiguate a shared name. ' +
         `Creature abilities may carry an \`area\`: ${AREA_LEGEND}`,
       inputSchema: z.object({

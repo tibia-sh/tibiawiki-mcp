@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/server';
 import { str, num, type TibiaDb } from '../db.ts';
-import { statusClause } from '../domain.ts';
+import { resolveItemName, statusClause } from '../domain.ts';
 import { sourceBlock } from './get.ts';
 
 const outputSchema = z.object({
@@ -29,9 +29,7 @@ export const NAME = 'tibia_how_to_obtain';
 export function registerHowToObtain(server: McpServer, handle: TibiaDb): void {
   const { db, provenance } = handle;
 
-  const findItem = db.prepare(
-    'select article_id, title, status from item where title = ? collate nocase',
-  );
+  const findItem = db.prepare('select article_id, title, status from item where article_id = ?');
 
   const dropped = (includeInactive: boolean) => {
     const status = statusClause('c', includeInactive);
@@ -74,7 +72,8 @@ export function registerHowToObtain(server: McpServer, handle: TibiaDb): void {
         'likely, which NPCs sell it and for how much (the price the player pays), and which ' +
         'quests reward it. Prefer this over three separate lookups.',
       inputSchema: z.object({
-        item_name: z.string().min(1).describe('Item page name, e.g. "Dragon Shield".'),
+        item_name: z.string().min(1)
+          .describe('Item page name or the name the game prints, e.g. "Dragon Shield".'),
         include_inactive: z.boolean().default(false)
           .describe('Include deprecated or event-only creatures, NPCs and quests as sources.'),
       }),
@@ -82,9 +81,22 @@ export function registerHowToObtain(server: McpServer, handle: TibiaDb): void {
       annotations: { readOnlyHint: true, openWorldHint: false },
     },
     async ({ item_name, include_inactive }) => {
-      const item = findItem.get(item_name) as
-        | { article_id: number; title: string; status: string | null }
-        | undefined;
+      const found = resolveItemName(db, item_name);
+      if (found.length > 1) {
+        return {
+          isError: true,
+          content: [{
+            type: 'text',
+            text: `"${item_name}" is ambiguous, several items go by it: ` +
+              `${found.map((i) => i.title).join(', ')}. Call tibia_how_to_obtain again with ` +
+              'one of them.',
+          }],
+        };
+      }
+      const [match] = found;
+      const item = match === undefined
+        ? undefined
+        : findItem.get(match.articleId) as { article_id: number; title: string; status: string | null };
       if (!item) {
         return {
           isError: true,

@@ -1,3 +1,4 @@
+import type { DatabaseSync } from 'node:sqlite';
 import { z } from 'zod';
 
 /**
@@ -389,6 +390,129 @@ export const asciiLower = (s: string): string => s.replace(/[A-Z]/g, (c) => c.to
  */
 export const likePattern = (text: string): string =>
   `%${asciiLower(text).replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
+
+/** An item a name resolves to. */
+export type ResolvedItem = { articleId: number; title: string };
+
+/** The singular forms of one English plural word: -ies to -y, -ves to -f and -fe, -es and -s. */
+function singularWords(word: string): string[] {
+  const forms: string[] = [];
+  if (word.endsWith('ies')) forms.push(`${word.slice(0, -3)}y`);
+  if (word.endsWith('ves')) forms.push(`${word.slice(0, -3)}f`, `${word.slice(0, -3)}fe`);
+  if (word.endsWith('es')) forms.push(word.slice(0, -2));
+  if (word.endsWith('s')) forms.push(word.slice(0, -1));
+  return forms;
+}
+
+/**
+ * The singular forms of a plural name, made on the word just before " of " when the name
+ * has one ("brown pieces of cloth" to "brown piece of cloth"), else on the last word.
+ */
+function singularForms(name: string): string[] {
+  const of = name.indexOf(' of ');
+  const head = of === -1 ? name : name.slice(0, of);
+  const lead = head.slice(0, head.lastIndexOf(' ') + 1);
+  const tail = of === -1 ? '' : name.slice(of);
+  return singularWords(head.slice(lead.length)).map((word) => lead + word + tail);
+}
+
+/** An item a name could mean, and how the name matches it. */
+type NameRow = ResolvedItem & {
+  byTitle: boolean; byName: boolean; byPlural: boolean; bySingular: boolean;
+  stackable: boolean; dropped: boolean;
+};
+
+/**
+ * Every item a name could mean, for the names in the first parameter, a JSON array of
+ * lowercased names: the items with one as title, whatever their status, and active items
+ * with one as actual_name or plural. `dropped` says whether a creature in the second
+ * parameter, a JSON array of article ids, drops the item.
+ */
+const ITEM_NAME_ROWS =
+  `select i.article_id, i.title, i.actual_name, i.plural, i.is_stackable,
+          (${statusClause('i', false)}) as active,
+          exists (select 1 from creature_drop d
+                   where d.item_id = i.article_id
+                     and d.creature_id in (select value from json_each(?2))) as dropped
+     from item i
+    where i.title in (select value from json_each(?1))
+       or (${statusClause('i', false)}
+           and (i.actual_name collate nocase in (select value from json_each(?1))
+                or i.plural collate nocase in (select value from json_each(?1))))`;
+
+/** The rows `keep` accepts, or all of them when it accepts none. */
+const narrow = (rows: NameRow[], keep: (row: NameRow) => boolean): NameRow[] => {
+  const kept = rows.filter(keep);
+  return kept.length > 0 ? kept : rows;
+};
+
+/** The first of `pools` that holds a row, or none. */
+const firstFound = (...pools: NameRow[][]): NameRow[] => pools.find((p) => p.length > 0) ?? [];
+
+/**
+ * The item a name the game prints, or a wiki title, stands for. It returns one item for an
+ * exact match, two or more candidates for a name several items share, and none for no
+ * match, each by title. Unlike this module's SQL fragments, it runs its own parameterised
+ * query on `db`.
+ *
+ * With a `count` above 1, the name is a plural: the active items whose recorded plural it
+ * is, or whose title or actual_name is one of its singular forms. When none is, it falls
+ * back to the title, whatever the status, then actual_name. Then the items a creature in
+ * `dropsOf` drops are kept, if any are, and of several the stackable ones, if any are.
+ *
+ * Otherwise, with `dropsOf`, the items with that title, actual_name or plural that a
+ * creature in it drops. Failing that, the first step that finds anything: the title,
+ * whatever the status (titles are unique), then the actual_name of active items, then
+ * their plural.
+ *
+ * `dropsOf` holds creature article ids: one creature, or each creature an ambiguous
+ * creature name could mean. Names that begin with an article or a number are decorations,
+ * not loot, and may resolve to nothing.
+ */
+export function resolveItemName(
+  db: DatabaseSync,
+  name: string,
+  { count, dropsOf }: { count?: number; dropsOf?: ReadonlySet<number> } = {},
+): ResolvedItem[] {
+  const folded = asciiLower(name);
+  const counted = count !== undefined && count > 1;
+  const singulars = counted ? singularForms(folded) : [];
+  const isSingular = (text: string | null) => text !== null && singulars.includes(text);
+  const fold = (v: unknown) => (v === null ? null : asciiLower(String(v)));
+  const rows = db.prepare(ITEM_NAME_ROWS)
+    .all(JSON.stringify([folded, ...singulars]), JSON.stringify([...(dropsOf ?? [])]))
+    .map((r): NameRow => {
+      const [title, actualName, active] = [fold(r.title), fold(r.actual_name), r.active === 1];
+      return {
+        articleId: Number(r.article_id), title: String(r.title),
+        byTitle: title === folded,
+        byName: active && actualName === folded,
+        byPlural: active && fold(r.plural) === folded,
+        bySingular: active && (isSingular(title) || isSingular(actualName)),
+        stackable: r.is_stackable === 1, dropped: r.dropped === 1,
+      };
+    });
+  const byTitle = rows.filter((r) => r.byTitle);
+  const byName = rows.filter((r) => r.byName);
+  const byPlural = rows.filter((r) => r.byPlural);
+
+  let found: NameRow[];
+  if (counted) {
+    found = firstFound(rows.filter((r) => r.byPlural || r.bySingular), byTitle, byName);
+    if (dropsOf) found = narrow(found, (r) => r.dropped);
+    if (found.length > 1) found = narrow(found, (r) => r.stackable);
+  } else {
+    const dropped = dropsOf
+      ? rows.filter((r) => r.dropped && (r.byTitle || r.byName || r.byPlural))
+      : [];
+    found = firstFound(dropped, byTitle, byName, byPlural);
+  }
+  // By title as the nocase collation orders it, then exactly.
+  const byCode = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
+  return found
+    .map(({ articleId, title }) => ({ articleId, title }))
+    .sort((a, b) => byCode(asciiLower(a.title), asciiLower(b.title)) || byCode(a.title, b.title));
+}
 
 /**
  * Non-active rows are numerous (138 event, 45 unavailable, 39 deprecated creatures)

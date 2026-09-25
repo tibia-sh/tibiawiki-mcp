@@ -83,9 +83,10 @@ export function registerParseLoot(server: McpServer, handle: TibiaDb): void {
     {
       description:
         'Parses loot messages as the game prints them, one per line, such as "12:34 Loot of ' +
-        'a dragon: 2 small diamonds, a steel shield (active prey bonus)." Gives totals by ' +
-        'item with count and value, and the entries it cannot resolve. Prices are NPC prices ' +
-        'in gold, coins at face value. Other lines come back as unparsed.',
+        'a dragon: 2 small diamonds, a steel shield (active prey bonus)." It reads the ' +
+        'game\'s names, not wiki titles. Gives totals by item with count and value, and the ' +
+        'entries it cannot resolve. Prices are NPC prices in gold, coins at face value. Other ' +
+        'lines come back as unparsed.',
       inputSchema: z.object({
         text: z.string().min(1).max(20_000).describe('Loot messages, one per line.'),
         include_lines: z.boolean().default(false)

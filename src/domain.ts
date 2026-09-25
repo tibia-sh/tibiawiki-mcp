@@ -407,6 +407,12 @@ export const asciiLower = (s: string): string => s.replace(/[A-Z]/g, (c) => c.to
 export const likePattern = (text: string): string =>
   `%${asciiLower(text).replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
 
+/** Titles as the nocase collation orders them, then exactly. */
+export const titleOrder = (a: string, b: string): number => {
+  const [fa, fb] = [asciiLower(a), asciiLower(b)];
+  return fa < fb ? -1 : fa > fb ? 1 : a < b ? -1 : a > b ? 1 : 0;
+};
+
 /** An item a name resolves to. */
 export type ResolvedItem = { articleId: number; title: string };
 
@@ -461,16 +467,18 @@ type NameIndex = {
  */
 const nameIndexes = new WeakMap<DatabaseSync, NameIndex>();
 
+/** Adds `value` to `map` under the folded `key`, unless the key is null. */
+function addFolded<T>(map: Map<string, T[]>, key: unknown, value: T): void {
+  if (key === null) return;
+  const folded = asciiLower(String(key));
+  const list = map.get(folded);
+  if (list) list.push(value);
+  else map.set(folded, [value]);
+}
+
 function nameIndex(db: DatabaseSync): NameIndex {
   const cached = nameIndexes.get(db);
   if (cached) return cached;
-  const add = (map: Map<string, IndexedItem[]>, key: unknown, item: IndexedItem) => {
-    if (key === null) return;
-    const folded = asciiLower(String(key));
-    const list = map.get(folded);
-    if (list) list.push(item);
-    else map.set(folded, [item]);
-  };
   const titles = new Map<string, IndexedItem[]>();
   const names = new Map<string, IndexedItem[]>();
   const plurals = new Map<string, IndexedItem[]>();
@@ -483,10 +491,10 @@ function nameIndex(db: DatabaseSync): NameIndex {
       articleId: Number(r.article_id), title: String(r.title),
       active: r.active === 1, stackable: r.is_stackable === 1,
     };
-    add(titles, r.title, item);
+    addFolded(titles, r.title, item);
     if (item.active) {
-      add(names, r.actual_name, item);
-      add(plurals, r.plural, item);
+      addFolded(names, r.actual_name, item);
+      addFolded(plurals, r.plural, item);
     }
   }
   const drops = new Map<number, Set<number>>();
@@ -590,11 +598,49 @@ export function resolveItemName(
     // A plural written without a count ("gold coins"), once nothing else matches.
     if (found.length === 0) found = asPlural();
   }
-  // By title as the nocase collation orders it, then exactly.
-  const byCode = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
   return found
     .map(({ articleId, title }) => ({ articleId, title }))
-    .sort((a, b) => byCode(asciiLower(a.title), asciiLower(b.title)) || byCode(a.title, b.title));
+    .sort((a, b) => titleOrder(a.title, b.title));
+}
+
+/** A creature a name resolves to. */
+export type ResolvedCreature = { articleId: number; title: string };
+
+/**
+ * Every creature under its folded title, whatever its status, and every active creature
+ * under its folded name and plural, one per database handle, as for items.
+ */
+const creatureIndexes = new WeakMap<DatabaseSync, Map<string, ResolvedCreature[]>[]>();
+
+/**
+ * The creature a name stands for: one for a match, two or more candidates for a name
+ * several creatures share, none for no match, each by title. The first step that finds
+ * anything wins: the title, whatever the status, then the name of active creatures, then
+ * their plural, all compared case-insensitively.
+ */
+export function resolveCreatureName(db: DatabaseSync, name: string): ResolvedCreature[] {
+  let steps = creatureIndexes.get(db);
+  if (!steps) {
+    const titles = new Map<string, ResolvedCreature[]>();
+    const names = new Map<string, ResolvedCreature[]>();
+    const plurals = new Map<string, ResolvedCreature[]>();
+    const rows = db.prepare(
+      `select c.article_id, c.title, c.name, c.plural, (${statusClause('c', false)}) as active
+         from creature c`).all();
+    for (const r of rows) {
+      const creature = { articleId: Number(r.article_id), title: String(r.title) };
+      addFolded(titles, r.title, creature);
+      if (r.active === 1) {
+        addFolded(names, r.name, creature);
+        addFolded(plurals, r.plural, creature);
+      }
+    }
+    steps = [titles, names, plurals];
+    creatureIndexes.set(db, steps);
+  }
+  const folded = asciiLower(name);
+  const found = steps.map((step) => step.get(folded) ?? []).find((f) => f.length > 0) ?? [];
+  return [...found].sort((a, b) => titleOrder(a.title, b.title));
 }
 
 /**

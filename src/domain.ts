@@ -192,6 +192,13 @@ const COIN_FACE_VALUES: Readonly<Record<string, number>> = {
 };
 
 /**
+ * A coin's value in gold, or null for an item that is no coin. Unlike this module's maps, it
+ * answers an unknown title rather than throwing, since any item title may be asked.
+ */
+export const coinFaceValue = (title: string): number | null =>
+  Object.hasOwn(COIN_FACE_VALUES, title) ? COIN_FACE_VALUES[title]! : null;
+
+/**
  * Estimated gold per kill, as a subquery with one row per creature that has a drop with a
  * recorded chance: `creature_id` and `gold_per_kill`. Each such drop is worth
  * chance / 100 x average amount x unit value, summed and rounded to an integer. The amount

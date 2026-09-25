@@ -62,7 +62,7 @@ You ask questions, and your assistant calls these:
 | `tibia_how_to_obtain` | "Where do I get X?" Drops, vendors and quest rewards in one call. X can be the wiki title or the name the game prints |
 | `tibia_find_updates` | "What changed for knights in 2026?" Game updates by text and release date |
 | `tibia_where_to_sell` | "Where do I sell all this loot?" The NPC paying the most for each item, grouped by city. It takes the names the game prints too, like "gold coins", and lists a name several items share with those items |
-| `tibia_parse_loot` | "What is this loot worth?" Paste loot messages as the game prints them and get each item's count, client ID and NPC value in gold |
+| `tibia_parse_loot` | "What is this loot worth?" Paste loot messages as the game prints them and get each item's count and NPC value in gold, with client IDs per line on request |
 | `tibia_find_travel` | "Which boat goes to Svargrond, and for how much?" Boat and carpet routes to a place or from a city, with fares. Each row is one leg, not a planned journey |
 
 The server tells your assistant how to read the data, for example that a damage modifier of 100

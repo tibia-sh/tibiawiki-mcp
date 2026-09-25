@@ -16,6 +16,7 @@ import { registerFindHouses, NAME as FIND_HOUSES } from './tools/find-houses.ts'
 import { registerHowToObtain, NAME as HOW_TO_OBTAIN } from './tools/how-to-obtain.ts';
 import { registerFindUpdates, NAME as FIND_UPDATES } from './tools/find-updates.ts';
 import { registerWhereToSell, NAME as WHERE_TO_SELL } from './tools/where-to-sell.ts';
+import { registerParseLoot, NAME as PARSE_LOOT } from './tools/parse-loot.ts';
 
 /**
  * What both servers report in the MCP handshake. The version is package.json's, read at
@@ -66,7 +67,7 @@ const FIELD_MEANINGS =
 
 export const TOOL_NAMES = [
   GET, SEARCH, FIND_CREATURES, FIND_ITEMS, FIND_SPELLS, FIND_QUESTS, FIND_HOUSES, HOW_TO_OBTAIN,
-  FIND_UPDATES, WHERE_TO_SELL,
+  FIND_UPDATES, WHERE_TO_SELL, PARSE_LOOT,
 ] as const;
 
 export function createServer(handle: TibiaDb): McpServer {
@@ -96,6 +97,7 @@ export function createServer(handle: TibiaDb): McpServer {
   registerHowToObtain(server, handle);
   registerFindUpdates(server, handle);
   registerWhereToSell(server, handle);
+  registerParseLoot(server, handle);
 
   return server;
 }

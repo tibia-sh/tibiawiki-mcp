@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DB_PATH } from '@tibia.sh/tibiawiki-data';
 import { InMemoryTransport } from '@modelcontextprotocol/server';
-import { Client } from '@modelcontextprotocol/client';
+import { Client, type Tool } from '@modelcontextprotocol/client';
 import { openDb } from '../src/db.ts';
 import { createServer } from '../src/server.ts';
 
@@ -80,25 +80,44 @@ export async function connectTo(path: string) {
 }
 
 /**
- * Ceiling on the serialised size of `tools/list`, in bytes.
+ * Ceiling on what a model reads of `tools/list`, in bytes, as `measureToolsList` counts it.
  *
- * This is a self-imposed budget, not an MCP limit. It exists because `tools/list`
- * is sent to the model at the start of every session, so it is a standing charge
- * against the agent's context: at roughly four characters per token, 40,000 bytes
- * is about 10,000 tokens.
+ * This is a self-imposed budget, not an MCP limit. A host puts the tools in the model's
+ * context, so every byte is a standing charge against it: at roughly four characters per
+ * token, 16,000 bytes is about 4,000 tokens. Claude Code gives the model a tool's
+ * description and input parameters only, checked on 2026-09-25 by loading this server's
+ * tools in a Claude Code session, and it defers MCP schemas, loading tool names and server
+ * instructions at startup (https://code.claude.com/docs/en/mcp). Output schemas never
+ * reach the model there, so they do not count here.
  *
- * Raised from 30,000 on 2026-09-12, when spell area shapes landed at 29,855 and left
- * 145 bytes. The measured breakdown is that `tibia_get`'s outputSchema is ~20,000 of
- * the total - two thirds - because it is a fourteen-member discriminated union. That
- * is inherent to describing fourteen entity types honestly, not slack to reclaim, so
- * the right response was a higher ceiling rather than a thinner schema.
- *
- * If this is approached again, weigh trimming `tibia_get` (or splitting it) before
- * raising it further: the number is meant to force that conversation, not to slide.
- *
- * Raised from 40,000 to 48,000 on 2026-09-24, when the tools went from six to nine
- * (spells, quests and houses) and `tools/list` measured 40,416 bytes. `tibia_get` is
- * 23,329 of that, and its fourteen-member output schema alone is 21,597, still the
- * largest part by far. It is the first thing to trim or split before any further raise.
+ * On the fixture the helper measures 12,945 bytes model-facing, names included.
+ * This is the number meant to force the conversation: if you approach it, trim a
+ * description or move a meaning into the server instructions before you raise it.
  */
-export const TOOLS_LIST_BUDGET = 48_000;
+export const MODEL_FACING_BUDGET = 16_000;
+
+/**
+ * Ceiling on the whole serialised `tools/list`, in bytes.
+ *
+ * Output schemas cost Claude Code's model nothing, but some hosts load every schema into
+ * context, and every client carries the full answer over the wire. On the fixture the
+ * total is 45,469 bytes, 31,313 of them output schemas, most of it `tibia_get`'s
+ * fourteen-member union. 64,000 is about 40% above that, which leaves room for output
+ * schemas to grow while still catching runaway growth.
+ */
+export const TOOLS_LIST_CEILING = 64_000;
+
+/**
+ * Sizes a `tools/list` result in UTF-8 bytes. `modelFacing` sums each tool's name,
+ * description and serialised input schema, what Claude Code gives the model. `total`
+ * is the whole serialised list, output schemas included.
+ */
+export function measureToolsList(tools: readonly Tool[]): { modelFacing: number; total: number } {
+  let modelFacing = 0;
+  for (const tool of tools) {
+    modelFacing += Buffer.byteLength(tool.name, 'utf8') +
+      Buffer.byteLength(tool.description ?? '', 'utf8') +
+      Buffer.byteLength(JSON.stringify(tool.inputSchema), 'utf8');
+  }
+  return { modelFacing, total: Buffer.byteLength(JSON.stringify(tools), 'utf8') };
+}

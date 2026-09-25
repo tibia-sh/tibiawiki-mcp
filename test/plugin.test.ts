@@ -2,11 +2,11 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { InMemoryTransport } from '@modelcontextprotocol/server';
-import { Client } from '@modelcontextprotocol/client';
+import { Client, type Tool } from '@modelcontextprotocol/client';
 import { openDb } from '../src/db.ts';
 import { createServer } from '../src/server.ts';
 import { ENTITY_TYPES } from '../src/domain.ts';
-import { FIXTURE, TOOLS_LIST_BUDGET } from './harness.ts';
+import { FIXTURE, measureToolsList, MODEL_FACING_BUDGET, TOOLS_LIST_CEILING } from './harness.ts';
 
 const root = new URL('..', import.meta.url).pathname;
 
@@ -83,7 +83,7 @@ test('the marketplace installs this plugin from its release tag and leaves its v
   assert.ok(!Object.hasOwn(entry, 'version'), 'the entry must not carry a version');
 });
 
-test('tools/list stays within the stated byte budget', async () => {
+test('tools/list stays within the model-facing budget and the total ceiling', async () => {
   const handle = openDb(FIXTURE);
   const server = createServer(handle);
   const [ct, st] = InMemoryTransport.createLinkedPair();
@@ -91,11 +91,38 @@ test('tools/list stays within the stated byte budget', async () => {
   const client = new Client({ name: 'budget', version: '1.0.0' });
   await client.connect(ct);
   const { tools } = await client.listTools();
-  const bytes = Buffer.byteLength(JSON.stringify(tools), 'utf8');
   await client.close();
   await server.close();
   handle.close();
-  assert.ok(bytes < TOOLS_LIST_BUDGET, `tools/list is ${bytes} bytes, over the ${TOOLS_LIST_BUDGET} budget`);
+  const { modelFacing, total } = measureToolsList(tools);
+  const measured = `tools/list is ${modelFacing} model-facing bytes (budget ${MODEL_FACING_BUDGET}) ` +
+    `and ${total} bytes in total (ceiling ${TOOLS_LIST_CEILING})`;
+  assert.ok(modelFacing <= MODEL_FACING_BUDGET, measured);
+  assert.ok(total <= TOOLS_LIST_CEILING, measured);
+});
+
+test('an output schema adds to the total but not to what the model reads', () => {
+  const tool = (outputSchema: Tool['outputSchema']): Tool => ({
+    name: 'tibia_example',
+    description: 'Finds an NPC in Thaïs, whose ï is two bytes in UTF-8, so the helper counts bytes.',
+    inputSchema: { type: 'object', properties: { name: { type: 'string' } }, required: ['name'] },
+    outputSchema,
+  });
+  const small = tool({ type: 'object', properties: { id: { type: 'number' } } });
+  const large = tool({
+    type: 'object',
+    properties: Object.fromEntries(
+      Array.from({ length: 50 }, (_, i) => [`field${i}`, { type: 'string', description: 'x'.repeat(200) }]),
+    ),
+  });
+  const before = measureToolsList([small]);
+  const after = measureToolsList([large]);
+  assert.equal(after.modelFacing, before.modelFacing);
+  assert.ok(after.total > before.total + 10_000, `total went from ${before.total} to ${after.total}`);
+  const expected = Buffer.byteLength(small.name) + Buffer.byteLength(small.description!) +
+    Buffer.byteLength(JSON.stringify(small.inputSchema));
+  assert.equal(before.modelFacing, expected);
+  assert.equal(measureToolsList([small, large]).modelFacing, 2 * expected);
 });
 
 // A description that still named five types would send a client looking for houses

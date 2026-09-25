@@ -11,6 +11,9 @@ import {
  */
 const MAX_LISTED = 100;
 
+/** The longest text the tool takes, in UTF-16 code units as zod counts a string's length. */
+export const MAX_LOOT_TEXT = 20_000;
+
 const candidatesSchema = z.array(z.string()).describe('Titles it may mean, when more than one.');
 
 const entrySchema = z.object({
@@ -96,7 +99,7 @@ export function registerParseLoot(server: McpServer, handle: TibiaDb): void {
         'cannot resolve. Prices are NPC prices in gold, coins at face value. Other lines come ' +
         `back unparsed. Both lists stop at ${MAX_LISTED}, their counts in totals do not.`,
       inputSchema: z.object({
-        text: z.string().min(1).max(20_000).describe('Loot messages, one per line.'),
+        text: z.string().min(1).max(MAX_LOOT_TEXT).describe('Loot messages, one per line.'),
         include_lines: z.boolean().default(false)
           .describe('Also give each line with its items, client IDs and prices.'),
       }),

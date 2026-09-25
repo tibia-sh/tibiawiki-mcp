@@ -3,6 +3,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from 'node:ht
 import { setTimeout as delay } from 'node:timers/promises';
 import { hostHeaderValidation, localhostOriginValidation, toNodeHandler } from '@modelcontextprotocol/node';
 import { createMcpHandler, localhostAllowedHostnames, type McpServer } from '@modelcontextprotocol/server';
+import { MAX_LOOT_TEXT } from './tools/parse-loot.ts';
 
 /**
  * Streamable HTTP in front of the SDK's MCP handler. It serves both protocol eras statelessly, refuses
@@ -13,8 +14,16 @@ import { createMcpHandler, localhostAllowedHostnames, type McpServer } from '@mo
 /**
  * The largest body a POST to /mcp may declare. The adapter buffers a whole body with no limit of its own,
  * so the cap is checked on Content-Length before a byte of the body is read.
+ *
+ * It admits a tibia_parse_loot call of MAX_LOOT_TEXT, the largest bounded input a tool takes, whichever way
+ * a client escapes it. zod counts that text in UTF-16 code units, a unit escaped as \uXXXX takes 6 bytes,
+ * and a surrogate pair is two units and two such escapes. 8 KiB more holds one JSON-RPC envelope, and the
+ * sum is rounded up to the next KiB: 128,192 bytes make 129,024. Other string inputs, such as
+ * tibia_where_to_sell's names, the search query and cursors, have no length limit of their own, and this
+ * cap is the only bound on them. It bounds a batch too: two maximally escaped calls stay refused, while two
+ * ASCII calls of MAX_LOOT_TEXT characters, about 40 KB, fit.
  */
-export const MAX_BODY_BYTES = 65_536;
+export const MAX_BODY_BYTES = Math.ceil((MAX_LOOT_TEXT * 6 + 8_192) / 1_024) * 1_024;
 
 export type HttpServeOptions = {
   /** The address to bind. */

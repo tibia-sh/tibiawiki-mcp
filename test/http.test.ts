@@ -10,6 +10,7 @@ import { localhostAllowedHostnames } from '@modelcontextprotocol/server';
 import { openDb } from '../src/db.ts';
 import { MAX_BODY_BYTES, isLoopbackAddress, serveHttp, type HttpServing } from '../src/http.ts';
 import { createServer, TOOL_NAMES } from '../src/server.ts';
+import { MAX_LOOT_TEXT } from '../src/tools/parse-loot.ts';
 import { FIXTURE } from './harness.ts';
 
 /**
@@ -211,18 +212,49 @@ test('a POST to /mcp without Content-Length gets 411', async () => {
   assert.equal(answer.headers['content-type'], 'text/plain');
 });
 
-test('a POST declaring 65,537 bytes gets 413 before any of them is sent, and 65,536 bytes reach the handler', async () => {
-  assert.equal(MAX_BODY_BYTES, 65_536);
+test('a POST declaring one byte over the cap gets 413 before any of them is sent, and one of exactly the cap reaches the handler', async () => {
+  // The hosting proxy in front of mcp.tibia.sh admits 129,024 bytes, so the cap must never exceed it.
+  assert.equal(MAX_BODY_BYTES, 129_024);
   // No byte of the declared body is ever sent, so an answer shows the length alone decided it.
-  const over = await send({ method: 'POST', headers: { ...mcpHeaders(LEGACY), 'content-length': '65537' }, timeoutMs: 1_000 });
+  const over = await send({
+    method: 'POST',
+    headers: { ...mcpHeaders(LEGACY), 'content-length': String(MAX_BODY_BYTES + 1) },
+    timeoutMs: 1_000,
+  });
   assert.equal(over.status, 413);
   assert.equal(over.headers['content-type'], 'text/plain');
 
   // JSON allows whitespace after the message, so padding makes a valid request of exactly the cap.
-  const exact = await post(TOOLS_LIST.padEnd(65_536, ' '), mcpHeaders(LEGACY));
+  const exact = await post(TOOLS_LIST.padEnd(MAX_BODY_BYTES, ' '), mcpHeaders(LEGACY));
   assert.equal(exact.status, 200);
   const [message] = events(exact.body) as Array<{ result: { tools: unknown[] } }>;
   assert.equal(message?.result.tools.length, TOOL_NAMES.length);
+});
+
+test('a tibia_parse_loot call of the longest text, every character escaped as \\uXXXX, fits the cap and is answered', async () => {
+  // U+0001 serialises as a six-byte escape and is no whitespace, so the text stays one line the tool cannot parse.
+  const text = '\u0001'.repeat(MAX_LOOT_TEXT);
+  const body = JSON.stringify({
+    jsonrpc: '2.0',
+    id: 1,
+    method: 'tools/call',
+    params: { name: 'tibia_parse_loot', arguments: { text }, _meta: ENVELOPE },
+  });
+  const bytes = Buffer.byteLength(body);
+  // 65,536 was the cap before 0.11.1, kept literal so the test cannot pass against it.
+  assert.ok(bytes > 65_536, `the request is ${bytes} bytes, within the old cap`);
+  assert.ok(bytes <= MAX_BODY_BYTES, `the request is ${bytes} bytes, over the cap of ${MAX_BODY_BYTES}`);
+
+  const answer = await post(body, { ...mcpHeaders(MODERN), 'mcp-method': 'tools/call', 'mcp-name': 'tibia_parse_loot' });
+  assert.equal(answer.status, 200, `the request of ${bytes} bytes got ${answer.status}`);
+  const message = JSON.parse(answer.body) as {
+    error?: unknown;
+    result: { isError?: boolean; structuredContent: { totals: { unparsed: number }; unparsed: string[] } };
+  };
+  assert.equal(message.error, undefined);
+  assert.equal(message.result.isError ?? false, false);
+  assert.equal(message.result.structuredContent.totals.unparsed, 1);
+  assert.deepEqual(message.result.structuredContent.unparsed, [text]);
 });
 
 test('PUT and DELETE on /mcp get 405 with Allow: GET, POST before their bodies are read', async () => {

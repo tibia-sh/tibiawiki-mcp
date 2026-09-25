@@ -88,7 +88,7 @@ On a loopback address the server rejects a request to `/mcp` with a foreign `Hos
 header. On any other address it skips those checks. Put your own edge in front of it to handle those
 checks and TLS.
 
-Request bodies are capped at 64 KiB and need a `Content-Length`. `GET /ping` answers `200`
+Request bodies are capped at 126 KiB and need a `Content-Length`. `GET /ping` answers `200`
 for health checks.
 
 On `SIGTERM` the server answers new requests with `503` and gives the ones in flight up to

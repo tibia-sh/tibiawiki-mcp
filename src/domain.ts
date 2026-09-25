@@ -438,23 +438,71 @@ type NameRow = ResolvedItem & {
   stackable: boolean; dropped: boolean;
 };
 
+/** An item as the name index holds it. */
+type IndexedItem = ResolvedItem & { active: boolean; stackable: boolean };
+
 /**
- * Every item a name could mean, for the names in the first parameter, a JSON array of
- * lowercased names: the items with one as title, whatever their status, and active items
- * with one as actual_name or plural. `dropped` says whether a creature in the second
- * parameter, a JSON array of article ids, drops the item.
+ * Every item under its folded title, whatever its status, and every active item under its
+ * folded actual_name and plural. `dropsOf` gives a creature's dropped item ids, read from
+ * the database on first use.
  */
-const ITEM_NAME_ROWS =
-  `select i.article_id, i.title, i.actual_name, i.plural, i.is_stackable,
-          (${statusClause('i', false)}) as active,
-          exists (select 1 from creature_drop d
-                   where d.item_id = i.article_id
-                     and d.creature_id in (select value from json_each(?2))) as dropped
-     from item i
-    where i.title in (select value from json_each(?1))
-       or (${statusClause('i', false)}
-           and (i.actual_name collate nocase in (select value from json_each(?1))
-                or i.plural collate nocase in (select value from json_each(?1))))`;
+type NameIndex = {
+  titles: Map<string, IndexedItem[]>;
+  names: Map<string, IndexedItem[]>;
+  plurals: Map<string, IndexedItem[]>;
+  dropsOf: (creatureId: number) => Set<number>;
+};
+
+/**
+ * One name index per database handle, built on the first resolve. A query per name read
+ * every item row, since a nocase match on three columns uses no index, and a loot paste
+ * resolves hundreds of names. The index holds the database as it was when built, which is
+ * the whole life of a read-only handle.
+ */
+const nameIndexes = new WeakMap<DatabaseSync, NameIndex>();
+
+function nameIndex(db: DatabaseSync): NameIndex {
+  const cached = nameIndexes.get(db);
+  if (cached) return cached;
+  const add = (map: Map<string, IndexedItem[]>, key: unknown, item: IndexedItem) => {
+    if (key === null) return;
+    const folded = asciiLower(String(key));
+    const list = map.get(folded);
+    if (list) list.push(item);
+    else map.set(folded, [item]);
+  };
+  const titles = new Map<string, IndexedItem[]>();
+  const names = new Map<string, IndexedItem[]>();
+  const plurals = new Map<string, IndexedItem[]>();
+  const rows = db.prepare(
+    `select i.article_id, i.title, i.actual_name, i.plural, i.is_stackable,
+            (${statusClause('i', false)}) as active
+       from item i`).all();
+  for (const r of rows) {
+    const item: IndexedItem = {
+      articleId: Number(r.article_id), title: String(r.title),
+      active: r.active === 1, stackable: r.is_stackable === 1,
+    };
+    add(titles, r.title, item);
+    if (item.active) {
+      add(names, r.actual_name, item);
+      add(plurals, r.plural, item);
+    }
+  }
+  const drops = new Map<number, Set<number>>();
+  const dropRows = db.prepare('select item_id from creature_drop where creature_id = ?');
+  const dropsOf = (creatureId: number): Set<number> => {
+    let set = drops.get(creatureId);
+    if (!set) {
+      set = new Set(dropRows.all(creatureId).map((d) => Number(d.item_id)));
+      drops.set(creatureId, set);
+    }
+    return set;
+  };
+  const index = { titles, names, plurals, dropsOf };
+  nameIndexes.set(db, index);
+  return index;
+}
 
 /** The rows `keep` accepts, or all of them when it accepts none. */
 const narrow = (rows: NameRow[], keep: (row: NameRow) => boolean): NameRow[] => {
@@ -468,8 +516,8 @@ const firstFound = (...pools: NameRow[][]): NameRow[] => pools.find((p) => p.len
 /**
  * The item a name the game prints, or a wiki title, stands for. It returns one item for an
  * exact match, two or more candidates for a name several items share, and none for no
- * match, each by title. Unlike this module's SQL fragments, it runs its own parameterised
- * query on `db`.
+ * match, each by title. Unlike this module's SQL fragments, it reads `db` itself, through a
+ * name index built once per database handle.
  *
  * With a `count` above 1, the name is a plural: the active items whose recorded plural it
  * is, or whose title or actual_name is one of its singular forms. When none is, it falls
@@ -490,24 +538,36 @@ export function resolveItemName(
   name: string,
   { count, dropsOf }: { count?: number; dropsOf?: ReadonlySet<number> } = {},
 ): ResolvedItem[] {
+  const index = nameIndex(db);
   const folded = asciiLower(name);
   const counted = count !== undefined && count > 1;
   const singulars = singularForms(folded);
-  const isSingular = (text: string | null) => text !== null && singulars.includes(text);
-  const fold = (v: unknown) => (v === null ? null : asciiLower(String(v)));
-  const rows = db.prepare(ITEM_NAME_ROWS)
-    .all(JSON.stringify([folded, ...singulars]), JSON.stringify([...(dropsOf ?? [])]))
-    .map((r): NameRow => {
-      const [title, actualName, active] = [fold(r.title), fold(r.actual_name), r.active === 1];
-      return {
-        articleId: Number(r.article_id), title: String(r.title),
-        byTitle: title === folded,
-        byName: active && actualName === folded,
-        byPlural: active && fold(r.plural) === folded,
-        bySingular: active && (isSingular(title) || isSingular(actualName)),
-        stackable: r.is_stackable === 1, dropped: r.dropped === 1,
-      };
-    });
+  const dropSets = [...(dropsOf ?? [])].map(index.dropsOf);
+  // Each item a name could mean once, with every way the name matches it.
+  const byId = new Map<number, NameRow>();
+  type Flag = 'byTitle' | 'byName' | 'byPlural' | 'bySingular';
+  const mark = (items: IndexedItem[] | undefined, flag: Flag) => {
+    for (const item of items ?? []) {
+      let row = byId.get(item.articleId);
+      if (!row) {
+        row = {
+          articleId: item.articleId, title: item.title,
+          byTitle: false, byName: false, byPlural: false, bySingular: false,
+          stackable: item.stackable, dropped: dropSets.some((d) => d.has(item.articleId)),
+        };
+        byId.set(item.articleId, row);
+      }
+      row[flag] = true;
+    }
+  };
+  mark(index.titles.get(folded), 'byTitle');
+  mark(index.names.get(folded), 'byName');
+  mark(index.plurals.get(folded), 'byPlural');
+  for (const singular of singulars) {
+    mark(index.titles.get(singular)?.filter((i) => i.active), 'bySingular');
+    mark(index.names.get(singular), 'bySingular');
+  }
+  const rows = [...byId.values()];
   const byTitle = rows.filter((r) => r.byTitle);
   const byName = rows.filter((r) => r.byName);
   const byPlural = rows.filter((r) => r.byPlural);

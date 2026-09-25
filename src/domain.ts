@@ -165,6 +165,7 @@ export const IMAGE_MEANING = 'Sprite image link. Dimensions are pixels, not map 
 export const RASHID_PLACE_MEANING =
   "For Rashid, who moves city daily, a buyer's city and position coordinates are null. His NPC page and " +
   'tibia_where_to_sell give his week as rashidSchedule.';
+export const FARE_MEANING = 'Route price in gold. 0: free or not recorded, see notes.';
 
 /**
  * Creature numbers the wiki gives a meaning at 0, described once for every tool that
@@ -173,6 +174,9 @@ export const RASHID_PLACE_MEANING =
 export const runsAtSchema = z.number().nullable().describe(RUNS_AT_MEANING);
 export const summonCostSchema = z.number().nullable().describe(SUMMON_COST_MEANING);
 export const convinceCostSchema = z.number().nullable().describe(CONVINCE_COST_MEANING);
+
+/** A travel route's recorded fare, described once for every tool that reports it. */
+export const fareSchema = z.number().nullable().describe(FARE_MEANING);
 
 /**
  * Names as the game prints them in look, loot and kill messages, which can differ from the
@@ -400,6 +404,25 @@ export function houseSort(key: HouseSort): string {
     throw new Error(`Unknown sort key: ${String(key)}`);
   }
   return HOUSE_ORDER[key];
+}
+
+export const TRAVEL_SORTS = ['price', 'npc'] as const;
+export type TravelSort = (typeof TRAVEL_SORTS)[number];
+/**
+ * How travel routes sort. Each order is total over a route's fields, so a cursor's offset
+ * stays stable. A fare of 0 is free or unrecorded, so it sorts after every positive fare
+ * rather than as the cheapest. nullsLast does not fit: its tiebreak is a bare title. The
+ * query must alias the npc table `n` and npc_destination `d`.
+ */
+const TRAVEL_ORDER: Record<TravelSort, string> = {
+  price: '(d.price > 0) desc, d.price asc, n.title asc, d.name asc, d.notes asc',
+  npc: 'n.title asc, d.name asc, d.price asc, d.notes asc',
+};
+export function travelSort(key: TravelSort): string {
+  if (!Object.hasOwn(TRAVEL_ORDER, key)) {
+    throw new Error(`Unknown sort key: ${String(key)}`);
+  }
+  return TRAVEL_ORDER[key];
 }
 
 const EAV_OPERATORS = { gt: '>', gte: '>=', lte: '<=' } as const;

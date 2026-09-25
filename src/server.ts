@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { McpServer } from '@modelcontextprotocol/server';
 import type { TibiaDb } from './db.ts';
 import {
-  CONVINCE_COST_MEANING, GOLD_PER_KILL_MEANING, IMAGE_MEANING, RASHID_PLACE_MEANING,
+  CONVINCE_COST_MEANING, FARE_MEANING, GOLD_PER_KILL_MEANING, IMAGE_MEANING, RASHID_PLACE_MEANING,
   RUNS_AT_MEANING, SUMMON_COST_MEANING,
 } from './domain.ts';
 import { registerGet, NAME as GET } from './tools/get.ts';
@@ -17,6 +17,7 @@ import { registerHowToObtain, NAME as HOW_TO_OBTAIN } from './tools/how-to-obtai
 import { registerFindUpdates, NAME as FIND_UPDATES } from './tools/find-updates.ts';
 import { registerWhereToSell, NAME as WHERE_TO_SELL } from './tools/where-to-sell.ts';
 import { registerParseLoot, NAME as PARSE_LOOT } from './tools/parse-loot.ts';
+import { registerFindTravel, NAME as FIND_TRAVEL } from './tools/find-travel.ts';
 
 /**
  * What both servers report in the MCP handshake. The version is package.json's, read at
@@ -63,11 +64,11 @@ export const ATTRIBUTION =
 const FIELD_MEANINGS =
   `What result fields mean. runsAt: ${RUNS_AT_MEANING} summonCost: ${SUMMON_COST_MEANING} ` +
   `convinceCost: ${CONVINCE_COST_MEANING} goldPerKill: ${GOLD_PER_KILL_MEANING} ` +
-  `image: ${IMAGE_MEANING} ${RASHID_PLACE_MEANING} `;
+  `image: ${IMAGE_MEANING} ${RASHID_PLACE_MEANING} ${FARE_MEANING} `;
 
 export const TOOL_NAMES = [
   GET, SEARCH, FIND_CREATURES, FIND_ITEMS, FIND_SPELLS, FIND_QUESTS, FIND_HOUSES, HOW_TO_OBTAIN,
-  FIND_UPDATES, WHERE_TO_SELL, PARSE_LOOT,
+  FIND_UPDATES, WHERE_TO_SELL, PARSE_LOOT, FIND_TRAVEL,
 ] as const;
 
 export function createServer(handle: TibiaDb): McpServer {
@@ -98,6 +99,7 @@ export function createServer(handle: TibiaDb): McpServer {
   registerFindUpdates(server, handle);
   registerWhereToSell(server, handle);
   registerParseLoot(server, handle);
+  registerFindTravel(server, handle);
 
   return server;
 }

@@ -3,14 +3,18 @@ import type { McpServer } from '@modelcontextprotocol/server';
 import { str, num, type TibiaDb } from '../db.ts';
 import {
   asciiLower, BEST_GOLD_PRICE, buyerCitySchema, buyerPlace, buyerPositionSchema, RASHID,
-  RASHID_SCHEDULE, rashidScheduleSchema, rashidScheduleDay,
+  RASHID_SCHEDULE, rashidScheduleSchema, rashidScheduleDay, resolveItemName,
 } from '../domain.ts';
 
 const buyerSchema = z.object({
   npc: z.string(),
   position: buyerPositionSchema,
   rashidSchedule: rashidScheduleSchema.optional(),
-  items: z.array(z.object({ item: z.string(), price: z.number() })),
+  items: z.array(z.object({
+    item: z.string(),
+    input: z.string().describe('The name as you first wrote it.'),
+    price: z.number(),
+  })),
 });
 type Buyer = z.infer<typeof buyerSchema>;
 
@@ -21,6 +25,8 @@ const outputSchema = z.object({
   })),
   noGoldBuyer: z.array(z.string()).describe('Items no active NPC buys for gold.'),
   unknownItems: z.array(z.string()).describe('Names that match no item.'),
+  ambiguousItems: z.array(z.object({ input: z.string(), candidates: z.array(z.string()) }))
+    .describe('Names more than one item goes by, with those items.'),
   indexGeneratedAt: z.string(),
 });
 
@@ -36,11 +42,9 @@ const cityOrder = (a: string | null, b: string | null): number =>
 
 export function registerWhereToSell(server: McpServer, handle: TibiaDb): void {
   const { db, provenance } = handle;
-  // item.title is COLLATE NOCASE, the same ASCII fold as asciiLower.
-  const findItem = db.prepare('select article_id from item where title = ?');
   // BEST_GOLD_PRICE ranks every offer, so it runs once for the whole list.
   const bestBuyers = db.prepare(
-    `select i.title as item, best.price, n.title as npc, n.city, n.x, n.y, n.z
+    `select i.article_id, i.title as item, best.price, n.title as npc, n.city, n.x, n.y, n.z
        from item i
        left join (${BEST_GOLD_PRICE}) best on best.item_id = i.article_id
        left join npc n on n.article_id = best.npc_id
@@ -57,7 +61,8 @@ export function registerWhereToSell(server: McpServer, handle: TibiaDb): void {
         'for more.',
       inputSchema: z.object({
         items: z.array(z.string().min(1)).min(1).max(100)
-          .describe('Exact item names, any case, e.g. "Dragon Shield".'),
+          .describe('Item names, any case, as the wiki titles them or the game prints them, ' +
+            'e.g. "Dragon Shield" or "vial of lifefluid".'),
       }),
       outputSchema,
       annotations: { readOnlyHint: true, openWorldHint: false },
@@ -67,18 +72,25 @@ export function registerWhereToSell(server: McpServer, handle: TibiaDb): void {
       const names = new Map<string, string>();
       for (const name of items) if (!names.has(asciiLower(name))) names.set(asciiLower(name), name);
 
-      const ids: number[] = [];
+      // Each item once, under the first name that resolves to it.
+      const inputs = new Map<number, string>();
       const unknownItems: string[] = [];
+      const ambiguousItems: Array<{ input: string; candidates: string[] }> = [];
       for (const name of names.values()) {
-        const row = findItem.get(name);
-        if (row) ids.push(Number(row.article_id));
-        else unknownItems.push(name);
+        const found = resolveItemName(db, name);
+        if (found.length === 1) {
+          if (!inputs.has(found[0]!.articleId)) inputs.set(found[0]!.articleId, name);
+        } else if (found.length > 1) {
+          ambiguousItems.push({ input: name, candidates: found.map((i) => i.title) });
+        } else {
+          unknownItems.push(name);
+        }
       }
 
       const noGoldBuyer: string[] = [];
       const cities = new Map<string | null, Buyer[]>();
       let buyer: Buyer | undefined;
-      for (const row of bestBuyers.all(JSON.stringify(ids))) {
+      for (const row of bestBuyers.all(JSON.stringify([...inputs.keys()]))) {
         const item = String(row.item);
         if (row.npc === null) {
           noGoldBuyer.push(item);
@@ -96,13 +108,14 @@ export function registerWhereToSell(server: McpServer, handle: TibiaDb): void {
           if (inCity) inCity.push(buyer);
           else cities.set(place.city, [buyer]);
         }
-        buyer.items.push({ item, price: Number(row.price) });
+        buyer.items.push({ item, input: inputs.get(Number(row.article_id))!, price: Number(row.price) });
       }
 
       const output = {
         cities: [...cities].sort(([a], [b]) => cityOrder(a, b)).map(([city, buyers]) => ({ city, buyers })),
         noGoldBuyer,
         unknownItems,
+        ambiguousItems,
         indexGeneratedAt: provenance.generatedAt,
       };
       return {

@@ -29,11 +29,16 @@ export function registerSearch(server: McpServer, handle: TibiaDb): void {
       // entirely rather than merely disabled - these statements are prepared eagerly
       // here, so an unconditional clause would fail at server construction.
       const status = entityHasStatus(type) ? statusClause('t', includeInactive) : '';
+      // An item also matches by the name and plural the game prints, one row per item.
+      const inGame = type === 'item'
+        ? ' or t.actual_name like ?1 collate nocase or t.plural like ?1 collate nocase'
+        : '';
       statements.set(
         `${type}:${includeInactive}`,
         db.prepare(
           `select t.title from "${entityTable(type)}" t
-           where (? is null or t.title like ? collate nocase)` + (status ? ` and ${status}` : ''),
+           where (?1 is null or t.title like ?1 collate nocase${inGame})` +
+            (status ? ` and ${status}` : ''),
         ),
       );
     }
@@ -45,8 +50,9 @@ export function registerSearch(server: McpServer, handle: TibiaDb): void {
       description:
         'Find Tibia pages whose name contains a substring, across all fourteen kinds of ' +
         'page (creature, item, npc, quest, spell, achievement, house, imbuement, charm, ' +
-        'mount, outfit, book, world, update). Turns an approximate name into the exact page ' +
-        'name tibia_get expects. With a query, ordered shortest name first, so the closest ' +
+        'mount, outfit, book, world, update). Items also match by the name and plural the game ' +
+        'prints. Turns an approximate or in-game name into the exact page name tibia_get expects. ' +
+        'With a query, ordered shortest name first, so the closest ' +
         'match leads. With types and no query, lists every page of those types by title, ' +
         'as in "list every mount".',
       inputSchema: z.object({
@@ -92,7 +98,7 @@ export function registerSearch(server: McpServer, handle: TibiaDb): void {
       const all: Array<{ title: string; type: EntityType }> = [];
       for (const type of wanted) {
         const stmt = statements.get(`${type}:${include_inactive}`)!;
-        for (const row of stmt.all(pattern, pattern)) {
+        for (const row of stmt.all(pattern)) {
           all.push({ title: String(row.title), type });
         }
       }

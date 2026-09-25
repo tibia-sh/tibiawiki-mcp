@@ -96,7 +96,8 @@ export async function connectTo(path: string, provenance?: Provenance) {
  *
  * On the fixture the helper measures 12,945 bytes model-facing, names included.
  * This is the number meant to force the conversation: if you approach it, trim a
- * description or move a meaning into the server instructions before you raise it.
+ * description before you raise it. The server instructions are no escape hatch, since
+ * they have their own 2,048-character cap in test/server.test.ts and little room left.
  */
 export const MODEL_FACING_BUDGET = 16_000;
 

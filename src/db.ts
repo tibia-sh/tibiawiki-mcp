@@ -28,8 +28,6 @@ export const MCP_SCHEMA_VERSION = 3;
 /**
  * The shape the tools require. Probed once at startup so a generator-version drift
  * names the column it is missing instead of silently returning nulls for it.
- * `index-digest` covers exactly these tables and columns, so the drift check watches
- * the same shape the tools read.
  */
 export const REQUIRED_COLUMNS: Readonly<Record<string, readonly string[]>> = {
   creature: [

@@ -10,7 +10,7 @@ const scratch = tempDirs('twmcp-bi-cli-');
 /**
  * A failed `build-index` used to end in an uncaught rejection, so the user read a stack
  * trace with the reason somewhere inside it. Now it reports failures the way
- * `index-digest` does: one `tibiawiki-mcp: ` diagnostic on stderr and exit code 1.
+ * `serve --http` does: one `tibiawiki-mcp: ` diagnostic on stderr and exit code 1.
  *
  * The built binary runs with a PATH of one empty directory, so `uv` cannot start and the
  * build fails before anything reaches the network. `TIBIAWIKI_MCP_DB`, `XDG_CACHE_HOME`

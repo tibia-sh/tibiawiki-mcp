@@ -133,8 +133,3 @@ The server reads the first index it finds:
 
 A built index keeps winning over every later data release. If the server cannot read
 it, you get an error, not a fallback. Delete it to go back to the packaged one.
-
-`tibiawiki-mcp index-digest <path>` prints a SHA-256 over the rows and columns the tools
-read from an index. Two indexes with the same digest hold the same rows, in any stored
-order. Build stamps such as `indexGeneratedAt` are left out. The data repo's drift job
-will use it to tell new wiki content from a rebuild of the same content.

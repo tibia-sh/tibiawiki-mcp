@@ -50,18 +50,16 @@ export function registerSearch(server: McpServer, handle: TibiaDb): void {
     NAME,
     {
       description:
-        'Find Tibia pages whose name contains a substring, across all fourteen kinds of ' +
-        'page (creature, item, npc, quest, spell, achievement, house, imbuement, charm, ' +
-        'mount, outfit, book, world, update). Items also match by the name and plural the game ' +
-        'prints. Turns an approximate or in-game name into the exact page name tibia_get expects. ' +
-        'With a query, ordered shortest name first, so the closest ' +
-        'match leads. With types and no query, lists every page of those types by title, ' +
-        'as in "list every mount".',
+        'Find Tibia pages of any kind whose name contains a substring. Items also match by the ' +
+        'name and plural the game prints. Turns an approximate or in-game name into the exact ' +
+        'page name tibia_get expects. With a query, shortest name first, so the closest match ' +
+        'leads. With types and no query, lists every page of those types by title, as in ' +
+        '"list every mount".',
       inputSchema: z.object({
         query: z.string().min(1).optional()
           .describe('Substring to match against page names, case-insensitive. Omit it to list every page of types.'),
         types: z.array(entityTypeSchema).optional()
-          .describe('Restrict to these kinds of page. Defaults to all fourteen. Required without a query.'),
+          .describe('Restrict to these kinds of page. Defaults to all. Required without a query.'),
         include_inactive: z.boolean().default(false)
           .describe('Include deprecated, event-only and unavailable pages.'),
         limit: z.number().int().min(1).max(100).default(25),

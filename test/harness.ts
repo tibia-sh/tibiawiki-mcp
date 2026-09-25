@@ -82,13 +82,14 @@ export async function connectTo(path: string) {
 /**
  * Ceiling on what a model reads of `tools/list`, in bytes, as `measureToolsList` counts it.
  *
- * This is a self-imposed budget, not an MCP limit. A host puts the tools in the model's
- * context, so every byte is a standing charge against it: at roughly four characters per
- * token, 16,000 bytes is about 4,000 tokens. Claude Code gives the model a tool's
- * description and input parameters only, checked on 2026-09-25 by loading this server's
- * tools in a Claude Code session, and it defers MCP schemas, loading tool names and server
- * instructions at startup (https://code.claude.com/docs/en/mcp). Output schemas never
- * reach the model there, so they do not count here.
+ * This is a self-imposed budget, not an MCP limit. A host that loads every schema pays
+ * these bytes each session, and a host that defers them pays them per tool it loads: at
+ * roughly four characters per token, 16,000 bytes is about 4,000 tokens. Claude Code gives
+ * the model a tool's description and input parameters only, checked on 2026-09-25 by
+ * loading this server's tools in a Claude Code session, and it defers MCP schemas, loading
+ * tool names and server instructions at startup (https://code.claude.com/docs/en/mcp).
+ * There, output schemas do not reach the model, so they do not count here. Other hosts
+ * were not checked.
  *
  * On the fixture the helper measures 12,945 bytes model-facing, names included.
  * This is the number meant to force the conversation: if you approach it, trim a

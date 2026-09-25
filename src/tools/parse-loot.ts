@@ -5,6 +5,12 @@ import {
   BEST_GOLD_PRICE, coinFaceValue, resolveCreatureName, resolveItemName, titleOrder,
 } from '../domain.ts';
 
+/**
+ * How many unresolved entries and unparsed lines the answer lists, so a crafted paste cannot
+ * make it hundreds of kilobytes. The totals count them all.
+ */
+const MAX_LISTED = 100;
+
 const candidatesSchema = z.array(z.string()).describe('Titles it may mean, when more than one.');
 
 const entrySchema = z.object({
@@ -32,13 +38,15 @@ const outputSchema = z.object({
     gold: z.number().describe('Sum of the priced values.'),
     unresolved: z.number().describe('Entries with no single item.'),
     unpriced: z.number().describe('Entries of an item with no value.'),
+    unparsed: z.number().describe('Lines that are no loot message.'),
   }),
   unresolvedEntries: z.array(z.object({
     line: z.number().describe('Line number in the input, from 1.'),
     text: z.string(),
     candidates: candidatesSchema,
-  })).describe('Entries with no single item.'),
-  unparsed: z.array(z.string()).describe('Lines that are no loot message.'),
+  })).describe(`Entries with no single item, the first ${MAX_LISTED}.`),
+  unparsed: z.array(z.string())
+    .describe(`Lines that are no loot message, the first ${MAX_LISTED}.`),
   indexGeneratedAt: z.string(),
 });
 
@@ -86,7 +94,8 @@ export function registerParseLoot(server: McpServer, handle: TibiaDb): void {
         'a dragon: 2 small diamonds, a steel shield (active prey bonus)." It reads the ' +
         'game\'s names, not wiki titles. Gives totals by item with count and value, and the ' +
         'entries it cannot resolve. Prices are NPC prices in gold, coins at face value. Other ' +
-        'lines come back as unparsed.',
+        `lines come back as unparsed. Both lists stop at ${MAX_LISTED}, their counts in totals ` +
+        'do not.',
       inputSchema: z.object({
         text: z.string().min(1).max(20_000).describe('Loot messages, one per line.'),
         include_lines: z.boolean().default(false)
@@ -181,10 +190,10 @@ export function registerParseLoot(server: McpServer, handle: TibiaDb): void {
         ...(include_lines ? { lines } : {}),
         totals: {
           items: [...totals.values()].sort((a, b) => titleOrder(a.item, b.item)),
-          gold, unresolved: unresolvedEntries.length, unpriced,
+          gold, unresolved: unresolvedEntries.length, unpriced, unparsed: unparsed.length,
         },
-        unresolvedEntries,
-        unparsed,
+        unresolvedEntries: unresolvedEntries.slice(0, MAX_LISTED),
+        unparsed: unparsed.slice(0, MAX_LISTED),
         indexGeneratedAt: provenance.generatedAt,
       };
       return {

@@ -21,7 +21,7 @@ type Line = {
 type Compact = {
   totals: {
     items: Array<{ item: string; count: number; value: number | null }>;
-    gold: number; unresolved: number; unpriced: number;
+    gold: number; unresolved: number; unpriced: number; unparsed: number;
   };
   unresolvedEntries: Array<{ line: number; text: string; candidates: string[] }>;
   unparsed: string[];
@@ -123,7 +123,7 @@ test('a loot line gives its creature, note, items, client IDs, prices and totals
       { item: 'Small Diamond', count: 2, value: 2 * prices.get('Small Diamond')! },
       { item: 'Steel Shield', count: 1, value: prices.get('Steel Shield')! },
     ],
-    gold, unresolved: 0, unpriced: 1,
+    gold, unresolved: 0, unpriced: 1, unparsed: 0,
   });
   assert.deepEqual(answer.unparsed, []);
   assert.match(answer.indexGeneratedAt, /\S/);
@@ -143,7 +143,7 @@ test('by default the answer leaves out the lines and names each unresolved entry
         { line: 4, text: 'a blorb', candidates: [] },
       ]);
       assert.deepEqual(answer.totals, {
-        items: [{ item: 'Gold Coin', count: 2, value: 2 }], gold: 2, unresolved: 3, unpriced: 0,
+        items: [{ item: 'Gold Coin', count: 2, value: 2 }], gold: 2, unresolved: 3, unpriced: 0, unparsed: 1,
       });
       assert.deepEqual(answer.unparsed, ['hello']);
     }
@@ -166,8 +166,27 @@ test('one item across lines sums its value into one total', async () => {
       { item: 'Small Diamond', count: 3, value: 3 * diamond },
       { item: 'Steel Shield', count: 1, value: shield },
     ],
-    gold: 3 * diamond + shield + 3 * scale, unresolved: 0, unpriced: 0,
+    gold: 3 * diamond + shield + 3 * scale, unresolved: 0, unpriced: 0, unparsed: 0,
   });
+});
+
+test('the lists stop at 100 in input order, and the counts stay complete', async () => {
+  const unknown = Array.from({ length: 150 }, (_, i) => `a blorb ${i}`);
+  const chat = Array.from({ length: 150 }, (_, i) => `chat line ${i}`);
+  const text = [`Loot of a dragon: ${unknown.join(', ')}, 2 gold coins`, ...chat].join('\n');
+  const h = await connect();
+  try {
+    const answer = await callParseLoot(h.client, { text });
+    assert.deepEqual(answer.unresolvedEntries,
+      unknown.slice(0, 100).map((t) => ({ line: 1, text: t, candidates: [] })));
+    assert.deepEqual(answer.unparsed, chat.slice(0, 100));
+    assert.deepEqual([answer.totals.unresolved, answer.totals.unparsed, answer.totals.gold],
+      [150, 150, 2]);
+    const full = await askParseLoot(h.client, text);
+    assert.equal(full.lines[0]!.items.length, 151, 'include_lines keeps every entry');
+  } finally {
+    await h.close();
+  }
 });
 
 test('coins count at face value', async () => {
@@ -192,7 +211,7 @@ test('a boss without an article, "nothing" and a note parse, with or without sec
     },
     { creature: { text: 'a dragon', title: 'Dragon', candidates: [] }, note: null, items: [] },
   ]);
-  assert.deepEqual(answer.totals, { items: [], gold: 0, unresolved: 0, unpriced: 0 });
+  assert.deepEqual(answer.totals, { items: [], gold: 0, unresolved: 0, unpriced: 0, unparsed: 0 });
   assert.deepEqual(answer.unparsed, []);
 });
 
@@ -207,6 +226,7 @@ test('several lines sum by item, blank lines are skipped and chat lands in unpar
     [['Gold Coin', 5], ['Steel Shield', 1]]);
   assert.deepEqual(answer.unparsed,
     ['12:00 Knight [123]: anyone selling loot?', 'Loot of a dragon 3 gold coins']);
+  assert.equal(answer.totals.unparsed, 2);
 });
 
 test('a count of 0, over 1,000,000 or not an integer is unresolved, and the rest parses', async () => {
@@ -224,7 +244,7 @@ test('a count of 0, over 1,000,000 or not an integer is unresolved, and the rest
     [1000000, 'Gold Coin', 1000000]);
   assert.deepEqual(answer.totals, {
     items: [{ item: 'Gold Coin', count: 1000000, value: 1000000 }],
-    gold: 1000000, unresolved: 4, unpriced: 0,
+    gold: 1000000, unresolved: 4, unpriced: 0, unparsed: 0,
   });
   assert.deepEqual(answer.unresolvedEntries.map((e) => [e.line, e.text]), [
     [1, '0 gold coins'], [1, '1000001 gold coins'], [1, '2.5 gold coins'], [1, '-3 gold coins'],
@@ -244,7 +264,7 @@ test('an ambiguous item the creature does not settle and an unknown item stay un
     { ...ENTRY_DEFAULTS, text: 'a blorb', count: 1, item: null },
   ]);
   assert.deepEqual(answer.totals, {
-    items: [{ item: 'Gold Coin', count: 2, value: 2 }], gold: 2, unresolved: 2, unpriced: 0,
+    items: [{ item: 'Gold Coin', count: 2, value: 2 }], gold: 2, unresolved: 2, unpriced: 0, unparsed: 0,
   });
   assert.deepEqual(answer.unresolvedEntries, [
     { line: 1, text: 'a book', candidates: ['Book (Brown)', 'Book (Gemmed)'] },
@@ -309,7 +329,7 @@ test('a value that would leave the exact integers is left out and counts as unpr
         { item: 'Gold Coin', count: 5, value: 5 },
         { item: 'Steel Shield', count: 6, value: 2 * huge },
       ],
-      gold: 2 * huge + 5, unresolved: 0, unpriced: 2,
+      gold: 2 * huge + 5, unresolved: 0, unpriced: 2, unparsed: 0,
     });
     assert.ok(Number.isSafeInteger(answer.totals.gold));
   } finally {

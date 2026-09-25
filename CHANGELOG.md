@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.10.1](https://github.com/tibia-sh/tibiawiki-mcp/compare/v0.10.0...v0.10.1) (2026-09-25)
+
+
+### Bug Fixes
+
+* say Rashid's coordinates are null ([b73e58b](https://github.com/tibia-sh/tibiawiki-mcp/commit/b73e58b58f101ccdefe555cb6b401109186cc66e))
+* tell the model what the zeros mean ([6fed2e5](https://github.com/tibia-sh/tibiawiki-mcp/commit/6fed2e585b29a7d15696d2c0a116793c0812e049))
+
 ## [0.10.0](https://github.com/tibia-sh/tibiawiki-mcp/compare/v0.9.0...v0.10.0) (2026-09-24)
 
 

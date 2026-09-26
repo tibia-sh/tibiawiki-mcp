@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.14.1](https://github.com/tibia-sh/tibiawiki-mcp/compare/v0.14.0...v0.14.1) (2026-09-26)
+
+
+### Bug Fixes
+
+* validate the generator lock header ([1f6f861](https://github.com/tibia-sh/tibiawiki-mcp/commit/1f6f861b6d8621d7d06ab73289265041b79d2465))
+
 ## [0.14.0](https://github.com/tibia-sh/tibiawiki-mcp/compare/v0.13.1...v0.14.0) (2026-09-26)
 
 

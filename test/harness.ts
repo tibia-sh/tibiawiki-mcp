@@ -98,7 +98,7 @@ export async function connectTo(path: string, provenance?: Provenance) {
  * This is the number meant to force the conversation: if you approach it, trim a
  * description before you raise it. The server instructions are no escape hatch, since
  * they have their own 2,048-character cap in test/server.test.ts, and with a real
- * index's provenance they measure 1,583 characters.
+ * index's provenance they measure 1,593 characters.
  */
 export const MODEL_FACING_BUDGET = 16_000;
 

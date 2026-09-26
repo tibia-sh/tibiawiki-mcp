@@ -707,7 +707,7 @@ test('a second generator entry after a bare CR fails the lock check', () => {
     `${first.slice(0, -2)} ; python_version == "0"\r${GENERATOR} --hash=sha256:${'0'.repeat(64)} \\`,
   );
   assert.notEqual(hidden, lock);
-  assert.throws(() => assertApprovedWheel(hidden), /has a carriage return/);
+  assert.throws(() => assertApprovedWheel(hidden), /of the lock has U\+000D\./);
 });
 
 test('the lock header records the cutoff, the uv version, the Python range, the checks, the attestation and the command', () => {

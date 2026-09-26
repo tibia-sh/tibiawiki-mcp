@@ -44,8 +44,7 @@ wheel, refuses it unless its sha256 is `GENERATOR_SHA256`, and runs
 `gh attestation verify`, which must show that the copy's `release.yml` built it from the
 tag `v<GENERATOR_VERSION>` on a GitHub-hosted runner. The check runs at lock time because
 `build-index` installs by hash alone, on machines that may have no `gh`. The hash a
-verified run writes into the lock carries that attestation to every build. The lock's
-header records the verified digest and tag under `attested`.
+verified run writes into the lock carries that attestation to every build.
 
 ## Refreshing the generator lock
 
@@ -70,10 +69,11 @@ every dependency ships wheels for a newer Python, raise the constant and run
 `pnpm test` fails on its header.
 
 The lock's header records the cutoff, the uv version, the Python range, the platforms
-checked and the command. To reproduce a lock, put the uv version named in its header
-first on your `PATH`, and pass the header's cutoff. Leave out any uv setting of your own
-that changes how uv resolves, such as a `uv.toml` or `UV_INDEX_URL`, because the header
-cannot record it:
+checked, the wheel digest and tag the attestation was verified for (`attested`) and the
+command. To reproduce a lock, put the uv version named in its header first on your
+`PATH`, sign in to `gh`, and pass the header's cutoff. Leave out any uv setting of your
+own that changes how uv resolves, such as a `uv.toml` or `UV_INDEX_URL`, because the
+header cannot record it:
 
 ```bash
 pnpm lock-generator --cutoff <cutoff>

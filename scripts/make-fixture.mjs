@@ -62,9 +62,12 @@ const NAMED_BY_TYPE = {
 // so "an NPC with destinations" could not have passed. Rashid anchors the 7-row
 // weekly schedule that rashid_position feeds. Harlow and Sebastian each stand in two
 // places (npc_location) and sail from both, so their legs carry an origin: Harlow's
-// Yalahar leg leaves from Farmine while his Vengoth leg names none, and Sebastian's
-// Liberty Bay fare differs by the port he sails from.
-const NAMED_NPCS = ['Captain Bluebear', 'Rashid', 'Harlow', 'Sebastian'];
+// Vengoth leg leaves from Yalahar and his Yalahar leg from Vengoth, and Sebastian's
+// Liberty Bay fare differs by the port he sails from. Tarak shuttles between Monument
+// Tower and the Sunken Quarter, each leg leaving from the other's destination. Cornell's
+// Edron leg names no origin while his Grimvale leg leaves from Edron, so the fixture
+// keeps a null-origin leg beside a recorded one.
+const NAMED_NPCS = ['Captain Bluebear', 'Rashid', 'Harlow', 'Sebastian', 'Tarak', 'Cornell'];
 // 60 quest_danger rows, and the quest tables were otherwise derived only via rewards.
 const NAMED_QUESTS = ['Forgotten Knowledge Quest'];
 

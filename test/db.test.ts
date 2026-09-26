@@ -147,7 +147,7 @@ test('resolveDbPath reads the installed data package by default', () => {
 
 test('openDb exposes provenance from the database_info key/value table', () => {
   const h = openDb(FIXTURE);
-  assert.equal(h.provenance.version, '9.0.0+tibiash.1');
+  assert.equal(h.provenance.version, '9.0.0+tibiash.2');
   assert.match(h.provenance.generatedAt, /^\d{4}-\d{2}-\d{2}T/);
   h.close();
 });

@@ -145,8 +145,8 @@ test('an NPC returns its travel destinations with fares', async () => {
   await h.close();
 });
 
-// Harlow sails from Farmine and from Yalahar, so one recorded position and one city cannot say
-// where each leg starts.
+// Harlow stands in Farmine and in Yalahar and sails between Vengoth and Yalahar, so one
+// recorded position and one city cannot say where each leg starts.
 test('an NPC lists every recorded position and where each leg starts', async () => {
   const h = await connect();
   const harlow = await get(h, 'Harlow', 'npc');
@@ -157,8 +157,8 @@ test('an NPC lists every recorded position and where each leg starts', async () 
   assert.deepEqual(harlow.position, harlow.positions[0]!.position);
   const notes = 'After mission 4 of the Blood Brothers Quest';
   assert.deepEqual(harlow.destinations, [
-    { name: 'Vengoth', price: 100, origin: null, notes },
-    { name: 'Yalahar', price: 50, origin: 'Farmine', notes },
+    { name: 'Vengoth', price: 100, origin: 'Yalahar', notes },
+    { name: 'Yalahar', price: 50, origin: 'Vengoth', notes },
   ]);
   await h.close();
 });

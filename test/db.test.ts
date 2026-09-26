@@ -232,6 +232,40 @@ test('openDb rejects an index that has no mcp_image table', () => {
 });
 
 /**
+ * A copy of the fixture with one schema change applied. The copy is opened first, so a
+ * copy that fails for some other reason is never mistaken for the schema error under test.
+ */
+function fixtureCopyWith(change: string): string {
+  const path = join(scratch(), 'changed.db');
+  copyFileSync(FIXTURE, path);
+  openDb(path).close();
+  const db = new DatabaseSync(path);
+  db.exec(change);
+  db.close();
+  return path;
+}
+
+test('openDb rejects an index whose npc_destination has no origin', () => {
+  const bad = fixtureCopyWith('alter table npc_destination drop column origin');
+  assert.throws(() => openDb(bad), (e: unknown) => {
+    assert.ok(e instanceof SchemaError, `expected SchemaError, got ${String(e)}`);
+    // Anchored at both ends of the column list, so origin must be the only column named.
+    assert.match((e as Error).message,
+      /^Index table "npc_destination" is missing required column\(s\): origin\. /);
+    return true;
+  });
+});
+
+test('openDb rejects an index that has no npc_location table', () => {
+  const bad = fixtureCopyWith('drop table npc_location');
+  assert.throws(() => openDb(bad), (e: unknown) => {
+    assert.ok(e instanceof SchemaError, `expected SchemaError, got ${String(e)}`);
+    assert.match((e as Error).message, /^Index is missing required table "npc_location"\. /);
+    return true;
+  });
+});
+
+/**
  * The enrichment tables are versioned separately from the generator's schema, so a
  * future reshape becomes a loud rebuild rather than a silent misread: a v1 runtime
  * opening a v2 index would parse `cells` under the wrong shape and serve wrong

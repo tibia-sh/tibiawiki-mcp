@@ -87,14 +87,21 @@ when one fails.
 
 The version number describes the server, not the data. The index ships separately as
 [`@tibia.sh/tibiawiki-data`](https://github.com/tibia-sh/tibiawiki-data), and its major
-version is the index schema version. The server depends on `^3`, the schema it reads.
-`test/data-package.test.ts` keeps that range in step with `MCP_SCHEMA_VERSION`, so npm
-refuses to install an index the server cannot read.
+version is the index schema version. The server depends on `^3.1.0`. The major is the
+schema it reads, and `3.1.0` is a floor: `MIN_DATA_VERSION` in `src/db.ts`, the first
+data release whose index has every table and column `REQUIRED_COLUMNS` names. Generator
+tables and columns can grow within a major, as `npc_location` and
+`npc_destination.origin` did in `3.1.0`, so an older index of the same major would pass
+npm and then fail the schema probe at startup. The floor keeps npm from installing it.
+`test/data-package.test.ts` checks that the range is `^MIN_DATA_VERSION`, that its
+major is `MCP_SCHEMA_VERSION` and that the installed data package is not below it. When a
+tool starts reading a column only a later data release has, raise `MIN_DATA_VERSION` and
+the range together.
 
-The caret is a deliberate exception to this repository's exact pins. An exact `3.0.0`
+The caret is a deliberate exception to this repository's exact pins. An exact `3.1.0`
 would keep major 4 out just as well, so the caret is not what guards the schema. It lets
 an install pick up each compatible data release without a
-server release. `pnpm add` does not write `^3`, so edit the range by hand.
+server release. `pnpm add` does not write `^3.1.0`, so edit the range by hand.
 
 The tarball ships exactly `dist/`, `data/spell-areas.json` and
 `data/tibiawikisql-requirements.txt`, plus the `package.json`,

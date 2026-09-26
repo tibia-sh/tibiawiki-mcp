@@ -168,6 +168,8 @@ export const RASHID_PLACE_MEANING =
 export const FARE_MEANING = 'Route price in gold. 0: free or not recorded, see notes.';
 export const ORIGIN_MEANING =
   "Where the leg starts. null: not recorded, it starts at one of the NPC's positions.";
+export const RACE_ID_MEANING =
+  'Tibia client race ID, not unique: boss phases can share one. null: the wiki records none.';
 
 /**
  * Creature numbers the wiki gives a meaning at 0, described once for every tool that
@@ -182,6 +184,9 @@ export const fareSchema = z.number().nullable().describe(FARE_MEANING);
 
 /** Where a travel leg starts, described once for every tool that reports it. */
 export const originSchema = z.string().nullable().describe(ORIGIN_MEANING);
+
+/** A creature's client race ID, described once for every tool that reports it. */
+export const raceIdSchema = z.number().nullable().describe(RACE_ID_MEANING);
 
 /**
  * Names as the game prints them in look, loot and kill messages, which can differ from the

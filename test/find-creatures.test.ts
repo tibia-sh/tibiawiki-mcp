@@ -7,6 +7,7 @@ import type { Client } from '@modelcontextprotocol/client';
 import { DB_PATH } from '@tibia.sh/tibiawiki-data';
 import {
   runsAtSchema, summonCostSchema, convinceCostSchema, goldPerKillSchema, asciiLower,
+  RACE_ID_MEANING, raceIdSchema,
 } from '../src/domain.ts';
 import { connect, connectTo, FIXTURE, tempDirs, withRealIndex } from './harness.ts';
 
@@ -15,7 +16,7 @@ type Creature = {
   bestiaryClass: string | null; modifiers: Record<string, number | null>;
   runsAt: number | null; seesInvisible: boolean | null; paralysable: boolean | null;
   pushable: boolean | null; summonCost: number | null; convinceCost: number | null;
-  goldPerKill: number | null;
+  goldPerKill: number | null; raceId: number | null;
 };
 type FindOut = { results: Creature[]; totalMatches: number; nextCursor?: string };
 
@@ -615,6 +616,62 @@ test('a 1-104 drop counts its midpoint', async () => {
   const h = await connectTo(path);
   try {
     assert.equal(await getGold(h.client, 'Dragon'), 37);
+  } finally {
+    await h.close();
+  }
+});
+
+/** Demon's raceId from both tools that report a creature. */
+async function demonRaceIds(client: Client): Promise<[unknown, unknown]> {
+  const demon = (await findAll(client, { bestiary_class: 'Demon' })).find((c) => c.title === 'Demon');
+  assert.ok(demon, 'guard: tibia_find_creatures finds Demon');
+  assert.ok('raceId' in demon, 'tibia_find_creatures reports raceId');
+  const res = await client.callTool({ name: 'tibia_get', arguments: { name: 'Demon', type: 'creature' } });
+  assert.notEqual(res.isError, true, JSON.stringify(res.content));
+  const detail = res.structuredContent as Record<string, unknown>;
+  assert.ok('raceId' in detail, 'tibia_get reports raceId');
+  return [demon.raceId, detail.raceId];
+}
+
+test('both tools report a creature\'s race ID', async () => {
+  const h = await connect();
+  try {
+    assert.deepEqual(await demonRaceIds(h.client), [35, 35]);
+  } finally {
+    await h.close();
+  }
+});
+
+test('a creature with no recorded race ID reports null in both tools', async () => {
+  const path = join(scratch(), 'race-id.db');
+  copyFileSync(FIXTURE, path);
+  const db = new DatabaseSync(path);
+  try {
+    db.exec("update creature set race_id = null where title = 'Demon'");
+  } finally {
+    db.close();
+  }
+  const h = await connectTo(path);
+  try {
+    assert.deepEqual(await demonRaceIds(h.client), [null, null]);
+  } finally {
+    await h.close();
+  }
+});
+
+test('both tools describe raceId in the same words', async () => {
+  const h = await connect();
+  try {
+    const { tools } = await h.client.listTools();
+    const output = (name: string): any => tools.find((t) => t.name === name)!.outputSchema;
+    const creature = output('tibia_get').oneOf
+      .find((b: any) => b.properties.type.const === 'creature').properties;
+    const row = output('tibia_find_creatures').properties.results.items.properties;
+    assert.equal(raceIdSchema.description, RACE_ID_MEANING);
+    assert.equal(row.raceId.description, RACE_ID_MEANING, 'tibia_find_creatures raceId');
+    assert.equal(creature.raceId.description, RACE_ID_MEANING, 'tibia_get raceId');
+    assert.equal(RACE_ID_MEANING,
+      'Tibia client race ID, not unique: boss phases can share one. null: the wiki records none.');
   } finally {
     await h.close();
   }

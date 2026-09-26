@@ -107,7 +107,7 @@ export const MODEL_FACING_BUDGET = 16_000;
  *
  * Output schemas cost Claude Code's model nothing, but some hosts load every schema into
  * context, and every client carries the full answer over the wire. On the fixture the
- * total is 53,793 bytes, 37,635 of them output schemas, most of it `tibia_get`'s
+ * total is 53,960 bytes, 37,802 of them output schemas, most of it `tibia_get`'s
  * fourteen-member union. 64,000 is about 20% above that, which leaves room for output
  * schemas to grow while still catching runaway growth.
  */

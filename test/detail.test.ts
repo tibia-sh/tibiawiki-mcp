@@ -1,8 +1,12 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { copyFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { DB_PATH } from '@tibia.sh/tibiawiki-data';
-import { connect, FIXTURE, withRealIndex } from './harness.ts';
+import { connect, connectTo, FIXTURE, tempDirs, withRealIndex } from './harness.ts';
+
+const scratch = tempDirs('twmcp-detail-');
 
 const get = async (h: Awaited<ReturnType<typeof connect>>, name: string, type?: string, verbosity?: string) => {
   const res = await h.client.callTool({
@@ -410,6 +414,41 @@ test('an outfit returns its unlocking quests', async () => {
   assert.ok(o.quests.length > 0);
   assert.ok(o.quests.every((q: any) => typeof q.quest === 'string'));
   await h.close();
+});
+
+test('an outfit carries its male and female client IDs, and a mount its client ID', async () => {
+  const h = await connect();
+  for (const [outfit, male, female] of [
+    ['Assassin Outfits', 152, 156], ['Beggar Outfits', 153, 157],
+  ] as const) {
+    const o = await get(h, outfit, 'outfit');
+    assert.deepEqual([o.maleClientId, o.femaleClientId], [male, female], outfit);
+  }
+  for (const [mount, clientId] of [['Donkey', 387], ['Racing Bird', 369]] as const) {
+    assert.equal((await get(h, mount, 'mount')).clientId, clientId, mount);
+  }
+  await h.close();
+});
+
+test('a client ID the wiki does not record is null', async () => {
+  // Every fixture outfit and mount has its client IDs, so this copy clears two.
+  const path = join(scratch(), 'client-ids.db');
+  copyFileSync(FIXTURE, path);
+  const db = new DatabaseSync(path);
+  try {
+    db.exec(`update mount set client_id = null where title = 'Donkey';
+      update outfit set male_client_id = null where title = 'Assassin Outfits'`);
+  } finally {
+    db.close();
+  }
+  const h = await connectTo(path);
+  try {
+    assert.equal((await get(h, 'Donkey', 'mount')).clientId, null);
+    const assassin = await get(h, 'Assassin Outfits', 'outfit');
+    assert.deepEqual([assassin.maleClientId, assassin.femaleClientId], [null, 156]);
+  } finally {
+    await h.close();
+  }
 });
 
 test('quest.legend stays top-level at concise verbosity', async () => {

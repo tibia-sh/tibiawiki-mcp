@@ -278,6 +278,7 @@ const mountOut = z.object({
   achievement: z.string().nullable(),
   lightColor: z.number().nullable(),
   lightRadius: z.number().nullable(),
+  clientId: z.number().nullable(),
   status: z.string().nullable(),
   detail, source: sourceSchema,
 });
@@ -290,6 +291,8 @@ const outfitOut = z.object({
   isTournament: z.boolean().nullable(),
   fullPrice: z.number().nullable(),
   achievement: z.string().nullable(),
+  maleClientId: z.number().nullable(),
+  femaleClientId: z.number().nullable(),
   status: z.string().nullable(),
   quests: z.array(z.object({ quest: z.string(), unlockType: z.string().nullable() })),
   detail, source: sourceSchema,
@@ -677,14 +680,16 @@ export function registerGet(server: McpServer, handle: TibiaDb): void {
           tamingMethod: str(row.taming_method), isBuyable: bool(row.is_buyable),
           price: num(row.price), achievement: str(row.achievement),
           lightColor: num(row.light_color), lightRadius: num(row.light_radius),
-          status: str(row.status), source,
+          clientId: num(row.client_id), status: str(row.status), source,
         };
       case 'outfit':
         return {
           type: 'outfit' as const, title, outfitType: str(row.outfit_type),
           isPremium: bool(row.is_premium), isBought: bool(row.is_bought),
           isTournament: bool(row.is_tournament), fullPrice: num(row.full_price),
-          achievement: str(row.achievement), status: str(row.status),
+          achievement: str(row.achievement),
+          maleClientId: num(row.male_client_id), femaleClientId: num(row.female_client_id),
+          status: str(row.status),
           quests: outfitQuests.all(row.article_id as number).map((q) => ({
             quest: String(q.title), unlockType: str(q.unlock_type),
           })),

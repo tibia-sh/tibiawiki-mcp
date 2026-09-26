@@ -128,8 +128,8 @@ NPC, and without a type the call returns an error asking you to choose.
 
 - **creature**: `abilities` with damage ranges and an `area` grid (below),
   `maxDamage` per element and total, `loot` with chances, the `name`, `plural`
-  and `article` the game prints, and `raceId`, the client race ID, which boss phases
-  can share, so it does not identify one creature
+  and `article` the game prints, and `raceId`, the client race ID, which some creatures
+  share, such as boss phases, so it does not identify one creature
 - **item**: EAV `attributes` (attack, defense, required level), `keys`, `storeOffers`,
   `proficiencyPerks`, `boughtBy`, the `actualName` and `plural` the game prints, and
   `isStackable`, `isPickupable` and `isImmobile`

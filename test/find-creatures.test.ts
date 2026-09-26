@@ -671,7 +671,7 @@ test('both tools describe raceId in the same words', async () => {
     assert.equal(row.raceId.description, RACE_ID_MEANING, 'tibia_find_creatures raceId');
     assert.equal(creature.raceId.description, RACE_ID_MEANING, 'tibia_get raceId');
     assert.equal(RACE_ID_MEANING,
-      'Tibia client race ID, not unique: boss phases can share one. null: the wiki records none.');
+      'Tibia client race ID, not unique: some creatures share one, such as boss phases. null: the wiki records none.');
   } finally {
     await h.close();
   }

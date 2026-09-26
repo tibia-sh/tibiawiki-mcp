@@ -4,7 +4,7 @@ import { McpServer } from '@modelcontextprotocol/server';
 import type { TibiaDb } from './db.ts';
 import {
   CONVINCE_COST_MEANING, FARE_MEANING, GOLD_PER_KILL_MEANING, IMAGE_MEANING, ORIGIN_MEANING,
-  RASHID_PLACE_MEANING, RUNS_AT_MEANING, SUMMON_COST_MEANING,
+  RACE_ID_MEANING, RASHID_PLACE_MEANING, RUNS_AT_MEANING, SUMMON_COST_MEANING,
 } from './domain.ts';
 import { registerGet, NAME as GET } from './tools/get.ts';
 import { registerSearch, NAME as SEARCH } from './tools/search.ts';
@@ -61,7 +61,8 @@ export const ATTRIBUTION =
 const FIELD_MEANINGS =
   `What result fields mean. runsAt: ${RUNS_AT_MEANING} summonCost: ${SUMMON_COST_MEANING} ` +
   `convinceCost: ${CONVINCE_COST_MEANING} goldPerKill: ${GOLD_PER_KILL_MEANING} ` +
-  `image: ${IMAGE_MEANING} ${RASHID_PLACE_MEANING} ${FARE_MEANING} origin: ${ORIGIN_MEANING} `;
+  `image: ${IMAGE_MEANING} ${RASHID_PLACE_MEANING} ${FARE_MEANING} origin: ${ORIGIN_MEANING} ` +
+  `raceId: ${RACE_ID_MEANING} `;
 
 export const TOOL_NAMES = [
   GET, SEARCH, FIND_CREATURES, FIND_ITEMS, FIND_SPELLS, FIND_QUESTS, FIND_HOUSES, HOW_TO_OBTAIN,

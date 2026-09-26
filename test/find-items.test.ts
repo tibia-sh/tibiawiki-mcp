@@ -176,6 +176,35 @@ test('tibia_get reports signed resistances and skill bonuses as numbers', () => 
   assert.equal((book.structuredContent as any).attributes.magic_level, 2);
 }));
 
+test('a potion reports its restore range as numbers, and other items report none', async () => {
+  const h = await connect();
+  try {
+    const restores = (attributes: Record<string, string | number>) =>
+      Object.fromEntries(Object.entries(attributes).filter(([k]) => k.startsWith('restores_')));
+    const got = await h.client.callTool({
+      name: 'tibia_get', arguments: { name: 'Strong Mana Potion', type: 'item' },
+    });
+    assert.deepEqual(restores((got.structuredContent as any).attributes),
+      { restores_mana_min: 115, restores_mana_max: 185 });
+    const found = await h.client.callTool({
+      name: 'tibia_find_items', arguments: { item_type: 'Liquids', limit: 100 },
+    });
+    const rows = (found.structuredContent as ItemsOut).results;
+    const potion = rows.find((r) => r.title === 'Strong Mana Potion');
+    assert.ok(potion, 'guard: tibia_find_items lists Strong Mana Potion');
+    assert.deepEqual(restores(potion.attributes), { restores_mana_min: 115, restores_mana_max: 185 });
+    const shield = await h.client.callTool({
+      name: 'tibia_get', arguments: { name: 'Dragon Shield', type: 'item' },
+    });
+    assert.deepEqual(restores((shield.structuredContent as any).attributes), {});
+    const mud = rows.find((r) => r.title === 'Mud');
+    assert.ok(mud, 'guard: tibia_find_items lists Mud, a liquid that restores nothing');
+    assert.deepEqual(restores(mud.attributes), {});
+  } finally {
+    await h.close();
+  }
+});
+
 test('healing is not an item resistance', () => withRealIndex(async (client) => {
   const res = await client.callTool({
     name: 'tibia_find_items', arguments: { resistant_to: ['healing'] },

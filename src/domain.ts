@@ -719,6 +719,7 @@ export const DETAILED_ITEM_FIELDS = ['flavor_text'] as const;
  */
 export const NUMERIC_ATTRS: readonly string[] = [
   'attack', 'defense', 'armor', 'required_level', 'imbuement_slots', 'range',
+  'restores_hp_min', 'restores_hp_max', 'restores_mana_min', 'restores_mana_max',
   ...Object.values(RESISTANCE_ATTRS), ...ITEM_SKILLS,
 ];
 

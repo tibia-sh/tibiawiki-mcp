@@ -12,7 +12,7 @@ import { resolveDbPath } from '../src/db.ts';
 import {
   buildIndex, GENERATOR, GENERATOR_PYTHON, GENERATOR_SHA256, GENERATOR_VERSION, type Runner,
 } from '../src/indexer/build-index.ts';
-import { generatorEntry } from '../src/indexer/generator-lock.ts';
+import { generatorEntry, lockEntries as entriesOf } from '../src/indexer/generator-lock.ts';
 import { eligibleScenes, MCP_SCHEMA_VERSION, type EnrichStats } from '../src/indexer/enrich.ts';
 import { FIXTURE, tempDirs } from './harness.ts';
 
@@ -99,14 +99,10 @@ function captureStderr() {
 }
 
 /**
- * The committed lock's requirements as pip reads them: a trailing backslash continues a
- * line and `#` starts a comment. Parsed here rather than through build-index, so a
- * miscount there cannot pass by agreeing with itself.
+ * The committed lock's requirements as uv reads them. Parsed by the lock checks rather than
+ * through build-index's own count, so a miscount there cannot pass by agreeing with itself.
  */
-const lockEntries = (): string[] =>
-  readFileSync(LOCK, 'utf8').replace(/\\\n/g, ' ').split('\n')
-    .map((line) => line.replace(/#.*/, '').trim().replace(/\s+/g, ' '))
-    .filter(Boolean);
+const lockEntries = (): string[] => entriesOf(readFileSync(LOCK, 'utf8'));
 
 test('runs uv venv, uv pip install and uv run in that order, then installs atomically', async () => {
   const dir = scratch();
@@ -688,11 +684,18 @@ test('the generator lock pins every dependency with == and hashes it', () => {
  * GENERATOR_SHA256 is the approved wheel, so CI fails on a lock that records any other,
  * whatever wrote it.
  */
+const assertApprovedWheel = (lock: string) =>
+  assert.deepEqual(generatorEntry(lock), { requirement: GENERATOR, hashes: [GENERATOR_SHA256] });
+
 test('the lock pins the generator build-index runs to the approved wheel', () => {
-  assert.deepEqual(generatorEntry(readFileSync(LOCK, 'utf8')), {
-    requirement: GENERATOR,
-    hashes: [GENERATOR_SHA256],
-  });
+  assertApprovedWheel(readFileSync(LOCK, 'utf8'));
+});
+
+test('a second generator entry after a comment ending in a backslash fails the lock check', () => {
+  // uv reads the appended line as a requirement of its own, so a lock like this would let
+  // uv accept a second wheel.
+  const hidden = `${readFileSync(LOCK, 'utf8')}# note \\\n${GENERATOR} --hash=sha256:${'0'.repeat(64)}\n`;
+  assert.throws(() => assertApprovedWheel(hidden), /found 2/);
 });
 
 test('the lock header records the cutoff, the uv version, the Python range, the checks, the attestation and the command', () => {

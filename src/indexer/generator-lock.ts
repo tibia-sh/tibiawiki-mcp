@@ -8,13 +8,31 @@
 const GENERATOR_NAME = 'tibiawikisql';
 
 /**
- * The lock's requirements, one string each: continuation lines joined, comments dropped
- * (pip's rule: `#` at the start of a line or after whitespace) and whitespace collapsed.
+ * The lock's requirements as uv reads them, one string each, whitespace collapsed. A
+ * comment (`#` at the start of a line or after whitespace) is dropped from each physical
+ * line first, and only then does a trailing backslash join a line to the next. uv ends a
+ * comment at the newline, so a backslash inside one continues nothing, and the next line
+ * is a requirement of its own that must not hide inside the comment.
  */
-function entries(lock: string): string[] {
-  return lock.replace(/\\\n/g, ' ').split('\n')
-    .map((line) => line.replace(/(?:^|\s)#.*/, '').trim().replace(/\s+/g, ' '))
-    .filter(Boolean);
+export function lockEntries(lock: string): string[] {
+  const found: string[] = [];
+  let entry = '';
+  const end = () => {
+    const text = entry.trim().replace(/\s+/g, ' ');
+    if (text !== '') found.push(text);
+    entry = '';
+  };
+  for (const physical of lock.split('\n')) {
+    const line = physical.replace(/(?:^|\s)#.*/, '').trimEnd();
+    if (line.endsWith('\\')) {
+      entry += `${line.slice(0, -1)} `;
+    } else {
+      entry += line;
+      end();
+    }
+  }
+  end();
+  return found;
 }
 
 /** A requirement's project name, normalized as PEP 503 compares names. */
@@ -27,7 +45,7 @@ const projectName = (entry: string): string =>
  * such entry, and on any hash that is not a sha256 digest.
  */
 export function generatorEntry(lock: string): { requirement: string; hashes: string[] } {
-  const found = entries(lock).filter((entry) => projectName(entry) === GENERATOR_NAME);
+  const found = lockEntries(lock).filter((entry) => projectName(entry) === GENERATOR_NAME);
   if (found.length !== 1) {
     throw new Error(`The lock must have exactly one ${GENERATOR_NAME} entry, found ${found.length}.`);
   }

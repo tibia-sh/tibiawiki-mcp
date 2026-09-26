@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { GENERATOR } from '../src/indexer/build-index.ts';
-import { assertGeneratorLocked, generatorEntry } from '../src/indexer/generator-lock.ts';
+import { assertGeneratorLocked, generatorEntry, lockEntries } from '../src/indexer/generator-lock.ts';
 
 const ATTESTED = 'c0bbb67c7ffe31f2a6d8ad6f9338683e52c6f526c4ecceaf306ddbb792395d4a';
 const OTHER = '6b779871820528bb800e96a46b38efdd3cd89355985e0b406da32d838e021a5b';
@@ -62,4 +62,31 @@ test('a PyPI pin of the generator throws, since it is not the attested wheel', (
   const pypi = lock(`tibiawikisql==9.0.0 \\\n    --hash=sha256:${ATTESTED}`);
   assert.equal(generatorEntry(pypi).requirement, 'tibiawikisql==9.0.0');
   assert.throws(() => assertGeneratorLocked(pypi, GENERATOR, ATTESTED), /tibiawikisql==9\.0\.0/);
+});
+
+// uv ends a comment at the physical newline, so a backslash at the end of a comment does
+// not continue it. Read the other way, the next line would hide inside the comment.
+test('a requirement after a comment ending in a backslash is an entry of its own', () => {
+  const hidden = `${lock(urlEntry(ATTESTED))}# note \\\n${GENERATOR} --hash=sha256:${OTHER}\n`;
+  assert.throws(() => generatorEntry(hidden), /found 2/);
+  assert.throws(() => assertGeneratorLocked(hidden, GENERATOR, ATTESTED), /found 2/);
+});
+
+test('a lock with comments reads as one entry per requirement', () => {
+  const [a, b] = ['a'.repeat(64), 'b'.repeat(64)];
+  assert.deepEqual(lockEntries([
+    '# a header line, # and a second hash in it',
+    'requests==2.34.2 \\',
+    `    --hash=sha256:${a} \\`,
+    `    --hash=sha256:${b}`,
+    '    # via tibiawikisql',
+    `idna==3.10 --hash=sha256:${a}  # an inline note`,
+    'colorama==0.4.6 ; sys_platform == \'win32\' \\',
+    `    --hash=sha256:${b}`,
+    '',
+  ].join('\n')), [
+    `requests==2.34.2 --hash=sha256:${a} --hash=sha256:${b}`,
+    `idna==3.10 --hash=sha256:${a}`,
+    `colorama==0.4.6 ; sys_platform == 'win32' --hash=sha256:${b}`,
+  ]);
 });

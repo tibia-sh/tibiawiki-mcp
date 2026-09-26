@@ -21,19 +21,48 @@ It fetches metadata only, prints any image whose revision moved (and any new
 candidate the file has never seen), and exits non-zero if there is drift, so it can
 run on a schedule. Re-run without `--check` to regenerate.
 
+## The generator
+
+`build-index` runs [tibiawiki-sql](https://github.com/tibia-sh/tibiawiki-sql), our copy of
+[Galarzaa90/tibiawiki-sql](https://github.com/Galarzaa90/tibiawiki-sql), never the PyPI
+release. The copy's release workflow builds a wheel for each release tag, attaches it
+to the GitHub release and attests it. The server pins that wheel in
+`src/indexer/build-index.ts`:
+
+- `GENERATOR_VERSION` is the release's version, its tag without the `v`. The wheel's
+  URL, `GENERATOR_WHEEL_URL`, is built from it.
+- `GENERATOR_SHA256` is the sha256 of the approved wheel. It is the approval boundary.
+  `pnpm test` fails on a lock that records any other wheel, so a release asset replaced
+  after the fact cannot reach a build.
+
+To move to a new release, set `GENERATOR_VERSION` and `GENERATOR_SHA256` to the new
+wheel's, then run `pnpm lock-generator`, which needs `gh` signed in. The change goes
+through a pull request like any other, because the new digest is a new approval.
+
+`pnpm lock-generator` checks the attestation before it writes the lock. It downloads the
+wheel, refuses it unless its sha256 is `GENERATOR_SHA256`, and runs
+`gh attestation verify`, which must show that the copy's `release.yml` built it from the
+tag `v<GENERATOR_VERSION>` on a GitHub-hosted runner. The check runs at lock time because
+`build-index` installs by hash alone, on machines that may have no `gh`. The hash a
+verified run writes into the lock carries that attestation to every build. The lock's
+header records the verified digest and tag under `attested`.
+
 ## Refreshing the generator lock
 
-To move `data/tibiawikisql-requirements.txt` to newer releases, run:
+To move `data/tibiawikisql-requirements.txt` to newer dependency releases, run:
 
 ```bash
 pnpm lock-generator
 ```
 
-It resolves the generator and its dependencies afresh with the `uv` on your `PATH`, using
-only files uploaded at least 7 days before the run. The old lock plays no part, so its
-pins cannot hold back the new resolution. Before it writes the new lock, it runs a dry-run
-install without a build for every CPython the range admits, on every platform the header
-lists, and it refuses to write a lock that fails any of them.
+It resolves the generator and its dependencies afresh with the `uv` on your `PATH`. The
+dependencies come from PyPI, and only files uploaded at least 7 days before the run count.
+That cutoff does not apply to the generator, which is named by URL and has no upload time.
+The generator is held by `GENERATOR_SHA256` instead. The old lock plays no part, so its
+pins cannot hold back the new resolution. Before it writes the new lock, it checks the
+generator as described above, checks that the lock records exactly that wheel with its
+one hash, and runs a dry-run install without a build for every CPython the range admits,
+on every platform the header lists. It refuses to write a lock that fails any of them.
 
 The range is `GENERATOR_PYTHON` in `src/indexer/build-index.ts`. To raise the cap once
 every dependency ships wheels for a newer Python, raise the constant and run

@@ -426,9 +426,10 @@ export function registerGet(server: McpServer, handle: TibiaDb): void {
     'select content from item_sound where item_id = ? order by content asc');
   const npcJobs = db.prepare('select name from npc_job where npc_id = ? order by name asc');
   const npcRaces = db.prepare('select name from npc_race where npc_id = ? order by name asc');
+  // Total order, so legs that differ only in notes or origin keep one order.
   const destinations = db.prepare(
     `select name, price, origin, notes from npc_destination where npc_id = ?
-     order by name asc, price asc`);
+     order by name asc, price asc, notes asc, origin asc`);
   const npcPositions = db.prepare(
     `select city, subarea, geolabel, x, y, z from npc_location where npc_id = ?
      order by position asc`);

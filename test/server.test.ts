@@ -93,7 +93,8 @@ test('the instructions tell a model what the zeros and nulls in results mean', a
   assert.match(RASHID_PLACE_MEANING, /city and position coordinates are null/);
   assert.match(FARE_MEANING, /0: free or not recorded/);
   assert.match(instructions, /origin: Where the leg starts\./);
-  assert.match(ORIGIN_MEANING, /null: from another of the NPC's positions/);
+  assert.equal(ORIGIN_MEANING,
+    "Where the leg starts. null: not recorded, it starts at one of the NPC's positions.");
 });
 
 test('each meaning in the instructions is the description of its output fields', async () => {

@@ -98,7 +98,7 @@ export async function connectTo(path: string, provenance?: Provenance) {
  * This is the number meant to force the conversation: if you approach it, trim a
  * description before you raise it. The server instructions are no escape hatch, since
  * they have their own 2,048-character cap in test/server.test.ts, and with a real
- * index's provenance they measure 1,666 characters.
+ * index's provenance they measure 1,684 characters.
  */
 export const MODEL_FACING_BUDGET = 16_000;
 
@@ -107,7 +107,7 @@ export const MODEL_FACING_BUDGET = 16_000;
  *
  * Output schemas cost Claude Code's model nothing, but some hosts load every schema into
  * context, and every client carries the full answer over the wire. On the fixture the
- * total is 53,960 bytes, 37,802 of them output schemas, most of it `tibia_get`'s
+ * total is 53,996 bytes, 37,838 of them output schemas, most of it `tibia_get`'s
  * fourteen-member union. 64,000 is about 20% above that, which leaves room for output
  * schemas to grow while still catching runaway growth.
  */

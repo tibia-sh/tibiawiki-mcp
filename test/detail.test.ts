@@ -163,6 +163,29 @@ test('an NPC lists every recorded position and where each leg starts', async () 
   await h.close();
 });
 
+// The fixture stores every NPC's positions in position order, so this copy stores Harlow's
+// second position before his first.
+test('an NPC\'s positions come back in position order, not storage order', async () => {
+  const path = join(scratch(), 'positions.db');
+  copyFileSync(FIXTURE, path);
+  const db = new DatabaseSync(path);
+  try {
+    db.exec(`create temp table harlow as select l.* from npc_location l
+        join npc n on n.article_id = l.npc_id where n.title = 'Harlow';
+      delete from npc_location where npc_id in (select npc_id from harlow);
+      insert into npc_location select * from harlow order by position desc`);
+  } finally {
+    db.close();
+  }
+  const h = await connectTo(path);
+  try {
+    assert.deepEqual((await get(h, 'Harlow', 'npc')).positions.map((p: any) => p.city),
+      ['Farmine', 'Yalahar']);
+  } finally {
+    await h.close();
+  }
+});
+
 // No recorded NPC has two legs to one place at one fare and with one note, so this copy gives
 // Harlow two to Edron that differ only in origin, stored in the reverse of origin order.
 test('an NPC\'s destinations that differ only in origin come back in origin order', async () => {

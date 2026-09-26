@@ -186,6 +186,11 @@ test('a potion reports its restore range as numbers, and other items report none
     });
     assert.deepEqual(restores((got.structuredContent as any).attributes),
       { restores_mana_min: 115, restores_mana_max: 185 });
+    const health = await h.client.callTool({
+      name: 'tibia_get', arguments: { name: 'Strong Health Potion', type: 'item' },
+    });
+    assert.deepEqual(restores((health.structuredContent as any).attributes),
+      { restores_hp_min: 250, restores_hp_max: 350 });
     const found = await h.client.callTool({
       name: 'tibia_find_items', arguments: { item_type: 'Liquids', limit: 100 },
     });
@@ -193,6 +198,9 @@ test('a potion reports its restore range as numbers, and other items report none
     const potion = rows.find((r) => r.title === 'Strong Mana Potion');
     assert.ok(potion, 'guard: tibia_find_items lists Strong Mana Potion');
     assert.deepEqual(restores(potion.attributes), { restores_mana_min: 115, restores_mana_max: 185 });
+    const healthRow = rows.find((r) => r.title === 'Strong Health Potion');
+    assert.ok(healthRow, 'guard: tibia_find_items lists Strong Health Potion');
+    assert.deepEqual(restores(healthRow.attributes), { restores_hp_min: 250, restores_hp_max: 350 });
     const shield = await h.client.callTool({
       name: 'tibia_get', arguments: { name: 'Dragon Shield', type: 'item' },
     });

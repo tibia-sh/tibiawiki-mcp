@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.12.0](https://github.com/tibia-sh/tibiawiki-mcp/compare/v0.11.1...v0.12.0) (2026-09-26)
+
+
+### Features
+
+* build the index with the tibia-sh generator ([a704e65](https://github.com/tibia-sh/tibiawiki-mcp/commit/a704e6515e91fe180ce778c89638d01694ddcdbc))
+
+
+### Bug Fixes
+
+* accept only ASCII lock text ([e0d673d](https://github.com/tibia-sh/tibiawiki-mcp/commit/e0d673dde86c0d2a944afd17faff01fb56ee763d))
+* parse lock comments like uv ([492bde6](https://github.com/tibia-sh/tibiawiki-mcp/commit/492bde69d6598f86d7935e2154a8a8f4f31710a9))
+* validate the lock's exact grammar ([b08b20d](https://github.com/tibia-sh/tibiawiki-mcp/commit/b08b20d6e01202ffc080ce25e232997a9f8770b4))
+* write the generator lock atomically ([ec43f71](https://github.com/tibia-sh/tibiawiki-mcp/commit/ec43f71728df4609255482cb84e91bf58567143e))
+
 ## [0.11.1](https://github.com/tibia-sh/tibiawiki-mcp/compare/v0.11.0...v0.11.1) (2026-09-25)
 
 

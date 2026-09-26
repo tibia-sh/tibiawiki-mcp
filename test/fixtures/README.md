@@ -77,13 +77,18 @@ node scripts/make-fixture.mjs node_modules/@tibia.sh/tibiawiki-data/index.db \
   test/fixtures/tibiawiki-fixture.db
 ```
 
-To cut it from an index you build yourself instead:
+To cut it from an index you build yourself instead, from the repository root:
 
 ```bash
-tibiawiki-mcp build-index                 # ~3 min generate + ~25 s enrichment;
+pnpm build
+TIBIAWIKI_MCP_DB=data/tibiawiki.db node dist/index.js build-index
+                                          # ~3 min generate + ~25 s enrichment;
                                           # data/tibiawiki.db is gitignored
 node scripts/make-fixture.mjs data/tibiawiki.db test/fixtures/tibiawiki-fixture.db
 ```
+
+Without `TIBIAWIKI_MCP_DB`, `build-index` writes to the cache path,
+`~/.cache/tibiawiki-mcp/tibiawiki.db` (or under `$XDG_CACHE_HOME`), not to `data/`.
 
 `build-index` generates, enriches, validates, then installs atomically. Enrichment
 fetches the live wiki and fails the build if stored areas fall below 95% of eligible

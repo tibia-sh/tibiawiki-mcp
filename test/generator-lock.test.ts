@@ -166,10 +166,12 @@ for (const [what, text, error] of REJECTED) {
 /**
  * Fake effects for `lockGenerator`, recording each call in order. The wheel is a few bytes,
  * so the run approves their digest in place of GENERATOR_SHA256, and by default uv compiles
- * a lock that records exactly that wheel. `attestStatus`, `requirements` and `failDryRun`
- * make one step fail the way the real one reports it.
+ * a lock that records exactly that wheel. `attestStatus`, `uvVersion`, `requirements` and
+ * `failDryRun` make one step fail the way the real one reports it.
  */
-function fakeSteps(opts: { attestStatus?: number; requirements?: (digest: string) => string; failDryRun?: string } = {}) {
+function fakeSteps(
+  opts: { attestStatus?: number; uvVersion?: string; requirements?: (digest: string) => string; failDryRun?: string } = {},
+) {
   const wheel = new TextEncoder().encode('not a real wheel');
   const digest = createHash('sha256').update(wheel).digest('hex');
   const calls: string[] = [];
@@ -183,7 +185,7 @@ function fakeSteps(opts: { attestStatus?: number; requirements?: (digest: string
       seen.flags = flags;
       return opts.attestStatus ?? 0;
     },
-    uvVersion: () => { calls.push('uv --version'); return 'uv 0.12.18 (test)'; },
+    uvVersion: () => { calls.push('uv --version'); return opts.uvVersion ?? 'uv 0.12.18 (test)'; },
     compile: (args, input) => {
       calls.push(`compile ${args.join(' ')}`);
       seen.compiled = input;
@@ -279,6 +281,25 @@ test('lockGenerator refuses a compiled lock that records another wheel, before t
   );
   assert.deepEqual(fake.calls, [`fetch ${GENERATOR_WHEEL_URL}`, 'attest', 'uv --version', COMPILE]);
 });
+
+// The header interpolates uv's version, so the header must read as comments alone. A $
+// or non-ASCII would be written and then rejected by the committed-lock checks, and a
+// newline would let a well-formed hashed entry into the lock.
+const BAD_UV_VERSIONS: Array<[string, string, RegExp]> = [
+  ['a $', '0.9.0 $HOME', /has a \$/],
+  ['a no-break space', '0.9.0\u00a0x', /has U\+00A0/],
+  ['a newline and a hashed entry', '0.9.0\nevil==1.0 \\\n    --hash=sha256:' + 'a'.repeat(64), /evil/],
+];
+for (const [what, uvVersion, reason] of BAD_UV_VERSIONS) {
+  test(`lockGenerator refuses a uv version with ${what} in the header, before the dry runs or write`, async () => {
+    const fake = fakeSteps({ uvVersion });
+    await assert.rejects(
+      lockGenerator(fake.steps, { cutoff: CUTOFF, approvedSha256: fake.digest }),
+      (error: Error) => /header/.test(error.message) && reason.test(error.message),
+    );
+    assert.deepEqual(fake.calls, [`fetch ${GENERATOR_WHEEL_URL}`, 'attest', 'uv --version', COMPILE]);
+  });
+}
 
 test('lockGenerator writes nothing when one dry run fails', async () => {
   const fake = fakeSteps({ failDryRun: '3.12 x86_64-pc-windows-msvc' });

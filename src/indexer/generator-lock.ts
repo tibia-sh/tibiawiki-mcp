@@ -217,7 +217,8 @@ export interface LockSteps {
  *    the attestation to every build, with no `gh` on the building machine.
  * 4. uv compiles the lock for the range's floor. The cutoff applies to what uv resolves
  *    from PyPI only: the generator is a direct URL, which has no upload time.
- * 5. The lock must record that wheel with that one hash.
+ * 5. The lock must record that wheel with that one hash, and the header must read as a
+ *    lock of comments alone, since it carries `uv --version`'s output.
  * 6. A dry-run install without a build must pass on every CPython minor version
  *    GENERATOR_PYTHON admits, for every platform in PLATFORMS. A CPython that some
  *    dependency ships no wheel for fails here, not in `build-index` on that CPython.
@@ -312,7 +313,22 @@ export async function lockGenerator(
     `# attested: sha256:${sha256} ${sourceRef}`,
     `# command: echo '${GENERATOR}' | uv ${args.join(' ')}`,
   ];
-  const lock = `${header.join('\n')}\n${requirements}`;
+  const headerText = `${header.join('\n')}\n`;
+  // The header carries uv's own output. A line break in it would start a line of its own,
+  // which parseLock reads as a requirement, so the header must parse with no entries.
+  let headerEntries: LockEntry[];
+  try {
+    headerEntries = parseLock(headerText);
+  } catch (error) {
+    throw new Error(`The lock's header is not comments alone, so the lock was not written. ${(error as Error).message}`);
+  }
+  if (headerEntries.length !== 0) {
+    throw new Error(
+      `The lock's header holds requirement lines (${headerEntries.map((entry) => entry.name).join(', ')}), ` +
+        'not comments alone, so the lock was not written.',
+    );
+  }
+  const lock = `${headerText}${requirements}`;
 
   for (const python of pythons) {
     for (const platform of PLATFORMS) {

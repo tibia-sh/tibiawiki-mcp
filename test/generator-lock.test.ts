@@ -104,13 +104,13 @@ test('parseLock reads a lock with markers, via notes and several hashes per entr
 /** Each is a lock uv would not write, and the line parseLock must name in rejecting it. */
 const HASH_A = `    --hash=sha256:${'a'.repeat(64)}`;
 const REJECTED: Array<[string, string, RegExp]> = [
-  ['CRLF line endings', `requests==2.34.2 \\\r\n${HASH_A}\r\n`, /Line 1 of the lock has a carriage return/],
+  ['CRLF line endings', `requests==2.34.2 \\\r\n${HASH_A}\r\n`, /Line 1, column 19 of the lock has U\+000D\./],
   ['a -r line', `-r other.txt\nrequests==2.34.2 \\\n${HASH_A}\n`, /Line 1 of the lock is not a requirement/],
   ['an --index-url line', `--index-url https://example.invalid/simple \\\n${HASH_A}\n`, /Line 1 of the lock is neither/],
   ['a -e line', `-e ./local \\\n${HASH_A}\n`, /Line 1 of the lock is neither/],
   ['a duplicate dependency', `requests==2.34.2 \\\n${HASH_A}\nRequests==2.34.1 \\\n${HASH_A}\n`, /Line 3 of the lock names requests a second time/],
   ['an entry without a hash', 'requests==2.34.2\n', /Line 1 of the lock is not a requirement with its hashes/],
-  ['an entry whose hashes never come', 'requests==2.34.2 \\\n', /ends inside the requests entry/],
+  ['an entry whose hashes never come', `requests==2.34.2 \\\n${HASH_A} \\\n`, /Line 2 of the lock ends in a backslash, but the lock ends there, before the last hash of requests/],
   ['a hash in uppercase hex', `requests==2.34.2 \\\n    --hash=sha256:${'A'.repeat(64)}\n`, /Line 2 of the lock should be the next --hash/],
   ['text after a hash', `requests==2.34.2 \\\n${HASH_A} --hash=sha256:${'b'.repeat(64)}\n`, /Line 2 of the lock should be the next --hash/],
   ['a blank line inside an entry', `requests==2.34.2 \\\n\n${HASH_A}\n`, /Line 2 of the lock should be the next --hash/],
@@ -120,6 +120,31 @@ const REJECTED: Array<[string, string, RegExp]> = [
   ['a marker with an option in it', `requests==2.34.2 ; python_version > "3" --hash=sha256:${'b'.repeat(64)} \\\n${HASH_A}\n`, /Line 1 of the lock has a marker uv does not write/],
   ['another URL for the generator', `tibiawikisql @ https://example.invalid/t.whl \\\n${HASH_A}\n`, /Line 1 of the lock is neither/],
 ];
+// pip splits lines with Python's splitlines(), which ends a line at each of these too, and
+// a tab or NUL is no part of what uv writes. Each would hide a second generator entry in a
+// comment from a reader that ends lines at LF.
+const HIDING: Array<[string, string]> = [
+  ['U+0085', '\u0085'], ['U+2028', '\u2028'], ['U+2029', '\u2029'], ['VT', '\x0b'], ['FF', '\x0c'],
+  ['U+001C', '\x1c'], ['a tab', '\t'], ['NUL', '\0'],
+];
+for (const [what, char] of HIDING) {
+  test(`parseLock rejects ${what}, naming its line and column`, () => {
+    const hidden = `# note${char}${GENERATOR} \\\n${lock(urlEntry(ATTESTED))}`;
+    const code = char.codePointAt(0)!.toString(16).toUpperCase().padStart(4, '0');
+    assert.throws(() => parseLock(hidden), new RegExp(`^Error: Line 1, column 7 of the lock has U\\+${code}\\.`));
+    assert.throws(() => assertGeneratorLocked(hidden, GENERATOR, ATTESTED), /Line 1, column 7/);
+  });
+}
+
+// pip decodes the file by an encoding declaration before it parses it, so
+// `unicode_escape` would turn a literal \x0a in a later comment into a line break.
+for (const declaration of ['# coding: unicode_escape', '# -*- coding: latin-1 -*-']) {
+  test(`parseLock rejects the encoding declaration ${declaration}`, () => {
+    const declared = `# a header line\n${declaration}\n${lock(urlEntry(ATTESTED))}`;
+    assert.throws(() => parseLock(declared), /Line 2 of the lock is an encoding declaration/);
+  });
+}
+
 for (const [what, text, error] of REJECTED) {
   test(`parseLock rejects ${what}`, () => {
     assert.throws(() => parseLock(text), error);
@@ -263,5 +288,5 @@ test('a generator entry after a bare CR is rejected', () => {
     `    --hash=sha256:${ATTESTED}`,
     '',
   ].join('\n');
-  assert.throws(() => assertGeneratorLocked(hidden, GENERATOR, ATTESTED), /Line 1 of the lock has a carriage return/);
+  assert.throws(() => assertGeneratorLocked(hidden, GENERATOR, ATTESTED), /Line 1, column 41 of the lock has U\+000D\./);
 });

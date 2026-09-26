@@ -37,8 +37,13 @@ const lineError = (index: number, line: string, why: string): Error =>
  * leniently than this, and every leniency has let a line hide from a looser reader, so
  * the grammar is closed:
  *
- * - Lines end in LF alone. A `\r` anywhere is rejected, because pip and uv end a line at a
- *   bare CR too.
+ * - The text is printable ASCII and LF, and nothing else. Lines end in LF alone: pip and
+ *   uv also end a line at a bare CR, and pip at every other break Python's splitlines()
+ *   knows, such as VT, FF, U+001C to U+001E, U+0085, U+2028 and U+2029. Tabs, NUL and
+ *   the rest are no part of what uv writes.
+ * - No line is an encoding declaration (PEP 263's `coding:` or `coding=`). pip decodes the
+ *   file by one before it parses it, and `unicode_escape` would turn a literal `\x0a` in a
+ *   comment into a line break.
  * - A line starting with `#` is a comment. The indented `# via` notes uv writes are allowed
  *   right after an entry's last hash.
  * - An entry is `name==version`, with an optional ` ; <marker>`, or exactly GENERATOR,
@@ -49,11 +54,14 @@ const lineError = (index: number, line: string, why: string): Error =>
  *   lines, no entry without a hash, no text after a hash, and no project twice.
  */
 export function parseLock(lock: string): LockEntry[] {
-  const cr = lock.indexOf('\r');
-  if (cr !== -1) {
+  const outside = /[^\x20-\x7e\n]/u.exec(lock);
+  if (outside) {
+    // Everything before it is ASCII, so the column counts characters.
+    const before = lock.slice(0, outside.index);
+    const code = outside[0].codePointAt(0)!.toString(16).toUpperCase().padStart(4, '0');
     throw new Error(
-      `Line ${lock.slice(0, cr).split('\n').length} of the lock has a carriage return. ` +
-        'Its lines end in LF alone.',
+      `Line ${before.split('\n').length}, column ${outside.index - before.lastIndexOf('\n')} of the lock ` +
+        `has U+${code}. A lock holds printable ASCII and LF only.`,
     );
   }
   const lines = lock.split('\n');
@@ -64,6 +72,9 @@ export function parseLock(lock: string): LockEntry[] {
   // Whether the line above ended an entry, or was a `# via` note under it.
   let underEntry = false;
   for (const [index, line] of lines.entries()) {
+    if (/coding[:=]/.test(line)) {
+      throw lineError(index, line, 'is an encoding declaration, which pip would decode the lock by');
+    }
     const hash = HASH.exec(line);
     if (open) {
       if (!hash) throw lineError(index, line, `should be the next --hash=sha256 line of ${open.name}`);
@@ -101,7 +112,12 @@ export function parseLock(lock: string): LockEntry[] {
     open = { name, requirement, hashes: [] };
     entries.push(open);
   }
-  if (open) throw new Error(`The lock ends inside the ${open.name} entry, before its last hash.`);
+  if (open) {
+    const last = lines.length - 1;
+    throw lineError(
+      last, lines[last]!, `ends in a backslash, but the lock ends there, before the last hash of ${open.name}`,
+    );
+  }
   return entries;
 }
 

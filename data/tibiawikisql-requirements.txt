@@ -1,14 +1,16 @@
-# tibiawikisql==9.0.0 and every dependency, pinned and hashed. `tibiawiki-mcp build-index`
+# tibiawikisql 9.0.0+tibiash.1 and every dependency, pinned and hashed. `tibiawiki-mcp build-index`
 # installs its generator from this file with `uv pip install --require-hashes`.
-# Written by `pnpm lock-generator` after a dry-run install without a build passed on
-# every CPython and platform under checked. Do not edit it by hand. To reproduce it, run
+# Written by `pnpm lock-generator` after `gh attestation verify` passed for the generator
+# wheel and tag under attested, and a dry-run install without a build passed on every
+# CPython and platform under checked. Do not edit it by hand. To reproduce it, run
 # `pnpm lock-generator --cutoff <cutoff>` with the uv version below, and with no uv.toml
 # or UV_* variable of your own that changes how uv resolves, such as UV_INDEX_URL.
 # cutoff: 2026-09-06T15:36:25Z
-# uv: uv 0.12.4 (77803aa22 2026-08-13 aarch64-apple-darwin)
+# uv: uv 0.12.18 (Homebrew 2026-09-22 aarch64-apple-darwin)
 # python: cpython>=3.10,<3.14
 # checked: CPython 3.10, 3.11, 3.12, 3.13 on x86_64-unknown-linux-gnu, aarch64-unknown-linux-gnu, x86_64-apple-darwin, aarch64-apple-darwin, x86_64-pc-windows-msvc
-# command: echo 'tibiawikisql==9.0.0' | uv pip compile - --universal --generate-hashes --no-build --python-version 3.10 --exclude-newer 2026-09-06T15:36:25Z --no-header
+# attested: sha256:c0bbb67c7ffe31f2a6d8ad6f9338683e52c6f526c4ecceaf306ddbb792395d4a refs/tags/v9.0.0+tibiash.1
+# command: echo 'tibiawikisql @ https://github.com/tibia-sh/tibiawiki-sql/releases/download/v9.0.0%2Btibiash.1/tibiawikisql-9.0.0+tibiash.1-py3-none-any.whl' | uv pip compile - --universal --generate-hashes --no-build --python-version 3.10 --exclude-newer 2026-09-06T15:36:25Z --no-header
 annotated-types==0.8.0 \
     --hash=sha256:13b2beaad985e05e2d6407ee4c4f35590b11f8d693a258a561055cac8f64cab7 \
     --hash=sha256:f072f4d804ea359e4eaf198b1af7a8b0943881a87f31bb764f8bf219bb9419e0
@@ -449,9 +451,8 @@ requests==2.34.2 \
     --hash=sha256:2a0d60c172f83ac6ab31e4554906c0f3b3588d37b5cb939b1c061f4907e278e0 \
     --hash=sha256:f288924cae4e29463698d6d60bc6a4da69c89185ad1e0bcc4104f584e960b9ed
     # via tibiawikisql
-tibiawikisql==9.0.0 \
-    --hash=sha256:6b779871820528bb800e96a46b38efdd3cd89355985e0b406da32d838e021a5b \
-    --hash=sha256:831f41d91cd179a52b56572412f463f99c1990379bd9b79a6f0c9e066fb6ed9a
+tibiawikisql @ https://github.com/tibia-sh/tibiawiki-sql/releases/download/v9.0.0%2Btibiash.1/tibiawikisql-9.0.0+tibiash.1-py3-none-any.whl \
+    --hash=sha256:c0bbb67c7ffe31f2a6d8ad6f9338683e52c6f526c4ecceaf306ddbb792395d4a
 typing-extensions==4.16.0 \
     --hash=sha256:481caa481374e813c1b176ada14e97f1f67a4539ce9cfeb3f350d78d6370c2e8 \
     --hash=sha256:dc983d19a509c94dba722ee6abd33940f7c05a89e243c47e907eb4db6f1a43e5

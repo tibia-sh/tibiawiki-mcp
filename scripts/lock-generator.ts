@@ -1,9 +1,14 @@
 import { execFileSync, spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { parseArgs } from 'node:util';
-import { GENERATOR, GENERATOR_LOCK_PATH, GENERATOR_PYTHON } from '../src/indexer/build-index.ts';
+import {
+  GENERATOR, GENERATOR_LOCK_PATH, GENERATOR_PYTHON, GENERATOR_REPO, GENERATOR_SHA256, GENERATOR_VERSION,
+  GENERATOR_WHEEL_URL,
+} from '../src/indexer/build-index.ts';
+import { assertGeneratorLocked } from '../src/indexer/generator-lock.ts';
 
 /**
  * Maintainer-run. Resolves the pinned generator and its dependencies with uv and writes
@@ -14,7 +19,16 @@ import { GENERATOR, GENERATOR_LOCK_PATH, GENERATOR_PYTHON } from '../src/indexer
  *
  * Every run is a fresh resolution. uv compiles to stdout and never sees the committed
  * lock, which as an output file it would read back as preferences, letting the old pins
- * steer the new resolution. A refresh is a run with a later cutoff.
+ * steer the new resolution. A refresh is a run with a later cutoff. The cutoff applies to
+ * what uv resolves from PyPI only: the generator is a direct URL, which has no upload time.
+ *
+ * The generator wheel is checked before uv runs. The run downloads it, refuses it unless
+ * its sha256 is GENERATOR_SHA256, and runs `gh attestation verify`, which must show that
+ * GENERATOR_REPO's release workflow built it from the tag `v${GENERATOR_VERSION}` on a
+ * GitHub-hosted runner. This needs `gh` signed in. The check runs here and not in
+ * `build-index`, which installs by hash alone: the hash a verified run writes carries the
+ * attestation to every build, with no `gh` on the building machine. The lock uv writes
+ * must then record that wheel with that one hash, or nothing is written.
  *
  * Before anything is written, a dry-run install checks the new lock on every CPython minor
  * version GENERATOR_PYTHON admits, for every platform in PLATFORMS. With `--no-build`, a
@@ -22,7 +36,8 @@ import { GENERATOR, GENERATOR_LOCK_PATH, GENERATOR_PYTHON } from '../src/indexer
  * that CPython, and a lock that fails is never written.
  *
  * The header carries what a reproduction needs: the cutoff, the uv version, the Python
- * range and the command. uv's own header is left out. It would repeat the command
+ * range and the command, and the wheel and tag the attestation was verified for. uv's
+ * own header is left out. It would repeat the command
  * without the uv version or the requirement uv read on stdin. A reproduction also needs
  * uv's own settings at their defaults: a uv.toml or a UV_* variable such as
  * UV_RESOLUTION changes the resolution without showing in the command.
@@ -73,33 +88,74 @@ if (
   throw new Error(`--cutoff must be an absolute UTC time such as 2026-09-06T12:00:00Z, got "${cutoff}".`);
 }
 
+const SIGNER_WORKFLOW = `${GENERATOR_REPO}/.github/workflows/release.yml`;
+const SOURCE_REF = `refs/tags/v${GENERATOR_VERSION}`;
+
 const args = [
   'pip', 'compile', '-', '--universal', '--generate-hashes', '--no-build',
   '--python-version', floor, '--exclude-newer', cutoff, '--no-header',
 ];
-const version = execFileSync('uv', ['--version'], { encoding: 'utf8' }).trim();
-// uv's progress and errors go straight to the terminal. Only the requirements are captured.
-const requirements = execFileSync('uv', args, {
-  input: `${GENERATOR}\n`, encoding: 'utf8', stdio: ['pipe', 'pipe', 'inherit'],
-});
-
-const header = [
-  `# ${GENERATOR} and every dependency, pinned and hashed. \`tibiawiki-mcp build-index\``,
-  '# installs its generator from this file with `uv pip install --require-hashes`.',
-  '# Written by `pnpm lock-generator` after a dry-run install without a build passed on',
-  '# every CPython and platform under checked. Do not edit it by hand. To reproduce it, run',
-  '# `pnpm lock-generator --cutoff <cutoff>` with the uv version below, and with no uv.toml',
-  '# or UV_* variable of your own that changes how uv resolves, such as UV_INDEX_URL.',
-  `# cutoff: ${cutoff}`,
-  `# uv: ${version}`,
-  `# python: ${GENERATOR_PYTHON}`,
-  `# checked: CPython ${pythons.join(', ')} on ${PLATFORMS.join(', ')}`,
-  `# command: echo '${GENERATOR}' | uv ${args.join(' ')}`,
-];
-const lock = `${header.join('\n')}\n${requirements}`;
 
 const scratch = mkdtempSync(join(tmpdir(), 'tibiawiki-mcp-lock-'));
 try {
+  // fetch follows the release download's redirect to its storage host.
+  const response = await fetch(GENERATOR_WHEEL_URL);
+  if (!response.ok) {
+    throw new Error(`Downloading ${GENERATOR_WHEEL_URL} failed with HTTP ${response.status}, so the lock was not written.`);
+  }
+  const wheelBytes = Buffer.from(await response.arrayBuffer());
+  const sha256 = createHash('sha256').update(wheelBytes).digest('hex');
+  if (sha256 !== GENERATOR_SHA256) {
+    throw new Error(
+      `The wheel at ${GENERATOR_WHEEL_URL} is sha256:${sha256}, not the approved ` +
+        `sha256:${GENERATOR_SHA256}, so the lock was not written.`,
+    );
+  }
+  const wheel = join(scratch, decodeURIComponent(basename(new URL(GENERATOR_WHEEL_URL).pathname)));
+  writeFileSync(wheel, wheelBytes);
+
+  // gh's findings and errors go straight to the terminal.
+  const attestation = spawnSync('gh', [
+    'attestation', 'verify', wheel, '--repo', GENERATOR_REPO, '--signer-workflow', SIGNER_WORKFLOW,
+    '--source-ref', SOURCE_REF, '--deny-self-hosted-runners',
+  ], { stdio: ['ignore', 'inherit', 'inherit'] });
+  if (attestation.error) throw attestation.error;
+  if (attestation.status !== 0) {
+    throw new Error(
+      `\`gh attestation verify\` refused the wheel sha256:${sha256} for ${SOURCE_REF} ` +
+        `(gh exit ${attestation.status}), so the lock was not written.`,
+    );
+  }
+  process.stderr.write(
+    `Verified the attestation of sha256:${sha256}: built by ${SIGNER_WORKFLOW} from ${SOURCE_REF} ` +
+      'on a GitHub-hosted runner.\n',
+  );
+
+  const version = execFileSync('uv', ['--version'], { encoding: 'utf8' }).trim();
+  // uv's progress and errors go straight to the terminal. Only the requirements are captured.
+  const requirements = execFileSync('uv', args, {
+    input: `${GENERATOR}\n`, encoding: 'utf8', stdio: ['pipe', 'pipe', 'inherit'],
+  });
+  // The lock must install exactly the wheel just verified, and nothing else in its place.
+  assertGeneratorLocked(requirements, GENERATOR, sha256);
+
+  const header = [
+    `# tibiawikisql ${GENERATOR_VERSION} and every dependency, pinned and hashed. \`tibiawiki-mcp build-index\``,
+    '# installs its generator from this file with `uv pip install --require-hashes`.',
+    '# Written by `pnpm lock-generator` after `gh attestation verify` passed for the generator',
+    '# wheel and tag under attested, and a dry-run install without a build passed on every',
+    '# CPython and platform under checked. Do not edit it by hand. To reproduce it, run',
+    '# `pnpm lock-generator --cutoff <cutoff>` with the uv version below, and with no uv.toml',
+    '# or UV_* variable of your own that changes how uv resolves, such as UV_INDEX_URL.',
+    `# cutoff: ${cutoff}`,
+    `# uv: ${version}`,
+    `# python: ${GENERATOR_PYTHON}`,
+    `# checked: CPython ${pythons.join(', ')} on ${PLATFORMS.join(', ')}`,
+    `# attested: sha256:${sha256} ${SOURCE_REF}`,
+    `# command: echo '${GENERATOR}' | uv ${args.join(' ')}`,
+  ];
+  const lock = `${header.join('\n')}\n${requirements}`;
+
   const candidate = join(scratch, 'tibiawikisql-requirements.txt');
   writeFileSync(candidate, lock);
   for (const python of pythons) {
@@ -119,9 +175,9 @@ try {
       process.stderr.write(`Checked CPython ${python} on ${platform}.\n`);
     }
   }
+
+  writeFileSync(GENERATOR_LOCK_PATH, lock);
+  process.stderr.write(`Wrote ${GENERATOR_LOCK_PATH} with cutoff ${cutoff}.\n`);
 } finally {
   rmSync(scratch, { recursive: true, force: true });
 }
-
-writeFileSync(GENERATOR_LOCK_PATH, lock);
-process.stderr.write(`Wrote ${GENERATOR_LOCK_PATH} with cutoff ${cutoff}.\n`);

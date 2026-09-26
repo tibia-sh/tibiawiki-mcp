@@ -31,7 +31,7 @@ export const MCP_SCHEMA_VERSION = 3;
  * `^MIN_DATA_VERSION`, so npm never pairs this server with an older index in the same
  * major, which would fail the probe below at startup.
  */
-export const MIN_DATA_VERSION = '3.1.0';
+export const MIN_DATA_VERSION = '3.2.0';
 
 /**
  * The shape the tools require. Probed once at startup so a generator-version drift
@@ -43,7 +43,7 @@ export const REQUIRED_COLUMNS: Readonly<Record<string, readonly string[]>> = {
     'bestiary_class', 'bestiary_occurrence', 'is_boss', 'location', 'spawn_type',
     'mitigation', 'walks_through', 'walks_around', 'status', 'runs_at', 'sees_invisible',
     'paralysable', 'pushable', 'push_objects', 'illusionable', 'summon_cost', 'convince_cost',
-    'bestiary_level', 'plural', 'article',
+    'bestiary_level', 'plural', 'article', 'race_id',
     ...ELEMENTS.map((e) => `modifier_${e}`),
   ],
   item: [

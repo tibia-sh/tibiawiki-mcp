@@ -44,6 +44,8 @@ const lineError = (index: number, line: string, why: string): Error =>
  * - No line is an encoding declaration (PEP 263's `coding:` or `coding=`). pip decodes the
  *   file by one before it parses it, and `unicode_escape` would turn a literal `\x0a` in a
  *   comment into a line break.
+ * - No line holds a `$`. pip and uv substitute `${VAR}` from the environment, so one would
+ *   let the building machine's environment change what the lock installs.
  * - A line starting with `#` is a comment. The indented `# via` notes uv writes are allowed
  *   right after an entry's last hash.
  * - An entry is `name==version`, with an optional ` ; <marker>`, or exactly GENERATOR,
@@ -74,6 +76,13 @@ export function parseLock(lock: string): LockEntry[] {
   for (const [index, line] of lines.entries()) {
     if (/coding[:=]/.test(line)) {
       throw lineError(index, line, 'is an encoding declaration, which pip would decode the lock by');
+    }
+    const dollar = line.indexOf('$');
+    if (dollar !== -1) {
+      throw new Error(
+        `Line ${index + 1}, column ${dollar + 1} of the lock has a $. ` +
+          'pip and uv would substitute ${VAR} from the environment, so a lock holds none.',
+      );
     }
     const hash = HASH.exec(line);
     if (open) {

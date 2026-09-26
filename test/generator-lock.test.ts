@@ -145,6 +145,18 @@ for (const declaration of ['# coding: unicode_escape', '# -*- coding: latin-1 -*
   });
 }
 
+// pip and uv substitute ${VAR} from the environment, so a $ would let the environment
+// change what the lock installs.
+const DOLLARS: Array<[string, string, RegExp]> = [
+  ['a ${VAR} marker', `# a header line\nrequests==2.34.2 ; python_version != '\${LOCK_MARKER}' \\\n${HASH_A}\n`, /^Error: Line 2, column 39 of the lock has a \$\./],
+  ['a bare $', `# costs $5\nrequests==2.34.2 \\\n${HASH_A}\n`, /^Error: Line 1, column 9 of the lock has a \$\./],
+];
+for (const [what, text, error] of DOLLARS) {
+  test(`parseLock rejects ${what}, naming its line and column`, () => {
+    assert.throws(() => parseLock(text), error);
+  });
+}
+
 for (const [what, text, error] of REJECTED) {
   test(`parseLock rejects ${what}`, () => {
     assert.throws(() => parseLock(text), error);

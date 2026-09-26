@@ -256,6 +256,17 @@ test('openDb rejects an index whose npc_destination has no origin', () => {
   });
 });
 
+test('openDb rejects an index whose creature has no race_id', () => {
+  const bad = fixtureCopyWith('alter table creature drop column race_id');
+  assert.throws(() => openDb(bad), (e: unknown) => {
+    assert.ok(e instanceof SchemaError, `expected SchemaError, got ${String(e)}`);
+    // Anchored at both ends of the column list, so race_id must be the only column named.
+    assert.match((e as Error).message,
+      /^Index table "creature" is missing required column\(s\): race_id\. /);
+    return true;
+  });
+});
+
 test('openDb rejects an index that has no npc_location table', () => {
   const bad = fixtureCopyWith('drop table npc_location');
   assert.throws(() => openDb(bad), (e: unknown) => {

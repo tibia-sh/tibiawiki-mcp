@@ -114,11 +114,13 @@ whoever is asking.
 
 The build runs the generator from a throwaway environment that uv creates in your temp
 directory. `uv pip install --require-hashes` installs it from
-`data/tibiawikisql-requirements.txt`, which pins the generator and every dependency to an
-exact version, with a hash for every file uv may download. A download that does not
-match its hash stops the build before the generator runs. The environment is deleted as
-soon as the generator exits, or as soon as a step before it fails. uv still reads your
-own settings, such as `UV_CACHE_DIR` and `UV_EXCLUDE_NEWER`.
+`data/tibiawikisql-requirements.txt`. It pins the generator to one wheel, by its URL on
+the [tibia-sh/tibiawiki-sql](https://github.com/tibia-sh/tibiawiki-sql) release and its
+hash, and every dependency to an exact version, with a hash for every file uv may
+download. A download that does not match its hash stops the build before the generator
+runs. The environment is deleted as soon as the generator exits, or as soon as a step
+before it fails. uv still reads your own settings, such as `UV_CACHE_DIR` and
+`UV_EXCLUDE_NEWER`.
 
 The environment runs CPython 3.10 to 3.13. uv uses one you have installed, or downloads
 one. The range stops before 3.14 because `mwparserfromhell` 0.7.2, the newest release of

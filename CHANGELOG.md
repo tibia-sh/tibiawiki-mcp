@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.13.0](https://github.com/tibia-sh/tibiawiki-mcp/compare/v0.12.0...v0.13.0) (2026-09-26)
+
+
+### Features
+
+* expose leg origins and NPC positions ([80fb252](https://github.com/tibia-sh/tibiawiki-mcp/commit/80fb252cfb7a3e8d057dcdcba9635b33f50fb4eb))
+* expose outfit and mount client IDs ([04446ea](https://github.com/tibia-sh/tibiawiki-mcp/commit/04446ea9c1e9c44575a5acf38277c4467412b779))
+* report potion restore ranges ([bff7565](https://github.com/tibia-sh/tibiawiki-mcp/commit/bff7565931dbc6f7447731b5ec0c50fe7ea658a2))
+* require the tibia-sh index columns ([ddf83fc](https://github.com/tibia-sh/tibiawiki-mcp/commit/ddf83fcb1609441e12b639876caaae86df953e18))
+* tibia_find_travel takes from instead of from_city ([5a25724](https://github.com/tibia-sh/tibiawiki-mcp/commit/5a25724f59834c96a5a61b00385eeac43582dc29))
+
+
+### Bug Fixes
+
+* order NPC destinations totally ([d95076d](https://github.com/tibia-sh/tibiawiki-mcp/commit/d95076d919a7346a8263fc171fad6b89a42cac57))
+* say what a null leg origin means ([5a25724](https://github.com/tibia-sh/tibiawiki-mcp/commit/5a25724f59834c96a5a61b00385eeac43582dc29))
+
 ## [0.12.0](https://github.com/tibia-sh/tibiawiki-mcp/compare/v0.11.1...v0.12.0) (2026-09-26)
 
 

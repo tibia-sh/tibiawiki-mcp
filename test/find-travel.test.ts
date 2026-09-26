@@ -268,8 +268,8 @@ function routeValues(path: string, column: 'd.origin' | 'd.name'): string[] {
 test('every active route pages in the brief\'s full order, by origin and by destination', async () => {
   const all = expectedRoutes(DB_PATH, {}, 'npc');
   assert.ok(all.length > 100, `guard: the index holds ${all.length} active routes`);
-  // A leg with no recorded origin starts from another of the NPC's positions, so no from
-  // value reaches it. Only to covers every route.
+  // A leg with no recorded origin starts at one of the NPC's positions, and no from value
+  // reaches it. Only to covers every route.
   const originless = all.filter((r) => r.origin === null).length;
   assert.ok(originless > 0, 'guard: some active routes have no recorded origin');
   await withRealIndex(async (client) => {

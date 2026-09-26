@@ -53,9 +53,9 @@ and the counts in `totals` cover them all.
 **Travel rows are single legs.** `tibia_find_travel` takes `to`, `from` or both, exact
 place names in any case. `from` matches the leg's start, its `origin`. Each row gives the
 NPC, the `origin`, the NPC's recorded city and position, the fare and `notes`. It does not
-plan journeys, so chain legs yourself. A null `origin` means the leg starts from another
-of the NPC's positions, which `tibia_get` lists as `positions`. A fare of 0 means free or
-not recorded, and `sort: "price"` puts it last.
+plan journeys, so chain legs yourself. A null `origin` is not recorded, and the leg starts
+at one of the NPC's positions, which `tibia_get` lists as `positions`. A fare of 0 means
+free or not recorded, and `sort: "price"` puts it last.
 
 **Prefer `tibia_how_to_obtain` over two lookups.** It returns creature drops with
 chances, NPC vendors with prices, and quest rewards in one call. Reaching for

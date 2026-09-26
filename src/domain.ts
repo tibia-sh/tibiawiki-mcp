@@ -166,7 +166,8 @@ export const RASHID_PLACE_MEANING =
   "For Rashid, who moves city daily, a buyer's city and position coordinates are null. His NPC page and " +
   'tibia_where_to_sell give his week as rashidSchedule.';
 export const FARE_MEANING = 'Route price in gold. 0: free or not recorded, see notes.';
-export const ORIGIN_MEANING = "Where the leg starts. null: from another of the NPC's positions.";
+export const ORIGIN_MEANING =
+  "Where the leg starts. null: not recorded, it starts at one of the NPC's positions.";
 
 /**
  * Creature numbers the wiki gives a meaning at 0, described once for every tool that

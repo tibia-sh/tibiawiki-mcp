@@ -8,7 +8,7 @@ import {
   DETAILED_CREATURE_FIELDS, DETAILED_ITEM_FIELDS, coerceAttribute, type EntityType,
   runsAtSchema, summonCostSchema, convinceCostSchema, GOLD_PER_KILL, goldPerKillSchema,
   positionSchema, RASHID, RASHID_SCHEDULE, rashidScheduleSchema, rashidScheduleDay, buyerPlace,
-  buyerCitySchema, buyerPositionSchema, IMAGE_MEANING, fareSchema,
+  buyerCitySchema, buyerPositionSchema, IMAGE_MEANING, fareSchema, originSchema,
   inGameNameSchema, inGamePluralSchema, inGameArticleSchema,
 } from '../domain.ts';
 
@@ -142,7 +142,11 @@ const npcOut = z.object({
   jobs: z.array(z.string()),
   races: z.array(z.string()),
   destinations: z.array(z.object({
-    name: z.string(), price: fareSchema, notes: z.string().nullable(),
+    name: z.string(), price: fareSchema, origin: originSchema, notes: z.string().nullable(),
+  })),
+  positions: z.array(z.object({
+    city: z.string().nullable(), subarea: z.string().nullable(), geolabel: z.string().nullable(),
+    position: positionSchema,
   })),
   // Only Rashid has one.
   rashidSchedule: rashidScheduleSchema.optional(),
@@ -420,8 +424,11 @@ export function registerGet(server: McpServer, handle: TibiaDb): void {
   const npcJobs = db.prepare('select name from npc_job where npc_id = ? order by name asc');
   const npcRaces = db.prepare('select name from npc_race where npc_id = ? order by name asc');
   const destinations = db.prepare(
-    `select name, price, notes from npc_destination where npc_id = ?
+    `select name, price, origin, notes from npc_destination where npc_id = ?
      order by name asc, price asc`);
+  const npcPositions = db.prepare(
+    `select city, subarea, geolabel, x, y, z from npc_location where npc_id = ?
+     order by position asc`);
   const rashid = db.prepare(RASHID_SCHEDULE);
   const dangers = db.prepare(
     `select c.title from quest_danger d join creature c on c.article_id = d.creature_id
@@ -591,7 +598,11 @@ export function registerGet(server: McpServer, handle: TibiaDb): void {
           jobs: npcJobs.all(row.article_id as number).map((r) => String(r.name)),
           races: npcRaces.all(row.article_id as number).map((r) => String(r.name)),
           destinations: destinations.all(row.article_id as number).map((d) => ({
-            name: String(d.name), price: num(d.price), notes: str(d.notes),
+            name: String(d.name), price: num(d.price), origin: str(d.origin), notes: str(d.notes),
+          })),
+          positions: npcPositions.all(row.article_id as number).map((p) => ({
+            city: str(p.city), subarea: str(p.subarea), geolabel: str(p.geolabel),
+            position: { x: num(p.x), y: num(p.y), z: num(p.z) },
           })),
           ...(title === RASHID ? { rashidSchedule: rashid.all().map(rashidScheduleDay) } : {}),
           buys: npcTrade('npc_offer_buy', includeInactive).all(row.article_id as number).map(trade),

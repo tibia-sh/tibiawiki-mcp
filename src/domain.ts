@@ -166,6 +166,7 @@ export const RASHID_PLACE_MEANING =
   "For Rashid, who moves city daily, a buyer's city and position coordinates are null. His NPC page and " +
   'tibia_where_to_sell give his week as rashidSchedule.';
 export const FARE_MEANING = 'Route price in gold. 0: free or not recorded, see notes.';
+export const ORIGIN_MEANING = "Where the leg starts. null: from another of the NPC's positions.";
 
 /**
  * Creature numbers the wiki gives a meaning at 0, described once for every tool that
@@ -177,6 +178,9 @@ export const convinceCostSchema = z.number().nullable().describe(CONVINCE_COST_M
 
 /** A travel route's recorded fare, described once for every tool that reports it. */
 export const fareSchema = z.number().nullable().describe(FARE_MEANING);
+
+/** Where a travel leg starts, described once for every tool that reports it. */
+export const originSchema = z.string().nullable().describe(ORIGIN_MEANING);
 
 /**
  * Names as the game prints them in look, loot and kill messages, which can differ from the
@@ -415,8 +419,8 @@ export type TravelSort = (typeof TRAVEL_SORTS)[number];
  * query must alias the npc table `n` and npc_destination `d`.
  */
 const TRAVEL_ORDER: Record<TravelSort, string> = {
-  price: '(d.price > 0) desc, d.price asc, n.title asc, d.name asc, d.notes asc',
-  npc: 'n.title asc, d.name asc, d.price asc, d.notes asc',
+  price: '(d.price > 0) desc, d.price asc, n.title asc, d.name asc, d.notes asc, d.origin asc',
+  npc: 'n.title asc, d.name asc, d.price asc, d.notes asc, d.origin asc',
 };
 export function travelSort(key: TravelSort): string {
   if (!Object.hasOwn(TRAVEL_ORDER, key)) {

@@ -163,6 +163,30 @@ test('an NPC lists every recorded position and where each leg starts', async () 
   await h.close();
 });
 
+// No recorded NPC has two legs to one place at one fare and with one note, so this copy gives
+// Harlow two to Edron that differ only in origin, stored in the reverse of origin order.
+test('an NPC\'s destinations that differ only in origin come back in origin order', async () => {
+  const path = join(scratch(), 'destinations.db');
+  copyFileSync(FIXTURE, path);
+  const db = new DatabaseSync(path);
+  try {
+    db.exec(`insert into npc_destination (npc_id, name, price, notes, origin)
+      select article_id, 'Edron', 70, null, 'Yalahar' from npc where title = 'Harlow'
+      union all
+      select article_id, 'Edron', 70, null, 'Farmine' from npc where title = 'Harlow'`);
+  } finally {
+    db.close();
+  }
+  const h = await connectTo(path);
+  try {
+    const edron = (await get(h, 'Harlow', 'npc')).destinations
+      .filter((d: any) => d.name === 'Edron');
+    assert.deepEqual(edron.map((d: any) => d.origin), ['Farmine', 'Yalahar']);
+  } finally {
+    await h.close();
+  }
+});
+
 // The schedule says which day Rashid is where, and positions are the wiki's coordinates for
 // the places he stands, so he carries both.
 test('Rashid keeps his schedule and also lists his seven positions', async () => {

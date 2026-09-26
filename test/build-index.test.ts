@@ -9,7 +9,10 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DB_PATH } from '@tibia.sh/tibiawiki-data';
 import { resolveDbPath } from '../src/db.ts';
-import { buildIndex, GENERATOR, GENERATOR_PYTHON, type Runner } from '../src/indexer/build-index.ts';
+import {
+  buildIndex, GENERATOR, GENERATOR_PYTHON, GENERATOR_SHA256, GENERATOR_VERSION, type Runner,
+} from '../src/indexer/build-index.ts';
+import { generatorEntry } from '../src/indexer/generator-lock.ts';
 import { eligibleScenes, MCP_SCHEMA_VERSION, type EnrichStats } from '../src/indexer/enrich.ts';
 import { FIXTURE, tempDirs } from './harness.ts';
 
@@ -670,25 +673,35 @@ test('zero eligible scenes fails rather than passing on NaN', async () => {
  * `uv pip install --require-hashes` is what refuses an unhashed or mismatched entry at
  * build time. These pin the committed lock itself, so a bad refresh fails here first.
  */
-test('the generator lock pins every requirement with == and hashes it', () => {
-  const entries = lockEntries();
+test('the generator lock pins every dependency with == and hashes it', () => {
+  // The generator's own entry is a URL, pinned by the next test.
+  const entries = lockEntries().filter((entry) => !entry.startsWith(`${GENERATOR} `));
   // tibiawikisql alone would parse too, but it has dependencies, and they must be locked.
-  assert.ok(entries.length > 1, `the lock lists ${entries.length} requirement(s)`);
+  assert.ok(entries.length > 1, `the lock lists ${entries.length} dependencies`);
   // An exact version starts with a digit and holds no `*`, so `==0.*` and `===` are refused.
   const pinnedAndHashed =
     /^[A-Za-z0-9][A-Za-z0-9._-]*==[0-9][0-9A-Za-z.!+_-]*(?: ; (?:(?! --hash=).)+)?(?: --hash=sha256:[0-9a-f]{64})+$/;
   assert.deepEqual(entries.filter((entry) => !pinnedAndHashed.test(entry)), []);
 });
 
-test('the lock pins the generator build-index runs', () => {
-  const generator = lockEntries().filter((entry) => /^tibiawikisql==/i.test(entry));
-  assert.equal(generator.length, 1, 'exactly one tibiawikisql entry');
-  assert.equal(generator[0]!.split(' ')[0], GENERATOR);
+/**
+ * GENERATOR_SHA256 is the approved wheel, so CI fails on a lock that records any other,
+ * whatever wrote it.
+ */
+test('the lock pins the generator build-index runs to the approved wheel', () => {
+  assert.deepEqual(generatorEntry(readFileSync(LOCK, 'utf8')), {
+    requirement: GENERATOR,
+    hashes: [GENERATOR_SHA256],
+  });
 });
 
-test('the lock header records the cutoff, the uv version, the Python range, the checks and the command', () => {
-  const header = /^(?:#.*\n)+/.exec(readFileSync(LOCK, 'utf8'))?.[0] ?? '';
+test('the lock header records the cutoff, the uv version, the Python range, the checks, the attestation and the command', () => {
+  const lock = readFileSync(LOCK, 'utf8');
+  const header = /^(?:#.*\n)+/.exec(lock)?.[0] ?? '';
   const field = (name: string) => new RegExp(`^# ${name}: (.+)$`, 'm').exec(header)?.[1];
+  // The attestation lock-generator verified is for the wheel the lock records.
+  const [hash] = generatorEntry(lock).hashes;
+  assert.equal(field('attested'), `sha256:${hash} refs/tags/v${GENERATOR_VERSION}`);
   const cutoff = field('cutoff');
   assert.match(cutoff ?? '', /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/, 'an absolute cutoff, as re-running needs it');
   assert.match(field('uv') ?? '', /^uv \d+\.\d+\.\d+ /, 'the uv --version output');

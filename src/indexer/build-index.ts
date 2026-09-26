@@ -9,11 +9,34 @@ import { createWikiApi, type WikiApi } from './wiki-api.ts';
 import { enrich, eligibleScenes, formatStats, IMAGE_TYPES, type Enricher } from './enrich.ts';
 
 /**
- * Pinned: the schema this server probes for is this generator's output. The build never
- * names it directly. `pnpm lock-generator` locks exactly this, and the build installs
- * that lock.
+ * The generator is tibia-sh's copy of tibiawiki-sql, released as a wheel on its GitHub
+ * release, never taken from PyPI. The schema this server probes for is this release's
+ * output. Its release workflow attests the wheel, and `pnpm lock-generator` verifies that
+ * attestation for the tag `v${GENERATOR_VERSION}` before it writes the lock.
  */
-export const GENERATOR = 'tibiawikisql==9.0.0';
+export const GENERATOR_VERSION = '9.0.0+tibiash.1';
+
+/** The repository whose release workflow builds and attests the generator wheel. */
+export const GENERATOR_REPO = 'tibia-sh/tibiawiki-sql';
+
+/** The release asset. The `+` in the tag is percent-encoded in the path, and not in the file name. */
+export const GENERATOR_WHEEL_URL =
+  `https://github.com/${GENERATOR_REPO}/releases/download/v${encodeURIComponent(GENERATOR_VERSION)}` +
+  `/tibiawikisql-${GENERATOR_VERSION}-py3-none-any.whl`;
+
+/**
+ * Pinned: the build never names the generator directly. `pnpm lock-generator` locks
+ * exactly this, and the build installs that lock.
+ */
+export const GENERATOR = `tibiawikisql @ ${GENERATOR_WHEEL_URL}`;
+
+/**
+ * The sha256 of the approved wheel, and the approval boundary. `pnpm lock-generator`
+ * refuses a download with any other digest, and the test suite fails on a lock that
+ * records any other, so a replaced release asset cannot reach a build. A new release
+ * means a new constant, reviewed in a pull request.
+ */
+export const GENERATOR_SHA256 = 'c0bbb67c7ffe31f2a6d8ad6f9338683e52c6f526c4ecceaf306ddbb792395d4a';
 
 /**
  * The Pythons the generator environment may be created with. The lock is compiled for

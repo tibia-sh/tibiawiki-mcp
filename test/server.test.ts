@@ -1,8 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  CONVINCE_COST_MEANING, FARE_MEANING, GOLD_PER_KILL_MEANING, IMAGE_MEANING, RASHID_PLACE_MEANING,
-  RUNS_AT_MEANING, SUMMON_COST_MEANING, inGameNameSchema, inGamePluralSchema, inGameArticleSchema,
+  CONVINCE_COST_MEANING, FARE_MEANING, GOLD_PER_KILL_MEANING, IMAGE_MEANING, ORIGIN_MEANING,
+  RASHID_PLACE_MEANING, RUNS_AT_MEANING, SUMMON_COST_MEANING, inGameNameSchema, inGamePluralSchema, inGameArticleSchema,
 } from '../src/domain.ts';
 import { CAPABILITIES } from '../src/server.ts';
 import { connect, connectTo, FIXTURE } from './harness.ts';
@@ -82,6 +82,7 @@ test('the instructions tell a model what the zeros and nulls in results mean', a
     `image: ${IMAGE_MEANING}`,
     RASHID_PLACE_MEANING,
     FARE_MEANING,
+    `origin: ${ORIGIN_MEANING}`,
   ]) {
     assert.ok(instructions.includes(meaning), `the instructions lack: ${meaning}`);
   }
@@ -91,6 +92,8 @@ test('the instructions tell a model what the zeros and nulls in results mean', a
   assert.match(GOLD_PER_KILL_MEANING, /^Estimated/);
   assert.match(RASHID_PLACE_MEANING, /city and position coordinates are null/);
   assert.match(FARE_MEANING, /0: free or not recorded/);
+  assert.match(instructions, /origin: Where the leg starts\./);
+  assert.match(ORIGIN_MEANING, /null: from another of the NPC's positions/);
 });
 
 test('each meaning in the instructions is the description of its output fields', async () => {
@@ -120,6 +123,9 @@ test('each meaning in the instructions is the description of its output fields',
     ['tibia_get destinations price',
       branch('npc').destinations.items.properties.price.description, FARE_MEANING],
     ['tibia_find_travel price', route.price.description, FARE_MEANING],
+    ['tibia_get destinations origin',
+      branch('npc').destinations.items.properties.origin.description, ORIGIN_MEANING],
+    ['tibia_find_travel origin', route.origin.description, ORIGIN_MEANING],
   ] as const) {
     assert.equal(description, meaning, where);
   }

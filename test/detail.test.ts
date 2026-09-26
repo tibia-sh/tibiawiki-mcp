@@ -141,6 +141,39 @@ test('an NPC returns its travel destinations with fares', async () => {
   await h.close();
 });
 
+// Harlow sails from Farmine and from Yalahar, so one recorded position and one city cannot say
+// where each leg starts.
+test('an NPC lists every recorded position and where each leg starts', async () => {
+  const h = await connect();
+  const harlow = await get(h, 'Harlow', 'npc');
+  assert.deepEqual(harlow.positions, [
+    { city: 'Farmine', subarea: 'Vengoth', geolabel: null, position: { x: 32856, y: 31548, z: 7 } },
+    { city: 'Yalahar', subarea: 'Yalahar Trade Quarter', geolabel: null, position: { x: 32837, y: 31365, z: 7 } },
+  ]);
+  assert.deepEqual(harlow.position, harlow.positions[0]!.position);
+  const notes = 'After mission 4 of the Blood Brothers Quest';
+  assert.deepEqual(harlow.destinations, [
+    { name: 'Vengoth', price: 100, origin: null, notes },
+    { name: 'Yalahar', price: 50, origin: 'Farmine', notes },
+  ]);
+  await h.close();
+});
+
+// The schedule says which day Rashid is where, and positions are the wiki's coordinates for
+// the places he stands, so he carries both.
+test('Rashid keeps his schedule and also lists his seven positions', async () => {
+  const h = await connect();
+  const rashid = await get(h, 'Rashid', 'npc');
+  assert.equal(rashid.rashidSchedule.length, 7);
+  assert.deepEqual(rashid.positions.map((p: any) => p.city), [
+    'Svargrond', 'Liberty Bay', 'Port Hope', 'Ankrahmun', 'Darashia', 'Edron', 'Carlin',
+  ]);
+  assert.deepEqual(rashid.positions[3]!, {
+    city: 'Ankrahmun', subarea: null, geolabel: 'Ankrahmun', position: { x: 33069, y: 32886, z: 6 },
+  });
+  await h.close();
+});
+
 // rashid_position.day is an integer 0-6, useless to an agent without names.
 test('Rashid returns a seven-day schedule with weekday names', async () => {
   const h = await connect();

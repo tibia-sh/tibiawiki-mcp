@@ -24,7 +24,7 @@ server state. Say so when it matters (a recently changed creature, a new update)
 | What changed in the game, and when | `tibia_find_updates` |
 | Where to sell a list of loot | `tibia_where_to_sell` |
 | What pasted loot messages hold and are worth | `tibia_parse_loot` |
-| Boat and carpet routes to a place or from a city | `tibia_find_travel` |
+| Boat and carpet routes to or from a place | `tibia_find_travel` |
 
 **Resolve names before fetching.** `tibia_get` takes an exact page name, the wiki
 title. If the user says "dragonlord", "that fire dragon" or a name the game prints,
@@ -50,11 +50,12 @@ items at their best NPC price. Pass `include_lines: true` for each line's items 
 client IDs and unit prices. `unresolvedEntries` and `unparsed` list the first 100,
 and the counts in `totals` cover them all.
 
-**Travel rows are single legs.** `tibia_find_travel` takes `to`, `from_city` or both,
-exact names in any case. Each row gives the NPC, its recorded city and position, the
-fare and `notes`. It does not plan journeys, so chain legs yourself. The index records
-no start per route and some NPCs work from more than one place, so read notes such as
-"From Meriana". A fare of 0 means free or not recorded, and `sort: "price"` puts it last.
+**Travel rows are single legs.** `tibia_find_travel` takes `to`, `from` or both, exact
+place names in any case. `from` matches the leg's start, its `origin`. Each row gives the
+NPC, the `origin`, the NPC's recorded city and position, the fare and `notes`. It does not
+plan journeys, so chain legs yourself. A null `origin` means the leg starts from another
+of the NPC's positions, which `tibia_get` lists as `positions`. A fare of 0 means free or
+not recorded, and `sort: "price"` puts it last.
 
 **Prefer `tibia_how_to_obtain` over two lookups.** It returns creature drops with
 chances, NPC vendors with prices, and quest rewards in one call. Reaching for
@@ -131,8 +132,9 @@ NPC, and without a type the call returns an error asking you to choose.
 - **item**: EAV `attributes` (attack, defense, required level), `keys`, `storeOffers`,
   `proficiencyPerks`, `boughtBy`, the `actualName` and `plural` the game prints, and
   `isStackable`, `isPickupable` and `isImmobile`
-- **npc**: `jobs`, `races`, `destinations` (travel with fares), `buys`, `sells`. Rashid
-  also carries `rashidSchedule`, his seven-day rotation
+- **npc**: `jobs`, `races`, `destinations` (travel with fares and each leg's `origin`),
+  `positions` (every recorded spot), `buys`, `sells`. Rashid also carries
+  `rashidSchedule`, his seven-day rotation
 - **quest**: `dangers` as creature names, `rewards`
 - **imbuement**: `materials` with amounts
 

@@ -1,7 +1,7 @@
 import { execFileSync, spawnSync } from 'node:child_process';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { basename, join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import { parseArgs } from 'node:util';
 import { GENERATOR_LOCK_PATH, GENERATOR_WHEEL_URL } from '../src/indexer/build-index.ts';
 import { lockGenerator } from '../src/indexer/generator-lock.ts';
@@ -62,7 +62,17 @@ try {
       if (install.error) throw install.error;
       return { status: install.status, stderr: install.stderr };
     },
-    write: (lock) => writeFileSync(GENERATOR_LOCK_PATH, lock),
+    // Written beside the lock and renamed over it, so an interrupted run never leaves a
+    // partial lock. The rename is atomic because both names are in one directory.
+    write: (lock) => {
+      const temp = join(dirname(GENERATOR_LOCK_PATH), `.${basename(GENERATOR_LOCK_PATH)}.${process.pid}.tmp`);
+      try {
+        writeFileSync(temp, lock);
+        renameSync(temp, GENERATOR_LOCK_PATH);
+      } finally {
+        rmSync(temp, { force: true });
+      }
+    },
     log: (line) => process.stderr.write(`${line}\n`),
   }, { cutoff: values.cutoff });
   process.stderr.write(`Wrote ${GENERATOR_LOCK_PATH} with cutoff ${cutoff}.\n`);

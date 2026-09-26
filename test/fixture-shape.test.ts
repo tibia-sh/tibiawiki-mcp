@@ -57,7 +57,7 @@ const REQUIRED_NON_EMPTY = [
   'outfit', 'outfit_quest', 'book', 'world', 'game_update', 'rashid_position',
   'creature_ability', 'creature_max_damage', 'creature_sound',
   'item_key', 'item_sound', 'item_store_offer', 'item_proficiency_perk',
-  'npc_job', 'npc_race', 'npc_destination', 'quest_danger',
+  'npc_job', 'npc_race', 'npc_destination', 'npc_location', 'quest_danger',
   'mcp_area_pattern', 'mcp_ability_area', 'mcp_schema_version', 'mcp_image', 'mcp_spell_area',
 ] as const;
 

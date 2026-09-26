@@ -60,8 +60,11 @@ const NAMED_BY_TYPE = {
 };
 // Captain Bluebear carries 12 npc_destination rows; the committed fixture had ZERO,
 // so "an NPC with destinations" could not have passed. Rashid anchors the 7-row
-// weekly schedule that rashid_position feeds.
-const NAMED_NPCS = ['Captain Bluebear', 'Rashid'];
+// weekly schedule that rashid_position feeds. Harlow and Sebastian each stand in two
+// places (npc_location) and sail from both, so their legs carry an origin: Harlow's
+// Yalahar leg leaves from Farmine while his Vengoth leg names none, and Sebastian's
+// Liberty Bay fare differs by the port he sails from.
+const NAMED_NPCS = ['Captain Bluebear', 'Rashid', 'Harlow', 'Sebastian'];
 // 60 quest_danger rows, and the quest tables were otherwise derived only via rewards.
 const NAMED_QUESTS = ['Forgotten Knowledge Quest'];
 
@@ -172,7 +175,7 @@ const USED = new Set([
   // is what keeps them small - their parents are already limited to named rows.
   'creature_ability', 'creature_max_damage', 'creature_sound',
   'item_key', 'item_sound', 'item_store_offer', 'item_proficiency_perk',
-  'npc_job', 'npc_race', 'npc_destination', 'quest_danger',
+  'npc_job', 'npc_race', 'npc_destination', 'npc_location', 'quest_danger',
   'imbuement_material', 'outfit_quest',
 ]);
 // rashid_position has no article_id (day, city, location, x, y, z) and is only 7 rows.

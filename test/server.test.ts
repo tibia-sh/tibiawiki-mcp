@@ -20,7 +20,7 @@ const LICENCE = 'licensed CC BY-SA.';
  */
 async function realisticHandshake() {
   const h = await connectTo(FIXTURE, {
-    generatedAt: '2026-09-24T00:58:39.504571+00:00', version: '9.0.0',
+    generatedAt: '2026-09-24T00:58:39.504571+00:00', version: '9.0.0+tibiash.1',
   });
   try {
     return { instructions: String(h.client.getInstructions()), tools: (await h.client.listTools()).tools };

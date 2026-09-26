@@ -169,7 +169,8 @@ export const FARE_MEANING = 'Route price in gold. 0: free or not recorded, see n
 export const ORIGIN_MEANING =
   "Where the leg starts. null: not recorded, it starts at one of the NPC's positions.";
 export const RACE_ID_MEANING =
-  'Tibia client race ID, not unique: boss phases can share one. null: the wiki records none.';
+  'Tibia client race ID, not unique: some creatures share one, such as boss phases. ' +
+  'null: the wiki records none.';
 
 /**
  * Creature numbers the wiki gives a meaning at 0, described once for every tool that

@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   CONVINCE_COST_MEANING, FARE_MEANING, GOLD_PER_KILL_MEANING, IMAGE_MEANING, ORIGIN_MEANING,
-  RASHID_PLACE_MEANING, RUNS_AT_MEANING, SUMMON_COST_MEANING, inGameNameSchema, inGamePluralSchema, inGameArticleSchema,
+  RACE_ID_MEANING, RASHID_PLACE_MEANING, RUNS_AT_MEANING, SUMMON_COST_MEANING, inGameNameSchema, inGamePluralSchema, inGameArticleSchema,
 } from '../src/domain.ts';
 import { CAPABILITIES } from '../src/server.ts';
 import { connect, connectTo, FIXTURE } from './harness.ts';
@@ -83,6 +83,7 @@ test('the instructions tell a model what the zeros and nulls in results mean', a
     RASHID_PLACE_MEANING,
     FARE_MEANING,
     `origin: ${ORIGIN_MEANING}`,
+    `raceId: ${RACE_ID_MEANING}`,
   ]) {
     assert.ok(instructions.includes(meaning), `the instructions lack: ${meaning}`);
   }
@@ -93,6 +94,8 @@ test('the instructions tell a model what the zeros and nulls in results mean', a
   assert.match(RASHID_PLACE_MEANING, /city and position coordinates are null/);
   assert.match(FARE_MEANING, /0: free or not recorded/);
   assert.match(instructions, /origin: Where the leg starts\./);
+  assert.ok(instructions.includes('raceId: Tibia client race ID, not unique'),
+    'the instructions say race IDs can be shared');
   assert.equal(ORIGIN_MEANING,
     "Where the leg starts. null: not recorded, it starts at one of the NPC's positions.");
 });
@@ -127,6 +130,8 @@ test('each meaning in the instructions is the description of its output fields',
     ['tibia_get destinations origin',
       branch('npc').destinations.items.properties.origin.description, ORIGIN_MEANING],
     ['tibia_find_travel origin', route.origin.description, ORIGIN_MEANING],
+    ['tibia_find_creatures raceId', creature.raceId.description, RACE_ID_MEANING],
+    ['tibia_get raceId', branch('creature').raceId.description, RACE_ID_MEANING],
   ] as const) {
     assert.equal(description, meaning, where);
   }

@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.13.1](https://github.com/tibia-sh/tibiawiki-mcp/compare/v0.13.0...v0.13.1) (2026-09-26)
+
+
+### Bug Fixes
+
+* build with generator 9.0.0+tibiash.2 ([690d600](https://github.com/tibia-sh/tibiawiki-mcp/commit/690d600216d41d877766dc603252bb1279291b0a))
+* reject dollar signs in lock text ([b80a8c5](https://github.com/tibia-sh/tibiawiki-mcp/commit/b80a8c5d510be81594084fa6184cd630bf2182d6))
+
 ## [0.13.0](https://github.com/tibia-sh/tibiawiki-mcp/compare/v0.12.0...v0.13.0) (2026-09-26)
 
 

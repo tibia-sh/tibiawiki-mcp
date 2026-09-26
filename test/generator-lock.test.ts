@@ -1,7 +1,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { GENERATOR } from '../src/indexer/build-index.ts';
-import { assertGeneratorLocked, generatorEntry, lockEntries } from '../src/indexer/generator-lock.ts';
+import { createHash } from 'node:crypto';
+import { GENERATOR, GENERATOR_VERSION, GENERATOR_WHEEL_URL } from '../src/indexer/build-index.ts';
+import {
+  assertGeneratorLocked, generatorEntry, lockEntries, lockGenerator, type LockSteps,
+} from '../src/indexer/generator-lock.ts';
 
 const ATTESTED = 'c0bbb67c7ffe31f2a6d8ad6f9338683e52c6f526c4ecceaf306ddbb792395d4a';
 const OTHER = '6b779871820528bb800e96a46b38efdd3cd89355985e0b406da32d838e021a5b';
@@ -89,4 +92,131 @@ test('a lock with comments reads as one entry per requirement', () => {
     `idna==3.10 --hash=sha256:${a}`,
     `colorama==0.4.6 ; sys_platform == 'win32' --hash=sha256:${b}`,
   ]);
+});
+
+/**
+ * Fake effects for `lockGenerator`, recording each call in order. The wheel is a few bytes,
+ * so the run approves their digest in place of GENERATOR_SHA256, and by default uv compiles
+ * a lock that records exactly that wheel. `attestStatus`, `requirements` and `failDryRun`
+ * make one step fail the way the real one reports it.
+ */
+function fakeSteps(opts: { attestStatus?: number; requirements?: (digest: string) => string; failDryRun?: string } = {}) {
+  const wheel = new TextEncoder().encode('not a real wheel');
+  const digest = createHash('sha256').update(wheel).digest('hex');
+  const calls: string[] = [];
+  const seen: { flags?: readonly string[]; attested?: Uint8Array; compiled?: string; dryRun: string[]; written?: string } =
+    { dryRun: [] };
+  const steps: LockSteps = {
+    fetchWheel: async (url) => { calls.push(`fetch ${url}`); return wheel; },
+    attest: (bytes, flags) => {
+      calls.push('attest');
+      seen.attested = bytes;
+      seen.flags = flags;
+      return opts.attestStatus ?? 0;
+    },
+    uvVersion: () => { calls.push('uv --version'); return 'uv 0.12.18 (test)'; },
+    compile: (args, input) => {
+      calls.push(`compile ${args.join(' ')}`);
+      seen.compiled = input;
+      return (opts.requirements ?? ((d) => `${GENERATOR} \\\n    --hash=sha256:${d}\n`))(digest);
+    },
+    dryRun: (lock, python, platform) => {
+      calls.push(`dry run ${python} ${platform}`);
+      seen.dryRun.push(lock);
+      return `${python} ${platform}` === opts.failDryRun
+        ? { status: 1, stderr: 'no wheel for this platform' }
+        : { status: 0, stderr: '' };
+    },
+    write: (lock) => { calls.push('write'); seen.written = lock; },
+    log: () => {},
+  };
+  return { steps, calls, seen, digest, wheel };
+}
+
+const CUTOFF = '2026-09-06T15:36:25Z';
+const PLATFORMS = [
+  'x86_64-unknown-linux-gnu', 'aarch64-unknown-linux-gnu', 'x86_64-apple-darwin', 'aarch64-apple-darwin',
+  'x86_64-pc-windows-msvc',
+];
+const COMPILE =
+  `compile pip compile - --universal --generate-hashes --no-build --python-version 3.10 --exclude-newer ${CUTOFF} --no-header`;
+
+test('lockGenerator refuses a bad cutoff before any step runs', async () => {
+  const fake = fakeSteps();
+  await assert.rejects(
+    lockGenerator(fake.steps, { cutoff: '2026-09-06', approvedSha256: fake.digest }),
+    /--cutoff must be an absolute UTC time/,
+  );
+  assert.deepEqual(fake.calls, []);
+});
+
+test('lockGenerator runs fetch, attest, compile, the dry runs and the write in that order', async () => {
+  const fake = fakeSteps();
+  const result = await lockGenerator(fake.steps, { cutoff: CUTOFF, approvedSha256: fake.digest });
+  assert.deepEqual(result, { cutoff: CUTOFF });
+  const dryRuns = ['3.10', '3.11', '3.12', '3.13'].flatMap((python) =>
+    PLATFORMS.map((platform) => `dry run ${python} ${platform}`));
+  assert.deepEqual(fake.calls, [
+    `fetch ${GENERATOR_WHEEL_URL}`, 'attest', 'uv --version', COMPILE, ...dryRuns, 'write',
+  ]);
+  assert.equal(fake.seen.compiled, `${GENERATOR}\n`);
+  const written = fake.seen.written ?? '';
+  assert.ok(
+    written.split('\n').includes(`# attested: sha256:${fake.digest} refs/tags/v${GENERATOR_VERSION}`),
+    `the header has no attested line for the wheel:\n${written}`,
+  );
+  assert.ok(written.endsWith(`${GENERATOR} \\\n    --hash=sha256:${fake.digest}\n`), 'the lock ends with what uv compiled');
+  // Every dry run checked the lock that was written.
+  assert.deepEqual(new Set(fake.seen.dryRun), new Set([written]));
+});
+
+test('lockGenerator verifies the attestation with exactly the release workflow flags', async () => {
+  const fake = fakeSteps();
+  await lockGenerator(fake.steps, { cutoff: CUTOFF, approvedSha256: fake.digest });
+  assert.deepEqual(fake.seen.attested, fake.wheel, 'the attested bytes are the downloaded wheel');
+  assert.deepEqual(fake.seen.flags, [
+    '--repo', 'tibia-sh/tibiawiki-sql',
+    '--signer-workflow', 'tibia-sh/tibiawiki-sql/.github/workflows/release.yml',
+    '--source-ref', `refs/tags/v${GENERATOR_VERSION}`,
+    '--deny-self-hosted-runners',
+  ]);
+});
+
+test('lockGenerator refuses a wheel whose digest is not the approved one, before attest, compile or write', async () => {
+  const fake = fakeSteps();
+  // No approvedSha256: the approved digest is GENERATOR_SHA256, which these bytes are not.
+  await assert.rejects(
+    lockGenerator(fake.steps, { cutoff: CUTOFF }),
+    (error: Error) => error.message.includes(fake.digest) && /not the approved/.test(error.message),
+  );
+  assert.deepEqual(fake.calls, [`fetch ${GENERATOR_WHEEL_URL}`]);
+});
+
+test('lockGenerator stops on a failed attestation, before compile or write', async () => {
+  const fake = fakeSteps({ attestStatus: 1 });
+  await assert.rejects(
+    lockGenerator(fake.steps, { cutoff: CUTOFF, approvedSha256: fake.digest }),
+    /gh attestation verify` refused the wheel .*gh exit 1/,
+  );
+  assert.deepEqual(fake.calls, [`fetch ${GENERATOR_WHEEL_URL}`, 'attest']);
+});
+
+test('lockGenerator refuses a compiled lock that records another wheel, before the dry runs or write', async () => {
+  const other = 'f'.repeat(64);
+  const fake = fakeSteps({ requirements: () => `${GENERATOR} \\\n    --hash=sha256:${other}\n` });
+  await assert.rejects(
+    lockGenerator(fake.steps, { cutoff: CUTOFF, approvedSha256: fake.digest }),
+    (error: Error) => error.message.includes(other) && error.message.includes(fake.digest),
+  );
+  assert.deepEqual(fake.calls, [`fetch ${GENERATOR_WHEEL_URL}`, 'attest', 'uv --version', COMPILE]);
+});
+
+test('lockGenerator writes nothing when one dry run fails', async () => {
+  const fake = fakeSteps({ failDryRun: '3.12 x86_64-pc-windows-msvc' });
+  await assert.rejects(
+    lockGenerator(fake.steps, { cutoff: CUTOFF, approvedSha256: fake.digest }),
+    /does not install without a build on CPython 3\.12 for x86_64-pc-windows-msvc \(uv exit 1\), so it was not written\.\nno wheel/,
+  );
+  assert.equal(fake.calls.at(-1), 'dry run 3.12 x86_64-pc-windows-msvc');
+  assert.ok(!fake.calls.includes('write'));
 });

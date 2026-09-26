@@ -12,54 +12,109 @@ import {
 /** The generator's PEP 503 normalized project name. */
 const GENERATOR_NAME = 'tibiawikisql';
 
-/**
- * The lock's requirements as uv reads them, one string each, whitespace collapsed. A
- * comment (`#` at the start of a line or after whitespace) is dropped from each physical
- * line first, and only then does a trailing backslash join a line to the next. uv ends a
- * comment at the newline, so a backslash inside one continues nothing, and the next line
- * is a requirement of its own that must not hide inside the comment.
- */
-export function lockEntries(lock: string): string[] {
-  const found: string[] = [];
-  let entry = '';
-  const end = () => {
-    const text = entry.trim().replace(/\s+/g, ' ');
-    if (text !== '') found.push(text);
-    entry = '';
-  };
-  for (const physical of lock.split('\n')) {
-    const line = physical.replace(/(?:^|\s)#.*/, '').trimEnd();
-    if (line.endsWith('\\')) {
-      entry += `${line.slice(0, -1)} `;
-    } else {
-      entry += line;
-      end();
-    }
-  }
-  end();
-  return found;
+/** One requirement of a lock: its PEP 503 normalized name, the requirement as written, and its sha256 digests. */
+export interface LockEntry {
+  name: string;
+  requirement: string;
+  hashes: string[];
 }
 
-/** A requirement's project name, normalized as PEP 503 compares names. */
-const projectName = (entry: string): string =>
-  (/^[A-Za-z0-9][A-Za-z0-9._-]*/.exec(entry)?.[0] ?? '').toLowerCase().replace(/[-_.]+/g, '-');
+/** A pinned dependency as uv writes it: `name==version`, with an optional ` ; <marker>`. */
+const PINNED = /^([A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?)==([0-9][0-9A-Za-z.!+_-]*)(?: ; (.+))?$/;
+
+/** One hash of the entry above, and ` \` when another hash follows. */
+const HASH = /^ {4}--hash=sha256:([0-9a-f]{64})( \\)?$/;
+
+/** The indented notes uv writes under an entry: `# via x`, or `# via` and then `#   x` lines. */
+const VIA = /^ {4}# via(?: \S.*)?$|^ {4}# {3}\S+$/;
+
+const lineError = (index: number, line: string, why: string): Error =>
+  new Error(`Line ${index + 1} of the lock ${why}: ${JSON.stringify(line)}`);
 
 /**
- * The lock's one `tibiawikisql` entry: the requirement as written, without its `--hash`
- * options, and the sha256 digests those options name. Throws unless there is exactly one
- * such entry, and on any hash that is not a sha256 digest.
+ * Reads a lock that must be exactly what `uv pip compile --generate-hashes` writes, and
+ * rejects anything else, naming the line. pip and uv read a requirements file more
+ * leniently than this, and every leniency has let a line hide from a looser reader, so
+ * the grammar is closed:
+ *
+ * - Lines end in LF alone. A `\r` anywhere is rejected, because pip and uv end a line at a
+ *   bare CR too.
+ * - A line starting with `#` is a comment. The indented `# via` notes uv writes are allowed
+ *   right after an entry's last hash.
+ * - An entry is `name==version`, with an optional ` ; <marker>`, or exactly GENERATOR,
+ *   and ends in ` \`. Its hashes follow one per line, `    --hash=sha256:` and 64
+ *   lowercase hex digits, each but the last ending in ` \`. A marker holds no `#` or `\`,
+ *   and no word starting with `-`, which pip would read as the start of its options.
+ * - Nothing else: no option lines such as `-r`, `-e`, `-c` or `--index-url`, no blank
+ *   lines, no entry without a hash, no text after a hash, and no project twice.
+ */
+export function parseLock(lock: string): LockEntry[] {
+  const cr = lock.indexOf('\r');
+  if (cr !== -1) {
+    throw new Error(
+      `Line ${lock.slice(0, cr).split('\n').length} of the lock has a carriage return. ` +
+        'Its lines end in LF alone.',
+    );
+  }
+  const lines = lock.split('\n');
+  if (lines.at(-1) === '') lines.pop();
+  const entries: LockEntry[] = [];
+  // The entry whose last line ended in ` \`, so its next hash line comes next.
+  let open: LockEntry | undefined;
+  // Whether the line above ended an entry, or was a `# via` note under it.
+  let underEntry = false;
+  for (const [index, line] of lines.entries()) {
+    const hash = HASH.exec(line);
+    if (open) {
+      if (!hash) throw lineError(index, line, `should be the next --hash=sha256 line of ${open.name}`);
+      open.hashes.push(hash[1]!);
+      if (hash[2] === undefined) {
+        open = undefined;
+        underEntry = true;
+      }
+      continue;
+    }
+    if (hash) throw lineError(index, line, 'is a hash outside an entry');
+    if (VIA.test(line)) {
+      if (!underEntry) throw lineError(index, line, 'is a via note outside an entry');
+      continue;
+    }
+    underEntry = false;
+    if (line.startsWith('#')) continue;
+    if (!line.endsWith(' \\')) {
+      throw lineError(index, line, 'is not a requirement with its hashes on the lines below');
+    }
+    const requirement = line.slice(0, -2);
+    let name = GENERATOR_NAME;
+    if (requirement !== GENERATOR) {
+      const pinned = PINNED.exec(requirement);
+      if (!pinned) throw lineError(index, line, 'is neither name==version nor the generator');
+      const marker = pinned[3];
+      if (marker !== undefined && /[#\\]|(?:^|\s)-/.test(marker)) {
+        throw lineError(index, line, 'has a marker uv does not write');
+      }
+      name = pinned[1]!.toLowerCase().replace(/[-_.]+/g, '-');
+    }
+    if (entries.some((entry) => entry.name === name)) {
+      throw lineError(index, line, `names ${name} a second time`);
+    }
+    open = { name, requirement, hashes: [] };
+    entries.push(open);
+  }
+  if (open) throw new Error(`The lock ends inside the ${open.name} entry, before its last hash.`);
+  return entries;
+}
+
+/**
+ * The lock's one `tibiawikisql` entry: the requirement as written, and the sha256 digests
+ * of its hashes. Throws on a lock `parseLock` rejects, and on one without that entry.
  */
 export function generatorEntry(lock: string): { requirement: string; hashes: string[] } {
-  const found = lockEntries(lock).filter((entry) => projectName(entry) === GENERATOR_NAME);
+  const found = parseLock(lock).filter((entry) => entry.name === GENERATOR_NAME);
   if (found.length !== 1) {
     throw new Error(`The lock must have exactly one ${GENERATOR_NAME} entry, found ${found.length}.`);
   }
-  const [requirement = '', ...options] = found[0]!.split(' --hash=');
-  const hashes = options.map((option) => {
-    const digest = /^sha256:([0-9a-f]{64})$/.exec(option)?.[1];
-    if (digest === undefined) throw new Error(`The ${GENERATOR_NAME} entry has a hash that is not sha256: ${option}`);
-    return digest;
-  });
+  const { requirement, hashes } = found[0]!;
   return { requirement, hashes };
 }
 
@@ -148,7 +203,9 @@ export interface LockSteps {
  * header is left out. It would repeat the command without the uv version or the
  * requirement uv read on stdin.
  *
- * `approvedSha256` is GENERATOR_SHA256 unless a test passes the digest of its fake wheel.
+ * `approvedSha256` is a test seam, and `scripts/lock-generator.ts` never passes it. It
+ * defaults to GENERATOR_SHA256, and a test passes the digest of its fake wheel instead,
+ * because it cannot produce the approved wheel's bytes.
  */
 export async function lockGenerator(
   steps: LockSteps,

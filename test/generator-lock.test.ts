@@ -3,20 +3,20 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { GENERATOR, GENERATOR_VERSION, GENERATOR_WHEEL_URL } from '../src/indexer/build-index.ts';
 import {
-  assertGeneratorLocked, generatorEntry, lockEntries, lockGenerator, type LockSteps,
+  assertGeneratorLocked, generatorEntry, lockGenerator, parseLock, type LockSteps,
 } from '../src/indexer/generator-lock.ts';
 
 const ATTESTED = 'c0bbb67c7ffe31f2a6d8ad6f9338683e52c6f526c4ecceaf306ddbb792395d4a';
 const OTHER = '6b779871820528bb800e96a46b38efdd3cd89355985e0b406da32d838e021a5b';
 
-/** A lock as `uv pip compile --generate-hashes` writes one, around the generator's entry. */
+/** A lock as `uv pip compile --generate-hashes` writes one, around the generator's entry, if any. */
 const lock = (generator: string) =>
   [
     '# a header line',
     'requests==2.34.2 \\',
     `    --hash=sha256:${'a'.repeat(64)}`,
     '    # via tibiawikisql',
-    generator,
+    ...(generator === '' ? [] : [generator]),
     'typing-extensions==4.16.0 \\',
     `    --hash=sha256:${'b'.repeat(64)}`,
     '',
@@ -55,10 +55,10 @@ test('a lock without a tibiawikisql entry throws', () => {
 
 test('a lock with two tibiawikisql entries throws', () => {
   const twice = lock(`${urlEntry(ATTESTED)}\n${urlEntry(ATTESTED)}`);
-  assert.throws(() => generatorEntry(twice), /found 2/);
+  assert.throws(() => generatorEntry(twice), /names tibiawikisql a second time/);
   // The name is matched as a project name, so another spelling of it is the same entry.
   const respelled = lock(`${urlEntry(ATTESTED)}\nTibiaWikiSQL==9.0.0 \\\n    --hash=sha256:${OTHER}`);
-  assert.throws(() => generatorEntry(respelled), /found 2/);
+  assert.throws(() => generatorEntry(respelled), /names tibiawikisql a second time/);
 });
 
 test('a PyPI pin of the generator throws, since it is not the attested wheel', () => {
@@ -69,30 +69,62 @@ test('a PyPI pin of the generator throws, since it is not the attested wheel', (
 
 // uv ends a comment at the physical newline, so a backslash at the end of a comment does
 // not continue it. Read the other way, the next line would hide inside the comment.
-test('a requirement after a comment ending in a backslash is an entry of its own', () => {
+test('a requirement after a comment ending in a backslash is rejected', () => {
   const hidden = `${lock(urlEntry(ATTESTED))}# note \\\n${GENERATOR} --hash=sha256:${OTHER}\n`;
-  assert.throws(() => generatorEntry(hidden), /found 2/);
-  assert.throws(() => assertGeneratorLocked(hidden, GENERATOR, ATTESTED), /found 2/);
+  assert.throws(() => generatorEntry(hidden), /Line 10 of the lock is not a requirement with its hashes/);
+  assert.throws(() => assertGeneratorLocked(hidden, GENERATOR, ATTESTED), /Line 10 of the lock/);
 });
 
-test('a lock with comments reads as one entry per requirement', () => {
+test('parseLock reads a lock with markers, via notes and several hashes per entry', () => {
   const [a, b] = ['a'.repeat(64), 'b'.repeat(64)];
-  assert.deepEqual(lockEntries([
+  assert.deepEqual(parseLock([
     '# a header line, # and a second hash in it',
     'requests==2.34.2 \\',
     `    --hash=sha256:${a} \\`,
     `    --hash=sha256:${b}`,
     '    # via tibiawikisql',
-    `idna==3.10 --hash=sha256:${a}  # an inline note`,
+    'Typing_Extensions==4.16.0 \\',
+    `    --hash=sha256:${a}`,
+    '    # via',
+    '    #   pydantic',
+    '    #   pypika',
     'colorama==0.4.6 ; sys_platform == \'win32\' \\',
     `    --hash=sha256:${b}`,
+    `${GENERATOR} \\`,
+    `    --hash=sha256:${ATTESTED}`,
     '',
   ].join('\n')), [
-    `requests==2.34.2 --hash=sha256:${a} --hash=sha256:${b}`,
-    `idna==3.10 --hash=sha256:${a}`,
-    `colorama==0.4.6 ; sys_platform == 'win32' --hash=sha256:${b}`,
+    { name: 'requests', requirement: 'requests==2.34.2', hashes: [a, b] },
+    { name: 'typing-extensions', requirement: 'Typing_Extensions==4.16.0', hashes: [a] },
+    { name: 'colorama', requirement: "colorama==0.4.6 ; sys_platform == 'win32'", hashes: [b] },
+    { name: 'tibiawikisql', requirement: GENERATOR, hashes: [ATTESTED] },
   ]);
 });
+
+/** Each is a lock uv would not write, and the line parseLock must name in rejecting it. */
+const HASH_A = `    --hash=sha256:${'a'.repeat(64)}`;
+const REJECTED: Array<[string, string, RegExp]> = [
+  ['CRLF line endings', `requests==2.34.2 \\\r\n${HASH_A}\r\n`, /Line 1 of the lock has a carriage return/],
+  ['a -r line', `-r other.txt\nrequests==2.34.2 \\\n${HASH_A}\n`, /Line 1 of the lock is not a requirement/],
+  ['an --index-url line', `--index-url https://example.invalid/simple \\\n${HASH_A}\n`, /Line 1 of the lock is neither/],
+  ['a -e line', `-e ./local \\\n${HASH_A}\n`, /Line 1 of the lock is neither/],
+  ['a duplicate dependency', `requests==2.34.2 \\\n${HASH_A}\nRequests==2.34.1 \\\n${HASH_A}\n`, /Line 3 of the lock names requests a second time/],
+  ['an entry without a hash', 'requests==2.34.2\n', /Line 1 of the lock is not a requirement with its hashes/],
+  ['an entry whose hashes never come', 'requests==2.34.2 \\\n', /ends inside the requests entry/],
+  ['a hash in uppercase hex', `requests==2.34.2 \\\n    --hash=sha256:${'A'.repeat(64)}\n`, /Line 2 of the lock should be the next --hash/],
+  ['text after a hash', `requests==2.34.2 \\\n${HASH_A} --hash=sha256:${'b'.repeat(64)}\n`, /Line 2 of the lock should be the next --hash/],
+  ['a blank line inside an entry', `requests==2.34.2 \\\n\n${HASH_A}\n`, /Line 2 of the lock should be the next --hash/],
+  ['a blank line between entries', `requests==2.34.2 \\\n${HASH_A}\n\nidna==3.19 \\\n${HASH_A}\n`, /Line 3 of the lock is not a requirement/],
+  ['a stray hash', `requests==2.34.2 \\\n${HASH_A}\n${HASH_A}\n`, /Line 3 of the lock is a hash outside an entry/],
+  ['a via note before any entry', `    # via requests\nrequests==2.34.2 \\\n${HASH_A}\n`, /Line 1 of the lock is a via note outside an entry/],
+  ['a marker with an option in it', `requests==2.34.2 ; python_version > "3" --hash=sha256:${'b'.repeat(64)} \\\n${HASH_A}\n`, /Line 1 of the lock has a marker uv does not write/],
+  ['another URL for the generator', `tibiawikisql @ https://example.invalid/t.whl \\\n${HASH_A}\n`, /Line 1 of the lock is neither/],
+];
+for (const [what, text, error] of REJECTED) {
+  test(`parseLock rejects ${what}`, () => {
+    assert.throws(() => parseLock(text), error);
+  });
+}
 
 /**
  * Fake effects for `lockGenerator`, recording each call in order. The wheel is a few bytes,
@@ -219,4 +251,17 @@ test('lockGenerator writes nothing when one dry run fails', async () => {
   );
   assert.equal(fake.calls.at(-1), 'dry run 3.12 x86_64-pc-windows-msvc');
   assert.ok(!fake.calls.includes('write'));
+});
+
+// pip and uv end a line at a bare CR, so what follows the CR is an entry of its own and
+// not marker text. Found by codex: a false marker hides a second generator entry.
+test('a generator entry after a bare CR is rejected', () => {
+  const hidden = [
+    `requests==2.34.2 ; python_version == "0"\r${GENERATOR} --hash=sha256:${OTHER} \\`,
+    `    --hash=sha256:${'a'.repeat(64)}`,
+    `${GENERATOR} \\`,
+    `    --hash=sha256:${ATTESTED}`,
+    '',
+  ].join('\n');
+  assert.throws(() => assertGeneratorLocked(hidden, GENERATOR, ATTESTED), /Line 1 of the lock has a carriage return/);
 });

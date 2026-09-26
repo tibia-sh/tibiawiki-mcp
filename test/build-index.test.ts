@@ -12,7 +12,7 @@ import { resolveDbPath } from '../src/db.ts';
 import {
   buildIndex, GENERATOR, GENERATOR_PYTHON, GENERATOR_SHA256, GENERATOR_VERSION, type Runner,
 } from '../src/indexer/build-index.ts';
-import { generatorEntry, lockEntries as entriesOf } from '../src/indexer/generator-lock.ts';
+import { generatorEntry, parseLock } from '../src/indexer/generator-lock.ts';
 import { eligibleScenes, MCP_SCHEMA_VERSION, type EnrichStats } from '../src/indexer/enrich.ts';
 import { FIXTURE, tempDirs } from './harness.ts';
 
@@ -99,10 +99,10 @@ function captureStderr() {
 }
 
 /**
- * The committed lock's requirements as uv reads them. Parsed by the lock checks rather than
- * through build-index's own count, so a miscount there cannot pass by agreeing with itself.
+ * The committed lock's requirements, read by the lock's own grammar rather than through
+ * build-index's count, so a miscount there cannot pass by agreeing with itself.
  */
-const lockEntries = (): string[] => entriesOf(readFileSync(LOCK, 'utf8'));
+const lockEntries = () => parseLock(readFileSync(LOCK, 'utf8'));
 
 test('runs uv venv, uv pip install and uv run in that order, then installs atomically', async () => {
   const dir = scratch();
@@ -670,14 +670,13 @@ test('zero eligible scenes fails rather than passing on NaN', async () => {
  * build time. These pin the committed lock itself, so a bad refresh fails here first.
  */
 test('the generator lock pins every dependency with == and hashes it', () => {
-  // The generator's own entry is a URL, pinned by the next test.
-  const entries = lockEntries().filter((entry) => !entry.startsWith(`${GENERATOR} `));
+  // parseLock admits nothing but exact name==version pins and the generator's own entry,
+  // pinned by the next test, each with its hashes. An exact version starts with a digit
+  // and holds no `*`, so `==0.*` and `===` are refused.
+  const dependencies = lockEntries().filter((entry) => entry.requirement !== GENERATOR);
   // tibiawikisql alone would parse too, but it has dependencies, and they must be locked.
-  assert.ok(entries.length > 1, `the lock lists ${entries.length} dependencies`);
-  // An exact version starts with a digit and holds no `*`, so `==0.*` and `===` are refused.
-  const pinnedAndHashed =
-    /^[A-Za-z0-9][A-Za-z0-9._-]*==[0-9][0-9A-Za-z.!+_-]*(?: ; (?:(?! --hash=).)+)?(?: --hash=sha256:[0-9a-f]{64})+$/;
-  assert.deepEqual(entries.filter((entry) => !pinnedAndHashed.test(entry)), []);
+  assert.ok(dependencies.length > 1, `the lock lists ${dependencies.length} dependencies`);
+  assert.deepEqual(dependencies.filter((entry) => !entry.requirement.includes('==') || entry.hashes.length === 0), []);
 });
 
 /**
@@ -695,7 +694,20 @@ test('a second generator entry after a comment ending in a backslash fails the l
   // uv reads the appended line as a requirement of its own, so a lock like this would let
   // uv accept a second wheel.
   const hidden = `${readFileSync(LOCK, 'utf8')}# note \\\n${GENERATOR} --hash=sha256:${'0'.repeat(64)}\n`;
-  assert.throws(() => assertApprovedWheel(hidden), /found 2/);
+  assert.throws(() => assertApprovedWheel(hidden), /of the lock is not a requirement with its hashes/);
+});
+
+test('a second generator entry after a bare CR fails the lock check', () => {
+  // uv ends a line at a bare CR, so the text after it is an entry of its own, however a
+  // reader that splits on LF alone would take it as the marker it follows.
+  const lock = readFileSync(LOCK, 'utf8');
+  const first = /^[a-z].* \\$/m.exec(lock)![0];
+  const hidden = lock.replace(
+    first,
+    `${first.slice(0, -2)} ; python_version == "0"\r${GENERATOR} --hash=sha256:${'0'.repeat(64)} \\`,
+  );
+  assert.notEqual(hidden, lock);
+  assert.throws(() => assertApprovedWheel(hidden), /has a carriage return/);
 });
 
 test('the lock header records the cutoff, the uv version, the Python range, the checks, the attestation and the command', () => {

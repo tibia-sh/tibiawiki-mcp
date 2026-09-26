@@ -415,15 +415,33 @@ test('from matches the leg\'s start, so Sebastian sails from Meriana to Liberty 
   }
 });
 
+// Cornell stands in Edron, and his Edron leg names no origin while his Grimvale leg leaves
+// from Edron. from matches the recorded start alone, not the NPC's city or the destination.
 test('a leg with no recorded origin comes back as null and no from value matches it', async () => {
   const h = await connect();
   try {
-    const vengoth = await find(h.client, { to: 'Vengoth' });
-    assert.equal(vengoth.totalMatches, 1);
-    const harlow = vengoth.results[0]!;
-    assert.deepEqual([harlow.npc, harlow.price, harlow.origin], ['Harlow', 100, null]);
-    const from = await find(h.client, { from: 'Vengoth' });
-    assert.deepEqual([from.totalMatches, from.results], [0, []]);
+    const edron = await findAll(h.client, { to: 'Edron' });
+    assert.equal(route(edron, 'Cornell', 'Edron').origin, null);
+    assert.equal(route(edron, 'Cornell', 'Edron').price, 100);
+    const from = await find(h.client, { from: 'Edron' });
+    assert.deepEqual(from.results.map((r) => [r.npc, r.to, r.price, r.origin]),
+      [['Cornell', 'Grimvale', 100, 'Edron']]);
+    assert.equal(from.totalMatches, 1);
+  } finally {
+    await h.close();
+  }
+});
+
+// Harlow and Tarak each shuttle between two places, so each leg starts where the other ends.
+test('a shuttle\'s legs each start at the other leg\'s destination', async () => {
+  const h = await connect();
+  try {
+    const legs = async (from: string) =>
+      (await find(h.client, { from })).results.map((r) => [r.npc, r.to, r.price, r.origin]);
+    assert.deepEqual(await legs('Vengoth'), [['Harlow', 'Yalahar', 50, 'Vengoth']]);
+    assert.deepEqual(await legs('Yalahar'), [['Harlow', 'Vengoth', 100, 'Yalahar']]);
+    assert.deepEqual(await legs('Monument Tower'), [['Tarak', 'Sunken Quarter', 0, 'Monument Tower']]);
+    assert.deepEqual(await legs('Sunken Quarter'), [['Tarak', 'Monument Tower', 50, 'Sunken Quarter']]);
   } finally {
     await h.close();
   }

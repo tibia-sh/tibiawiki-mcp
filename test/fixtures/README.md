@@ -28,8 +28,12 @@ nothing:
 - **Captain Bluebear** — 12 `npc_destination` rows. The fixture previously held
   **zero**, so "an NPC with destinations" could not have passed.
 - **Harlow** and **Sebastian** — two `npc_location` rows each, and legs that carry an
-  `origin`. Harlow's Yalahar leg leaves from Farmine while his Vengoth leg names none,
+  `origin`. Harlow's Vengoth leg leaves from Yalahar and his Yalahar leg from Vengoth,
   and Sebastian's Liberty Bay fare is 50 from Meriana and 100 from Nargor.
+- **Tarak** — shuttles between Monument Tower (fare 50) and the Sunken Quarter (fare 0),
+  each leg leaving from the other's destination.
+- **Cornell** — his Edron leg names no `origin` while his Grimvale leg leaves from Edron,
+  the anchor proving a null-origin leg matches no `from` value.
 - **Golden Key** — 7 `item_key` rows. `item_key` is one-to-many (Silver Key has 61),
   so a singular field read with `.get()` would silently drop rows.
 - **The Plasmother** — three abilities all named `Poison Ball`. `(creature_id, name)`
@@ -69,8 +73,8 @@ whose key is single-quoted upstream and whose grid uses cell value 4.
 
 ## Reproducing it
 
-The committed fixture was cut from the index `@tibia.sh/tibiawiki-data` 3.1.0 ships,
-whose `database_info` `version` is `9.0.0+tibiash.1`. With that version installed:
+The committed fixture was cut from the index `@tibia.sh/tibiawiki-data` 3.2.0 ships,
+whose `database_info` `version` is `9.0.0+tibiash.2`. With that version installed:
 
 ```bash
 node scripts/make-fixture.mjs node_modules/@tibia.sh/tibiawiki-data/index.db \

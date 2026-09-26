@@ -8,7 +8,7 @@ import {
   DETAILED_CREATURE_FIELDS, DETAILED_ITEM_FIELDS, coerceAttribute, type EntityType,
   runsAtSchema, summonCostSchema, convinceCostSchema, GOLD_PER_KILL, goldPerKillSchema,
   positionSchema, RASHID, RASHID_SCHEDULE, rashidScheduleSchema, rashidScheduleDay, buyerPlace,
-  buyerCitySchema, buyerPositionSchema, IMAGE_MEANING, fareSchema, originSchema,
+  buyerCitySchema, buyerPositionSchema, IMAGE_MEANING, fareSchema, originSchema, raceIdSchema,
   inGameNameSchema, inGamePluralSchema, inGameArticleSchema,
 } from '../domain.ts';
 
@@ -66,6 +66,7 @@ const creatureOut = z.object({
   summonCost: summonCostSchema,
   convinceCost: convinceCostSchema,
   goldPerKill: goldPerKillSchema,
+  raceId: raceIdSchema,
   modifiers: z.record(z.string(), z.number().nullable()),
   loot: z.array(z.object({
     item: z.string(),
@@ -535,6 +536,7 @@ export function registerGet(server: McpServer, handle: TibiaDb): void {
           pushObjects: bool(row.push_objects), illusionable: bool(row.illusionable),
           summonCost: num(row.summon_cost), convinceCost: num(row.convince_cost),
           goldPerKill: num(goldPerKill.get(row.article_id as number)?.gold_per_kill),
+          raceId: num(row.race_id),
           modifiers: Object.fromEntries(ELEMENTS.map((e) => [e, num(row[`modifier_${e}`])])),
           loot: drops.all(row.article_id as number).map((d) => ({
             item: String(d.item), chance: num(d.chance), min: num(d.lo), max: num(d.hi),

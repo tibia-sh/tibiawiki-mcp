@@ -5,7 +5,7 @@ import {
   ELEMENTS, elementSchema, modifierColumn, WEAK_TO, RESISTANT_TO,
   CREATURE_BESTIARY_LEVELS, CREATURE_SORTS, creatureSort, statusClause, hitpointsExpr, likePattern,
   runsAtSchema, summonCostSchema, convinceCostSchema, GOLD_PER_KILL, goldPerKillSchema,
-  inGameNameSchema,
+  inGameNameSchema, raceIdSchema,
 } from '../domain.ts';
 import { encodeCursor, decodeCursor } from '../cursor.ts';
 
@@ -25,6 +25,7 @@ const outputSchema = z.object({
     summonCost: summonCostSchema,
     convinceCost: convinceCostSchema,
     goldPerKill: goldPerKillSchema,
+    raceId: raceIdSchema,
   })),
   totalMatches: z.number(),
   nextCursor: z.string().optional(),
@@ -151,6 +152,7 @@ export function registerFindCreatures(server: McpServer, handle: TibiaDb): void 
           summonCost: num(row.summon_cost),
           convinceCost: num(row.convince_cost),
           goldPerKill: num(row.gold_per_kill),
+          raceId: num(row.race_id),
         })),
         totalMatches: total.c,
         ...(offset + args.limit < total.c ? { nextCursor: encodeCursor(offset + args.limit) } : {}),

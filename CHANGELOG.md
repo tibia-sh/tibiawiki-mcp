@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.14.0](https://github.com/tibia-sh/tibiawiki-mcp/compare/v0.13.1...v0.14.0) (2026-09-26)
+
+
+### Features
+
+* expose creature race IDs ([1691a1d](https://github.com/tibia-sh/tibiawiki-mcp/commit/1691a1de29175e9ed2cdddda0bf96175f3c97691))
+* require creature race IDs ([580db29](https://github.com/tibia-sh/tibiawiki-mcp/commit/580db294c4cd3bf1bfa26e268ccce301313a0995))
+
+
+### Bug Fixes
+
+* say race IDs can be shared ([89f4efc](https://github.com/tibia-sh/tibiawiki-mcp/commit/89f4efc055020cb2b29f741b677802be333aa6b0))
+
 ## [0.13.1](https://github.com/tibia-sh/tibiawiki-mcp/compare/v0.13.0...v0.13.1) (2026-09-26)
 
 

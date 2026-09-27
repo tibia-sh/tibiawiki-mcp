@@ -4,10 +4,10 @@
 
 ## A normal release
 
-1. A releasable commit, such as a `feat:` or a `fix:`, lands on `main`. The push runs `release.yml`, and its release-please step opens or updates the release PR, `chore(main): release X.Y.Z`, labelled `autorelease: pending`. The PR bumps the version in `package.json`, `server.json`, `.claude-plugin/plugin.json`, `.claude-plugin/marketplace.json`, `.mcp.json` and `.release-please-manifest.json`, and adds the release notes to `CHANGELOG.md`.
-2. release-please opens the PR with `GITHUB_TOKEN`, so its CI waits for you. Click **Approve workflows to run** in the merge box, and again after every update to the PR. `main` takes the merge only once the `test` check passes.
+1. A releasable commit, such as a `feat:` or a `fix:`, lands on `main`. The push runs `release.yml`, whose `please` job runs release-please as the `tibia-sh-bot` GitHub App. It opens or updates the release PR, `chore(main): release X.Y.Z`, labelled `autorelease: pending`. The PR bumps the version in `package.json`, `server.json`, `.claude-plugin/plugin.json`, `.claude-plugin/marketplace.json`, `.mcp.json` and `.release-please-manifest.json`, and adds the release notes to `CHANGELOG.md`.
+2. The App opens the PR, so its CI runs, which it would not for a PR opened with `GITHUB_TOKEN`. The `please` job's step `Turn on auto-merge for the release PR` turns on the PR's auto-merge with a rebase, unless it is on already, so the PR merges itself once the `test` check passes. `main` takes the merge only then.
 
-   You can also approve through the API, as `0.3.0` was. Put the `databaseId` of the run whose conclusion is `action_required` in place of `RUN_ID`:
+   If the merge box shows **Approve workflows to run** instead, the PR's CI is waiting for you. Click it, and again after every update to the PR. You can also approve through the API, as `0.3.0` was. Put the `databaseId` of the run whose conclusion is `action_required` in place of `RUN_ID`:
 
    ```bash
    PR=N
@@ -16,7 +16,7 @@
    gh api -X POST repos/tibia-sh/tibiawiki-mcp/actions/runs/RUN_ID/approve
    ```
 
-3. Merging the release PR publishes. The merge's push run creates the tag `vX.Y.Z` and the GitHub release at the merge commit, and relabels the PR `autorelease: tagged`. Then it checks out that commit, runs `pnpm install --frozen-lockfile` and `pnpm test`, and runs `npm publish` through npm trusted publishing. npm adds provenance for that commit when it confirms that the repository and the package are public. Once npm accepts the publish, the run's `registry` job checks out the tag, checks that `server.json` carries its version, and waits until npm serves that version. Then one step, `Publish to the MCP registry`, publishes `server.json` to the MCP registry in up to three attempts, 30 seconds apart. Each attempt runs its own login. Beside the `registry` job, the run's `hosting` job tells `tibia-sh/mcp.tibia.sh` about the release, and that repository pins the version and deploys it, as [The hosting dispatch](#the-hosting-dispatch) describes.
+3. The merge publishes. The merge's push run creates the tag `vX.Y.Z` and the GitHub release at the merge commit in its `please` job, and relabels the PR `autorelease: tagged`. Then its `release` job checks out that commit, runs `pnpm install --frozen-lockfile` and `pnpm test`, and runs `npm publish` through npm trusted publishing. npm adds provenance for that commit when it confirms that the repository and the package are public. Once npm accepts the publish, the run's `registry` job checks out the tag, checks that `server.json` carries its version, and waits until npm serves that version. Then one step, `Publish to the MCP registry`, publishes `server.json` to the MCP registry in up to three attempts, 30 seconds apart. Each attempt runs its own login. Beside the `registry` job, the run's `hosting` job tells `tibia-sh/mcp.tibia.sh` about the release, and that repository pins the version and deploys it, as [The hosting dispatch](#the-hosting-dispatch) describes.
 4. The release is done when that run is green, its `npm publish` and `Publish to the MCP registry` steps ran, and both npm and the MCP registry list the version.
 
 Only the run triggered at the merge commit publishes, because npm provenance names the commit that triggered the run. A run triggered at any other commit that creates the release fails red instead, at the step `Release tagged at another commit, not published`.
@@ -50,11 +50,25 @@ Read the whole version list. `npm view @tibia.sh/tibiawiki-mcp@X.Y.Z` exits 1 bo
 
 ## A plain re-run publishes nothing
 
-Re-running a release run that failed in a later step, after release-please created the GitHub release, publishes nothing. The run turns green, unless another merged release PR still carries `autorelease: pending`. The failed attempt already created the release and relabelled the PR `autorelease: tagged`, so the re-run finds no release PR left to release. `release_created` stays unset, so no step builds or publishes anything. The red attempt is then only behind the **Latest** menu.
+Re-running a release run that failed in a later step, after release-please created the GitHub release, publishes nothing. The run turns green, unless another merged release PR still carries `autorelease: pending`. The failed attempt already created the release and relabelled the PR `autorelease: tagged`, so the re-run's `please` job finds no release PR left to release. `release_created` stays unset, so no step of the `release` job builds or publishes anything. The red attempt is then only behind the **Latest** menu.
 
 A green release run does not prove a publish. Check npm. The one re-run that publishes is [the recovery below](#re-run-the-merge-commits-run), after the release, the tag and the label are reset.
 
-The same goes for a push run whose `registry` job failed. Re-running the whole run does not retry the registry publish. Its release job does not release that version again, so `released` stays empty and the `registry` job is skipped. Publish to the registry through [a dispatch](#a-version-the-mcp-registry-does-not-have) instead.
+The same goes for a push run whose `registry` job failed. Re-running the whole run does not retry the registry publish. Its `please` job does not release that version again, so `released` stays empty and the `registry` job is skipped. Publish to the registry through [a dispatch](#a-version-the-mcp-registry-does-not-have) instead.
+
+## A failed please job
+
+The `please` job runs release-please as the App, then turns on the release PR's auto-merge. When it is red, the jobs after it are skipped, so nothing was published. First find out whether release-please created a release before the job failed. Set `RUN` to the red run's ID, and look up the release of the version `.release-please-manifest.json` names at the run's commit:
+
+```bash
+RUN=N
+SHA=$(gh run view "$RUN" --json headSha --jq .headSha)
+VERSION=$(gh api "repos/tibia-sh/tibiawiki-mcp/contents/.release-please-manifest.json?ref=$SHA" --jq '.content | @base64d | fromjson | ."."')
+gh release view "v$VERSION"
+```
+
+- `release not found`: nothing was created. Re-run the failed job with `gh run rerun "$RUN" --failed`. That is not a re-run of a release, because the run released nothing. The re-run keeps the run's commit, so a release it creates is published as in [A normal release](#a-normal-release).
+- The release exists: never re-run the job. Check whether npm has the version with `npm view @tibia.sh/tibiawiki-mcp versions --json`. When it lists the version, the run's commit was not a release, and its manifest names the release before it, or that release was published already. Nothing is left to recover, and the next push to `main` runs release-please again and turns on the open release PR's auto-merge. To merge that PR before then, merge it yourself with `gh pr merge <pr> --rebase --match-head-commit <its head commit>`. When npm does not list it, release-please created the release before a later step failed, so follow [A release npm does not have](#a-release-npm-does-not-have).
 
 ## A merged release PR with no release
 
@@ -80,7 +94,7 @@ git ls-remote --tags https://github.com/tibia-sh/tibiawiki-mcp.git "v$VERSION"
 
 If the PR carries `autorelease: tagged` or the tag exists, a run released the PR after all. When `npm view @tibia.sh/tibiawiki-mcp versions --json` lists the version, nothing is left to do. When it does not, go to [A release npm does not have](#a-release-npm-does-not-have).
 
-Otherwise, open the log of the red run's `Run googleapis/release-please-action` step, and find out why release-please did not release the PR:
+Otherwise, open the log of the `Run googleapis/release-please-action` step in the red run's `please` job, and find out why release-please did not release the PR:
 
 | The log shows | Cause | Recovery |
 |---|---|---|
@@ -336,9 +350,9 @@ gh workflow run release.yml --ref main -f tag="v$VERSION"
 
 `gh` prints the URL of the run it started. Follow the run there, or with `gh run watch <run-id>`, where the run ID is the number at the end of the URL. If `gh` prints no URL, `gh run list --workflow release.yml --event workflow_dispatch` lists dispatched runs, newest first. Yours is the one created when you dispatched.
 
-A dispatched run's release job skips release-please, so it releases nothing and publishes nothing to npm. Only its `registry` job acts. It checks out the tag, checks that `server.json` carries the version, waits until npm serves that version, and publishes it. A version npm already serves passes the wait on the first try.
+A dispatched run's `please` job skips every step, release-please included, so it releases nothing, and its `release` job publishes nothing to npm. Only its `registry` job acts. It checks out the tag, checks that `server.json` carries the version, waits until npm serves that version, and publishes it. A version npm already serves passes the wait on the first try.
 
-Dispatch on `main` only. The key is a secret of the `mcp-registry` environment, which admits runs on `main` alone. The `registry` job of a run dispatched on any other branch or tag fails before its first step. The tag reaches the job as the input, never as the ref.
+Dispatch on `main` only. The `please` job runs in the `release-trigger` environment, and the `registry` job in the `mcp-registry` environment, which holds the key. Both admit runs on `main` alone. A run dispatched on any other branch or tag fails at the `please` job before its first step, and skips the jobs after it. The tag reaches the `registry` job as the input, never as the ref.
 
 If the registry has the version already, the dispatched run ends green without publishing. `Publish to the MCP registry` finds the version before it logs in, or the registry rejects the publish with `cannot publish duplicate version`. The registry never takes a version twice. Registering an older version after a newer one is fine. The registry keeps the higher version as its latest.
 
@@ -356,13 +370,13 @@ If it prints anything else, or `null`, leave the version out of the registry, an
 
 ## The hosting dispatch
 
-Once npm accepts the publish, the run's `hosting` job tells `tibia-sh/mcp.tibia.sh` about the release. Its one step, `Tell mcp.tibia.sh about the release`, sends a `repository_dispatch` of type `first-party-release` that names the package and the version, using the `HOSTING_DISPATCH_TOKEN` secret of the `release-trigger` environment. It makes up to three attempts, 30 seconds apart, and prints `Told tibia-sh/mcp.tibia.sh about @tibia.sh/tibiawiki-mcp X.Y.Z in attempt N.` once one got through. The job needs only the release job, so it runs beside the `registry` job, and neither waits for the other. A dispatched run of `release.yml` releases nothing, so it skips the job.
+Once npm accepts the publish, the run's `hosting` job tells `tibia-sh/mcp.tibia.sh` about the release. Its step `Tell mcp.tibia.sh about the release` sends a `repository_dispatch` of type `first-party-release` that names the package and the version. It sends it as the tibia-sh App: the job runs in the `release-trigger` environment, and its first step mints a token for `tibia-sh/mcp.tibia.sh` alone, with contents write, which expires within the hour. The dispatch makes up to three attempts, 30 seconds apart, and prints `Told tibia-sh/mcp.tibia.sh about @tibia.sh/tibiawiki-mcp X.Y.Z in attempt N.` once one got through. The job needs only the release job, so it runs beside the `registry` job, and neither waits for the other. A dispatched run of `release.yml` releases nothing, so it skips the job.
 
 The dispatch starts `bump.yml` in the hosting repo. That run pins the version, opens a pull request, turns on auto-merge, which merges at once when the checks have already passed, and waits for the merge, and the merge deploys. [How a release reaches the endpoint](https://github.com/tibia-sh/mcp.tibia.sh/blob/main/docs/OPERATING.md#how-a-release-reaches-the-endpoint) in that repository's `docs/OPERATING.md` describes the chain and what can go wrong there. `gh run list --workflow bump.yml -R tibia-sh/mcp.tibia.sh` lists its runs.
 
-A red `hosting` job leaves npm and the MCP registry untouched. The publish happened before the job started, and the `registry` job does not wait for the dispatch. The job is red when the tag does not look like `vX.Y.Z`, or when all three attempts failed. Its error line names the tag or the version, and the log carries what `gh` said about each attempt. Three attempts that all hang take 7.5 minutes, inside the job's 8, so the job normally ends with that error line. `Bad credentials (HTTP 401)` means the token expired or was revoked, and [The release trigger token](https://github.com/tibia-sh/mcp.tibia.sh/blob/main/docs/OPERATING.md#the-release-trigger-token) in the hosting repo's `docs/OPERATING.md` describes how to rotate it.
+A red `hosting` job leaves npm and the MCP registry untouched. The publish happened before the job started, and the `registry` job does not wait for the dispatch. The job is red when the App's token could not be minted, when the tag does not look like `vX.Y.Z`, or when all three attempts failed. Its error line names the tag or the version, and the log carries what `gh` said about each attempt. Three attempts that all hang take 7.5 minutes, inside the job's 8, so the job normally ends with that error line. A red token step, or `Bad credentials (HTTP 401)` from `gh`, means the App's key or its installation no longer works, and [The tibia-sh App](https://github.com/tibia-sh/mcp.tibia.sh/blob/main/docs/OPERATING.md#the-tibia-sh-app) in the hosting repo's `docs/OPERATING.md` describes how to rotate the key.
 
-Re-running the whole release run does not send the dispatch again. Its release job releases nothing the second time, so `released` stays empty and the `hosting` job is skipped. Run `bump.yml` by hand instead, on `main` of the hosting repo, with the version npm has:
+Never re-run the release run for it. A re-run does not send the dispatch again: its `please` job releases nothing the second time, so `released` stays empty and the `hosting` job is skipped. Run `bump.yml` by hand instead, on `main` of the hosting repo, with the version npm has:
 
 ```bash
 gh workflow run bump.yml -R tibia-sh/mcp.tibia.sh --ref main -f package=@tibia.sh/tibiawiki-mcp -f version=X.Y.Z
@@ -391,7 +405,7 @@ npm deprecate "@tibia.sh/tibiawiki-mcp@$VERSION" "<what is wrong>. Use the next 
 ```
 
 1. Land the fix on `main` as a `fix:` commit. release-please opens or updates the release PR for the next version.
-2. Approve the PR's CI and merge it, as in [A normal release](#a-normal-release).
+2. Let the release PR merge itself, as in [A normal release](#a-normal-release).
 3. If npm does not have the bad version, retitle its GitHub release, so nobody takes it for a published one:
 
    ```bash

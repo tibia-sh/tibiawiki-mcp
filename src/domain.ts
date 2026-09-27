@@ -171,6 +171,9 @@ export const ORIGIN_MEANING =
 export const RACE_ID_MEANING =
   'Tibia client race ID, not unique: some creatures share one, such as boss phases. ' +
   'null: the wiki records none.';
+export const PRICE_CURRENCY_MEANING =
+  'Currency of price as the wiki names it, e.g. Tibia Coins or Event Points. ' +
+  'null when there is no price.';
 
 /**
  * Creature numbers the wiki gives a meaning at 0, described once for every tool that

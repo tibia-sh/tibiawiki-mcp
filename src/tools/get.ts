@@ -9,7 +9,7 @@ import {
   runsAtSchema, summonCostSchema, convinceCostSchema, GOLD_PER_KILL, goldPerKillSchema,
   positionSchema, RASHID, RASHID_SCHEDULE, rashidScheduleSchema, rashidScheduleDay, buyerPlace,
   buyerCitySchema, buyerPositionSchema, IMAGE_MEANING, fareSchema, originSchema, raceIdSchema,
-  inGameNameSchema, inGamePluralSchema, inGameArticleSchema,
+  inGameNameSchema, inGamePluralSchema, inGameArticleSchema, PRICE_CURRENCY_MEANING,
 } from '../domain.ts';
 
 type Row = Record<string, unknown>;
@@ -276,6 +276,7 @@ const mountOut = z.object({
   tamingMethod: z.string().nullable(),
   isBuyable: z.boolean().nullable(),
   price: z.number().nullable(),
+  priceCurrency: z.string().nullable().describe(PRICE_CURRENCY_MEANING),
   achievement: z.string().nullable(),
   lightColor: z.number().nullable(),
   lightRadius: z.number().nullable(),
@@ -681,7 +682,8 @@ export function registerGet(server: McpServer, handle: TibiaDb): void {
         return {
           type: 'mount' as const, image: imageFor('mount', row), title, speed: num(row.speed),
           tamingMethod: str(row.taming_method), isBuyable: bool(row.is_buyable),
-          price: num(row.price), achievement: str(row.achievement),
+          price: num(row.price), priceCurrency: str(row.price_currency),
+          achievement: str(row.achievement),
           lightColor: num(row.light_color), lightRadius: num(row.light_radius),
           clientId: num(row.client_id), status: str(row.status), source,
         };

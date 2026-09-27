@@ -138,6 +138,8 @@ NPC, and without a type the call returns an error asking you to choose.
   `rashidSchedule`, his seven-day rotation
 - **quest**: `dangers` as creature names, `rewards`
 - **imbuement**: `materials` with amounts
+- **mount**: `priceCurrency`, the unit of `price` as the wiki names it, such as Tibia Coins
+  or Event Points, and null when there is no price
 
 Use `verbosity: "detailed"` for extra descriptive columns and for a book's full text,
 which is omitted by default because it is the heaviest field in the corpus.

@@ -1219,26 +1219,32 @@ fi
 
 /**
  * A stand-in for sleep that returns at once, and records what it was asked for in the run's `sleeps`,
- * and as `sleep` and its arguments in the run's `events`.
+ * and as `sleep` and its arguments in the run's `events`. When the run has an executable `on-sleep`, it
+ * runs that too, for what happens elsewhere while a step waits.
  */
 const FAKE_SLEEP = `#!/usr/bin/env bash
 printf '%s\\n' "$*" >> "$FAKE_RUN/sleeps"
 printf 'sleep %s\\n' "$*" >> "$FAKE_RUN/events"
+if [ -x "$FAKE_RUN/on-sleep" ]; then
+  "$FAKE_RUN/on-sleep"
+fi
 `;
 
 /**
- * A stand-in for GNU timeout. It takes only `--kill-after=10 120` and a command, and runs the command
- * with BOUNDED_BY_TIMEOUT set. It exits with the command's status, or with 124 when the fake
- * mcp-publisher hung, as timeout does once it has stopped a command that ran too long. Other
- * arguments fail with 125, timeout's own failure, so a changed bound cannot pass on a guess.
+ * A stand-in for GNU timeout. It takes only `--kill-after=10`, a whole number of seconds and a command,
+ * and runs the command with BOUNDED_BY_TIMEOUT set to those seconds, which each fake command checks
+ * against its own bound. It exits with the command's status, or with 124 when the fake command hung, as
+ * timeout does once it has stopped a command that ran too long. Other arguments fail with 125,
+ * timeout's own failure, so a changed bound cannot pass on a guess.
  */
 const FAKE_TIMEOUT = `#!/usr/bin/env bash
-if [ "$#" -lt 3 ] || [ "$1" != --kill-after=10 ] || [ "$2" != 120 ]; then
+if [ "$#" -lt 3 ] || [ "$1" != --kill-after=10 ] || [[ ! $2 =~ ^[1-9][0-9]*$ ]]; then
   echo "fake timeout: unsupported arguments: $1 $2" >&2
   exit 125
 fi
+seconds="$2"
 shift 2
-BOUNDED_BY_TIMEOUT=1 "$@"
+BOUNDED_BY_TIMEOUT="$seconds" "$@"
 status=$?
 if [ -e "$FAKE_RUN/hung" ]; then
   rm "$FAKE_RUN/hung"
@@ -1249,7 +1255,7 @@ exit "$status"
 
 /**
  * A stand-in for mcp-publisher, reading and writing a run's files in $FAKE_RUN. It takes only `login`
- * and `publish`, and runs only under the fake timeout, so a command without its bound fails. Each call
+ * and `publish`, and runs only under the fake timeout's 120 seconds, so a command without its bound fails. Each call
  * goes to `events` as `mcp-publisher` and its arguments. Call N answers with line N of `answers`, and
  * a call with no line fails. `CODE TEXT` prints TEXT and exits CODE, with TEXT on stdout for 0 and on
  * stderr otherwise, as mcp-publisher prints its errors. `hang` is a call that never returns, which the
@@ -1257,7 +1263,7 @@ exit "$status"
  */
 const FAKE_MCP_PUBLISHER = `#!/usr/bin/env bash
 here="$FAKE_RUN"
-if [ "$BOUNDED_BY_TIMEOUT" != 1 ]; then
+if [ "$BOUNDED_BY_TIMEOUT" != 120 ]; then
   echo "fake mcp-publisher: $1 run without timeout" >&2
   exit 2
 fi
@@ -1307,12 +1313,13 @@ exit "$code"
  * GH_REPO, from which gh fills in {owner}/{repo} and finds the pull request outside a checkout, and
  * GH_TOKEN, or they fail.
  *
- * `api repos/{owner}/{repo}/actions/workflows/release.yml/runs?event=push&head_sha=SHA` answers call N,
- * counting every gh call in `events`, with `runs-N`, what GitHub answers with the release workflow's
- * push runs for SHA, and exits with `runs-exit-N`. It needs GH_REPO and GH_TOKEN too, and a call with no
- * `runs-N` fails.
+ * `api repos/{owner}/{repo}/actions/workflows/release.yml/runs?event=push&head_sha=SHA` runs only under
+ * the fake timeout's 60 seconds. It answers call N, counting every gh call in `events`, with `runs-N`,
+ * what GitHub answers with the release workflow's push runs for SHA, and exits with `runs-exit-N`, or
+ * hangs, which the fake timeout stops, when there is a `hang-N`. It needs GH_REPO and GH_TOKEN too, and
+ * a call with no `runs-N` fails.
  *
- * `api repos/tibia-sh/mcp.tibia.sh/dispatches --input -` runs only under the fake timeout, so a call
+ * `api repos/tibia-sh/mcp.tibia.sh/dispatches --input -` runs only under the fake timeout's 120 seconds, so a call
  * without its bound fails. It writes its stdin, the body gh would send, to `body-N` for call N, counting
  * every gh call in `events`. Call N answers with line N of `answers`, and a call with no line fails. `0`
  * is a dispatch GitHub accepted, which prints nothing, as gh prints nothing for a 204. `CODE TEXT` prints
@@ -1344,9 +1351,13 @@ if [ "$#" -eq 2 ] && [ "$1" = api ] && [ "\${2%%head_sha=*}" = 'repos/{owner}/{r
   while IFS= read -r line; do
     case "$line" in 'gh '*) count=$((count + 1)) ;; esac
   done < "$here/events"
-  if [ -z "$GH_REPO" ] || [ -z "$GH_TOKEN" ] || [ ! -e "$here/runs-$count" ]; then
-    echo "fake gh: release runs without GH_REPO, GH_TOKEN or an answer for call $count" >&2
+  if [ -z "$GH_REPO" ] || [ -z "$GH_TOKEN" ] || [ "$BOUNDED_BY_TIMEOUT" != 60 ] || [ ! -e "$here/runs-$count" ]; then
+    echo "fake gh: release runs without GH_REPO, GH_TOKEN, timeout or an answer for call $count" >&2
     exit 2
+  fi
+  if [ -e "$here/hang-$count" ]; then
+    : > "$here/hung"
+    exit 143
   fi
   cat "$here/runs-$count"
   exit "$(cat "$here/runs-exit-$count")"
@@ -1376,7 +1387,7 @@ if [ "$#" -ne 4 ] || [ "$1" != api ] || [ "$2" != repos/tibia-sh/mcp.tibia.sh/di
   echo "fake gh: unsupported command: $*" >&2
   exit 2
 fi
-if [ "$BOUNDED_BY_TIMEOUT" != 1 ]; then
+if [ "$BOUNDED_BY_TIMEOUT" != 120 ]; then
   echo "fake gh: $2 run without timeout" >&2
   exit 2
 fi
@@ -2382,8 +2393,10 @@ const QUEUE_CHECK_ENV = {
  * computes the PR from main before it reads main's head to commit onto, so the release workflow's newest
  * push run for the base has to have completed with success too: its please job rebuilt the PR from the
  * base. A run that is missing or has not completed is read again every POLL_SECONDS, until
- * DEADLINE_SECONDS of waiting have passed. Every value is checked whole before git or the error reads it,
- * and an answer about the run the step cannot read fails it at once. A change here has to change this
+ * DEADLINE_SECONDS of waiting have passed, each read bounded by timeout. Once the run has succeeded, the
+ * PR's head is read again, and it still has to sit on the base with the entry's tree, since a push
+ * during the wait need not take the entry out of the queue at once. Every value is checked whole before
+ * git or the error reads it, and an answer about the run the step cannot read fails it at once. A change here has to change this
  * test on purpose.
  */
 const QUEUE_CHECK_SCRIPT = String.raw`[[ $BASE_SHA =~ ^[0-9a-f]{40}$ ]] || { echo "::error::The merge group names no base commit, so this check cannot tell whether a release PR is older than main."; exit 1; }
@@ -2425,7 +2438,7 @@ if [[ ! $poll =~ ^[1-9][0-9]*$ || ! $limit =~ ^(0|[1-9][0-9]*)$ ]]; then
 fi
 waited=0
 while :; do
-  if ! response="$(gh api "$query")" ||
+  if ! response="$(timeout --kill-after=10 60 gh api "$query")" ||
     ! run="$(jq -ser --arg sha "$BASE_SHA" 'if length == 1 then .[0].workflow_runs | arrays | map(select(.event == "push" and .head_sha == $sha)) | if length == 0 then "none" else max_by(.run_number) | "\(.status) \(.conclusion)" end else error("not one document") end' <<< "$response")" ||
     [[ ! $run =~ ^(none|([a-z_]+)\ ([a-z_]+))$ ]]; then
     echo "::error::Could not read main's release run for $BASE_SHA, so this check cannot tell whether release-please has rebuilt the release PR since that commit."
@@ -2446,6 +2459,13 @@ while :; do
 done
 if [[ $conclusion != success ]]; then
   echo "::error::main's release run for $BASE_SHA ended $conclusion, not success, so release-please may not have rebuilt this PR on that commit. release-please rebuilds it on main's tip on the next push to main, and its auto-merge adds it to the queue again, which takes it once that push's release run has succeeded."
+  exit 1
+fi
+git fetch --quiet --no-tags --depth=2 origin "refs/pull/$number/head"
+parent="$(git rev-parse --verify FETCH_HEAD^)"
+head_tree="$(git rev-parse --verify "FETCH_HEAD^{tree}")"
+if [[ $parent != "$BASE_SHA" || $head_tree != "$entry_tree" ]]; then
+  echo "::error::This queue entry does not match the release PR's current head, so it was built from an older head. The PR joins the queue again once release-please's update of it lands."
   exit 1
 fi
 echo "The release PR was built on $BASE_SHA, the commit this queue entry merges onto."`;
@@ -2572,8 +2592,11 @@ const queueFixture = (): QueueRepo => {
   return queueRepo;
 };
 
-/** What gh prints for the release workflow's push runs of a commit, and the status it exits with. */
-type RunsAnswer = { response: string; exit?: number };
+/**
+ * What gh prints for the release workflow's push runs of a commit, and the status it exits with, or a
+ * read that hangs until timeout stops it.
+ */
+type RunsAnswer = { response: string; exit?: number; hang?: boolean };
 
 /** One run of the release workflow as GitHub lists it, with only the fields the queue check reads. */
 type ReleaseRun = { run_number: number; status: string; conclusion: string | null; event?: string; head_sha?: string };
@@ -2593,10 +2616,18 @@ const releaseRuns = (sha: string, ...runs: ReleaseRun[]): RunsAnswer => ({
  * Runs the queue check as the test job runs it on merge_group: in a checkout of the merge group's
  * commit alone, as actions/checkout leaves it, with origin serving every commit, and the fake gh and
  * sleep first on PATH. gh answers its reads of the release runs with `runs` in order, and a read past
- * them fails. `env` adds to the step's environment, such as the poll interval. git and jq are real.
+ * them fails. `extra` adds to the step's environment, such as the poll interval. `origin` serves the
+ * repository in place of the fixture's, and `onSleep` is a script the fake sleep runs on every pause.
+ * git and jq are real.
  */
-const runQueueCheck = (base: string, entry: string, headRef: string, runs: RunsAnswer[] = [], extra: Record<string, string> = {}) => {
-  const { origin } = queueFixture();
+const runQueueCheck = (
+  base: string,
+  entry: string,
+  headRef: string,
+  runs: RunsAnswer[] = [],
+  extra: Record<string, string> = {},
+  { origin = queueFixture().origin, onSleep }: { origin?: string; onSleep?: string } = {},
+) => {
   const work = scratch();
   gitIn(work, ['init', '--quiet']);
   gitIn(work, ['remote', 'add', 'origin', origin]);
@@ -2606,7 +2637,9 @@ const runQueueCheck = (base: string, entry: string, headRef: string, runs: RunsA
   runs.forEach((answer, index) => {
     writeFileSync(join(gh, `runs-${index + 1}`), answer.response);
     writeFileSync(join(gh, `runs-exit-${index + 1}`), String(answer.exit ?? 0));
+    if (answer.hang === true) writeFileSync(join(gh, `hang-${index + 1}`), '');
   });
+  if (onSleep !== undefined) writeFileSync(join(gh, 'on-sleep'), `#!/usr/bin/env bash\nset -e\n${onSleep}\n`, { mode: 0o755 });
   const env = {
     BASE_SHA: base,
     HEAD_REF: headRef,
@@ -2758,6 +2791,30 @@ test("the queue check waits for main's release run for the base to succeed", () 
   );
 });
 
+test('the queue check refuses a release PR whose head moved while it waited', () => {
+  // The step checks the PR's head before the wait, and GitHub does not document that a push takes a
+  // queued PR out of the queue at once. So release-please's rebuild of the PR during the wait, a head
+  // with the notes computed from the base and so another tree, has to fail the entry built from the
+  // older head. The fake sleep moves the PR's head on a copy of origin, as that push would.
+  const repo = queueFixture();
+  const origin = scratch();
+  gitIn(origin, ['clone', '--quiet', '--mirror', repo.origin, '.']);
+  gitIn(origin, ['config', 'uploadpack.allowAnySHA1InWant', 'true']);
+  const running = releaseRuns(repo.base, { run_number: 4, status: 'in_progress', conclusion: null });
+  const succeeded = releaseRuns(repo.base, { run_number: 4, status: 'completed', conclusion: 'success' });
+  const move = `git --git-dir='${origin}' update-ref refs/pull/${repo.fresh.number}/head ${repo.moved.head}`;
+  const run = runQueueCheck(repo.base, repo.entry.fresh, queueRef(repo.fresh.number, repo.base), [running, succeeded], {}, { origin, onSleep: move });
+  assert.equal(run.status, 1, run.output);
+  assert.deepEqual(run.errors, [
+    "::error::This queue entry does not match the release PR's current head, so it was built from an older head. The PR joins the queue again once release-please's update of it lands.",
+  ]);
+  assert.deepEqual(run.events, [runsQuery(repo.base), 'sleep 20', runsQuery(repo.base)]);
+  assert.ok(run.has(repo.moved.head), 'the check did not read the moved head');
+  // Without the move, the same entry passes.
+  const still = runQueueCheck(repo.base, repo.entry.fresh, queueRef(repo.fresh.number, repo.base), [running, succeeded]);
+  assert.equal(still.status, 0, still.output);
+});
+
 test("the queue check refuses a release PR whose base's release run it cannot read", () => {
   // Each of these fails closed at once with one ::error::, after one gh call, without waiting.
   const repo = queueFixture();
@@ -2768,6 +2825,7 @@ test("the queue check refuses a release PR whose base's release run it cannot re
     ['an error from gh after a list of runs', { ...releaseRuns(repo.base, succeeded), exit: 1 }],
     ['no list of runs', { response: '{"total_count":0,"workflow_runs":null}' }],
     ['a list of runs that is no array', { response: '{"total_count":1,"workflow_runs":{}}' }],
+    ['a read that hangs until timeout stops it', { response: releaseRuns(repo.base, succeeded).response, hang: true }],
     ['text that is not JSON', { response: 'completed success' }],
     ['no output', { response: '' }],
     ['two documents', { response: `${releaseRuns(repo.base, succeeded).response}\n${releaseRuns(repo.base, succeeded).response}` }],

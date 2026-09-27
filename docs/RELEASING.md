@@ -48,13 +48,16 @@ Run `gh` from a checkout of this repository, or add `-R tibia-sh/tibiawiki-mcp`.
 
 Read the whole version list. `npm view @tibia.sh/tibiawiki-mcp@X.Y.Z` exits 1 both for a version npm lacks and for a registry it cannot read. A new version can also be missing from the list for a few minutes. `0.1.0` took about 5 minutes to show up.
 
-## A plain re-run publishes nothing
+## Re-running a release run
 
-Re-running a release run that failed in a later step, after release-please created the GitHub release, publishes nothing. The run turns green, unless another merged release PR still carries `autorelease: pending`. The failed attempt already created the release and relabelled the PR `autorelease: tagged`, so the re-run's `please` job finds no release PR left to release. `release_created` stays unset, so no step of the `release` job builds or publishes anything. The red attempt is then only behind the **Latest** menu.
+GitHub re-runs a run in two ways, and since release-please and the publish run in separate jobs, they end differently.
 
-A green release run does not prove a publish. Check npm. The one re-run that publishes is [the recovery below](#re-run-the-merge-commits-run), after the release, the tag and the label are reset.
+- **Re-run all jobs**, `gh run rerun <run-id>`, runs every job again, `please` included. After a failed attempt that created the GitHub release, it publishes nothing. The failed attempt already relabelled the PR `autorelease: tagged`, so the re-run's `please` job finds no release PR left to release. `release_created` stays unset, so no step of the `release` job builds or publishes anything, `released` stays empty, and the `registry` and `hosting` jobs are skipped. The run turns green, unless another merged release PR still carries `autorelease: pending`, and the red attempt is then only behind the **Latest** menu.
+- **Re-run failed jobs**, `gh run rerun <run-id> --failed`, runs only the jobs that failed and the jobs that need them, and hands them the outputs that the jobs which passed set in the failed attempt. After a failed `release` job, the re-run reuses the `please` job's outputs, so the `release` job runs its checks and the publish again for the release that attempt created, in the same run and at the same commit, and the `registry` and `hosting` jobs run once npm accepts it. After a failed `registry` or `hosting` job, the re-run runs that job again with the `release` job's outputs.
 
-The same goes for a push run whose `registry` job failed. Re-running the whole run does not retry the registry publish. Its `please` job does not release that version again, so `released` stays empty and the `registry` job is skipped. Publish to the registry through [a dispatch](#a-version-the-mcp-registry-does-not-have) instead.
+A green release run does not prove a publish. Check npm. A re-run of all jobs publishes only in [the recovery below](#re-run-the-merge-commits-run), after the release, the tag and the label are reset.
+
+For a push run whose `registry` job failed, a re-run of all jobs does not retry the registry publish, because its `please` job does not release that version again, so `released` stays empty and the `registry` job is skipped. Publish to the registry through [a dispatch](#a-version-the-mcp-registry-does-not-have) instead.
 
 ## A failed please job
 
@@ -214,6 +217,8 @@ A re-run keeps the run's `GITHUB_SHA`. So when release-please creates the releas
    git ls-remote --tags https://github.com/tibia-sh/tibiawiki-mcp.git "v$VERSION"
    ```
 
+   Then [check for a stray release PR](#a-stray-release-pr).
+
 4. Label the PR pending again. The second command must print `autorelease: pending` and nothing else:
 
    ```bash
@@ -221,7 +226,7 @@ A re-run keeps the run's `GITHUB_SHA`. So when release-please creates the releas
    gh pr view "$PR" --json labels --jq '.labels[].name'
    ```
 
-5. Re-run the merge commit's run, never the red run of another commit. Follow it on the run page or with `gh run watch "$RUN"`.
+5. [Check for a stray release PR](#a-stray-release-pr) again. Then re-run all jobs of the merge commit's run, never the red run of another commit. Follow it on the run page or with `gh run watch "$RUN"`.
 
    ```bash
    gh run rerun "$RUN"
@@ -229,14 +234,24 @@ A re-run keeps the run's `GITHUB_SHA`. So when release-please creates the releas
 
 6. Check the result. The run is green with its `npm publish` and `Publish to the MCP registry` steps run, `gh release view "v$VERSION" --json targetCommitish` names `$SHA`, and the PR is back to `autorelease: tagged`. Once npm lists the version, run `pnpm smoke "@tibia.sh/tibiawiki-mcp@$VERSION"` in an installed checkout.
 
-Any other release run that starts between steps 3 and 5 undoes this. After step 4 it creates the release itself, in a run triggered at the wrong commit, and you are back at the start. Before step 4 it opens or rewrites the release PR for a version past `$VERSION`, with the whole history as its notes. Left open, that PR can be merged while it shows the wrong version, and a later run quietly rewrites it into the next real release PR. So once the re-run has finished, find the open release PR whose title shows a version past `$VERSION`, and close it:
+Any other release run that starts between steps 3 and 5 undoes this. After step 4 it creates the release itself, in a run triggered at the wrong commit, and you are back at the start. Before step 4 it opens or rewrites the release PR for a version past `$VERSION`, with the whole history as its notes.
+
+#### A stray release PR
+
+Any release PR opened or updated between steps 3 and 5 merges itself. The run that opens or updates it turns on its auto-merge, and it merges as soon as its CI passes, which takes minutes. A stray PR that shows a version past `$VERSION` then publishes that wrong version, and npm never lets a version be taken back. So check for one right after step 3, and again before the re-run in step 5. The command lists the open release PRs, and prints `[]` when there is none:
 
 ```bash
-gh pr list --label "autorelease: pending" --json number,title
+gh pr list --label "autorelease: pending" --json number,title,autoMergeRequest
+```
+
+For each PR it lists, turn off its auto-merge, or close it, before its CI can pass. Then list them again, and go on only when none that you left open shows `autoMergeRequest` other than `null`:
+
+```bash
+gh pr merge --disable-auto N
 gh pr close N
 ```
 
-Do not add `autorelease: snooze` to it, because release-please reopens and reuses a closed PR with that label. Closing loses nothing, since the next release run opens a fresh release PR when there is something to release.
+Once the re-run has finished, close any such PR whose auto-merge you only turned off, if its title still shows a version past `$VERSION`. Do not add `autorelease: snooze` to it, because release-please reopens and reuses a closed PR with that label. Closing loses nothing, since the next release run opens a fresh release PR when there is something to release.
 
 If the re-run itself fails after release-please created the release, you are also back at the start of this section.
 
@@ -376,7 +391,7 @@ The dispatch starts `bump.yml` in the hosting repo. That run pins the version, o
 
 A red `hosting` job leaves npm and the MCP registry untouched. The publish happened before the job started, and the `registry` job does not wait for the dispatch. The job is red when the App's token could not be minted, when the tag does not look like `vX.Y.Z`, or when all three attempts failed. Its error line names the tag or the version, and the log carries what `gh` said about each attempt. Three attempts that all hang take 7.5 minutes, inside the job's 8, so the job normally ends with that error line. A red token step, or `Bad credentials (HTTP 401)` from `gh`, means the App's key or its installation no longer works, and [The tibia-sh App](https://github.com/tibia-sh/mcp.tibia.sh/blob/main/docs/OPERATING.md#the-tibia-sh-app) in the hosting repo's `docs/OPERATING.md` describes how to rotate the key.
 
-Never re-run the release run for it. A re-run does not send the dispatch again: its `please` job releases nothing the second time, so `released` stays empty and the `hosting` job is skipped. Run `bump.yml` by hand instead, on `main` of the hosting repo, with the version npm has:
+Never re-run the release run for it. A re-run of all jobs does not send the dispatch again: its `please` job releases nothing the second time, so `released` stays empty and the `hosting` job is skipped. A re-run of failed jobs would run the `hosting` job again with the `release` job's outputs from the failed attempt, as [Re-running a release run](#re-running-a-release-run) describes. Run `bump.yml` by hand instead, on `main` of the hosting repo, with the version npm has:
 
 ```bash
 gh workflow run bump.yml -R tibia-sh/mcp.tibia.sh --ref main -f package=@tibia.sh/tibiawiki-mcp -f version=X.Y.Z

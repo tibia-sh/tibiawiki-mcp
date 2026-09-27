@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { GENERATOR, GENERATOR_VERSION, GENERATOR_WHEEL_URL } from '../src/indexer/build-index.ts';
+import { generatorWheelUrl } from '../src/indexer/generator-release.ts';
 import {
   assertGeneratorLocked, generatorEntry, lockGenerator, parseLock, type LockSteps,
 } from '../src/indexer/generator-lock.ts';
@@ -25,6 +26,15 @@ const lock = (generator: string) =>
 const urlEntry = (...hashes: string[]) =>
   [`${GENERATOR} \\`, ...hashes.map((hash, i) =>
     `    --hash=sha256:${hash}${i < hashes.length - 1 ? ' \\' : ''}`)].join('\n');
+
+test('the wheel URL is the release asset of the pinned version', () => {
+  // The + in the tag is percent-encoded in the path, and not in the file name.
+  assert.equal(
+    generatorWheelUrl('9.0.0+tibiash.2'),
+    'https://github.com/tibia-sh/tibiawiki-sql/releases/download/v9.0.0%2Btibiash.2/tibiawikisql-9.0.0+tibiash.2-py3-none-any.whl',
+  );
+  assert.equal(GENERATOR_WHEEL_URL, generatorWheelUrl(GENERATOR_VERSION));
+});
 
 test('a lock with one URL entry and one hash passes', () => {
   const entry = lock(urlEntry(ATTESTED));

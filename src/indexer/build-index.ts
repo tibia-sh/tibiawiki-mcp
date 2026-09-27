@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { cacheDbPath, openDb } from '../db.ts';
 import { createWikiApi, type WikiApi } from './wiki-api.ts';
 import { enrich, eligibleScenes, formatStats, IMAGE_TYPES, type Enricher } from './enrich.ts';
+import { generatorWheelUrl } from './generator-release.ts';
 
 /**
  * The generator is tibia-sh's copy of tibiawiki-sql, released as a wheel on its GitHub
@@ -16,13 +17,8 @@ import { enrich, eligibleScenes, formatStats, IMAGE_TYPES, type Enricher } from 
  */
 export const GENERATOR_VERSION = '9.0.0+tibiash.2';
 
-/** The repository whose release workflow builds and attests the generator wheel. */
-export const GENERATOR_REPO = 'tibia-sh/tibiawiki-sql';
-
-/** The release asset. The `+` in the tag is percent-encoded in the path, and not in the file name. */
-export const GENERATOR_WHEEL_URL =
-  `https://github.com/${GENERATOR_REPO}/releases/download/v${encodeURIComponent(GENERATOR_VERSION)}` +
-  `/tibiawikisql-${GENERATOR_VERSION}-py3-none-any.whl`;
+/** The release asset of the pinned version. */
+export const GENERATOR_WHEEL_URL = generatorWheelUrl(GENERATOR_VERSION);
 
 /**
  * Pinned: the build never names the generator directly. `pnpm lock-generator` locks

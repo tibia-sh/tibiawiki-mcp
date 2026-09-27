@@ -150,6 +150,15 @@ test('the fixture carries the named anchors the detail tests depend on', () => {
     `select count(*) c from npc_destination d join npc n on n.article_id = d.npc_id where n.title = ?`,
     'Captain Bluebear') > 0);
 
+  // A buy price in gold says nothing about one in Theons or Gold Tokens, so the value
+  // sort and valueBuyCurrency need items priced in other currencies to prove anything.
+  assert.deepEqual(
+    db.prepare(`select title, value_buy, value_buy_currency from item
+                where title in ('25 Years Backpack', 'Blade of Mayhem') order by title`).all()
+      .map((r) => [r.title, r.value_buy, r.value_buy_currency]),
+    [['25 Years Backpack', 7197, 'Theons'], ['Blade of Mayhem', 50, 'Gold Token']],
+  );
+
   assert.equal(count('select count(*) c from rashid_position'), 7);
   assert.equal(count(
     `select count(*) c from creature_ability a join creature c on c.article_id = a.creature_id

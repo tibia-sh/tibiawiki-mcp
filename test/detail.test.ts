@@ -495,7 +495,7 @@ test('a mount reports the currency of its price', async () => {
 });
 
 test('a client ID the wiki does not record is null', async () => {
-  // Every fixture outfit and mount has its client IDs, so this copy clears two.
+  // Donkey and Assassin Outfits have their client IDs in the fixture, so this copy clears two.
   const path = join(scratch(), 'client-ids.db');
   copyFileSync(FIXTURE, path);
   const db = new DatabaseSync(path);

@@ -7,10 +7,10 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { decideGenerator, isStale, setGenerator } from '../scripts/set-generator.ts';
 import { generatorWheelUrl } from '../src/indexer/generator-release.ts';
+import { FIXTURE_BUILD_INDEX as BUILD_INDEX } from './generator-fixture.ts';
 import { tempDirs } from './harness.ts';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
-const BUILD_INDEX = readFileSync(join(root, 'src/indexer/build-index.ts'), 'utf8');
 const SHA = 'c0bbb67c7ffe31f2a6d8ad6f9338683e52c6f526c4ecceaf306ddbb792395d4a';
 const scratch = tempDirs('twmcp-set-generator-');
 

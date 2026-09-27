@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.17.0](https://github.com/tibia-sh/tibiawiki-mcp/compare/v0.16.1...v0.17.0) (2026-09-27)
+
+
+### Features
+
+* expose the item buy-price currency ([90e7f96](https://github.com/tibia-sh/tibiawiki-mcp/commit/90e7f960460ea4bcbb731748a6bc87060f0958f2))
+* require the item buy-price currency ([6409549](https://github.com/tibia-sh/tibiawiki-mcp/commit/64095498cd5a731cdf30db1ba17b2e744d891e05))
+
 ## [0.16.1](https://github.com/tibia-sh/tibiawiki-mcp/compare/v0.16.0...v0.16.1) (2026-09-27)
 
 

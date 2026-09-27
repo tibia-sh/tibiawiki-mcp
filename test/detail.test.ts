@@ -477,6 +477,23 @@ test('an outfit carries its male and female client IDs, and a mount its client I
   await h.close();
 });
 
+// Landsailer costs Event Points and Armoured War Horse Tibia Coins, so a bare price names
+// no unit. Donkey has no price, and no currency.
+test('a mount reports the currency of its price', async () => {
+  const h = await connect();
+  try {
+    for (const [mount, price, currency] of [
+      ['Landsailer', 140, 'Event Points'], ['Armoured War Horse', 870, 'Tibia Coins'], ['Donkey', null, null],
+    ] as const) {
+      const m = await get(h, mount, 'mount');
+      assert.ok('priceCurrency' in m, `${mount} reports priceCurrency`);
+      assert.deepEqual([m.price, m.priceCurrency], [price, currency], mount);
+    }
+  } finally {
+    await h.close();
+  }
+});
+
 test('a client ID the wiki does not record is null', async () => {
   // Every fixture outfit and mount has its client IDs, so this copy clears two.
   const path = join(scratch(), 'client-ids.db');

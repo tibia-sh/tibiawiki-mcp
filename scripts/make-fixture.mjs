@@ -43,6 +43,9 @@ const NAMED_ITEMS = [
   // Detail-section anchors. item_key is one-to-many (Silver Key has 61 rows), so
   // Golden Key's 7 prove keys[] is a collection without bloating the fixture.
   'Golden Key', 'Crypt Bile', 'Strong Mana Potion',
+  // value_buy_currency anchors: 25 Years Backpack costs 7197 Theons and Blade of Mayhem
+  // 50 Gold Tokens, so the value sort has buy prices in currencies other than gold.
+  '25 Years Backpack', 'Blade of Mayhem',
 ];
 
 // One named row per new entity type, each chosen because it actually HAS the child

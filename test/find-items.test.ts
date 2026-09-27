@@ -96,7 +96,7 @@ test('item_class is a real column filter and sorting is stable', async () => {
   await h.close();
 });
 
-// The fixture holds 135 items and few of them carry resistances or skill bonuses, so
+// The fixture holds 137 items and few of them carry resistances or skill bonuses, so
 // the tests below open the real packaged index, the way find-updates.test.ts does.
 // They assert stats of long-standing items, which later data releases do not change,
 // and membership rather than position.

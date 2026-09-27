@@ -36,6 +36,8 @@ nothing:
   the anchor proving a null-origin leg matches no `from` value.
 - **Landsailer** and **Armoured War Horse** — `price_currency` `Event Points` (140) and
   `Tibia Coins` (870), beside Donkey, which has no price and a null currency.
+- **25 Years Backpack** and **Blade of Mayhem** — `value_buy_currency` `Theons` (7197)
+  and `Gold Token` (50), so the `value` sort has buy prices in currencies other than gold.
 - **Golden Key** — 7 `item_key` rows. `item_key` is one-to-many (Silver Key has 61),
   so a singular field read with `.get()` would silently drop rows.
 - **The Plasmother** — three abilities all named `Poison Ball`. `(creature_id, name)`
@@ -75,8 +77,8 @@ whose key is single-quoted upstream and whose grid uses cell value 4.
 
 ## Reproducing it
 
-The committed fixture was cut from the index `@tibia.sh/tibiawiki-data` 3.3.0 ships,
-whose `database_info` `version` is `9.0.0+tibiash.5`. With that version installed:
+The committed fixture was cut from the index `@tibia.sh/tibiawiki-data` 3.4.0 ships,
+whose `database_info` `version` is `9.0.0+tibiash.6`. With that version installed:
 
 ```bash
 node scripts/make-fixture.mjs node_modules/@tibia.sh/tibiawiki-data/index.db \

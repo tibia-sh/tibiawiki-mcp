@@ -5,7 +5,7 @@
 ## A normal release
 
 1. A releasable commit, such as a `feat:` or a `fix:`, lands on `main`. The push runs `release.yml`, whose `please` job runs release-please as the `tibia-sh-bot` GitHub App. It opens or updates the release PR, `chore(main): release X.Y.Z`, labelled `autorelease: pending`. The PR bumps the version in `package.json`, `server.json`, `.claude-plugin/plugin.json`, `.claude-plugin/marketplace.json`, `.mcp.json` and `.release-please-manifest.json`, and adds the release notes to `CHANGELOG.md`.
-2. The App opens the PR, so its CI runs, which it would not for a PR opened with `GITHUB_TOKEN`. The `please` job's step `Turn on auto-merge for the release PR` turns on the PR's auto-merge with a rebase, unless it is on already, so the PR merges itself once the `test` check passes. `main` takes the merge only then.
+2. The App opens the PR, so its CI runs, which it would not for a PR opened with `GITHUB_TOKEN`. The `please` job's step `Turn on auto-merge for the release PR` turns on the PR's auto-merge, unless it is on already, so the PR is added to the merge queue once the `test` check passes, and the queue merges it, as [The merge queue](#the-merge-queue) describes.
 
    If the merge box shows **Approve workflows to run** instead, the PR's CI is waiting for you. Click it, and again after every update to the PR. You can also approve through the API, as `0.3.0` was. Put the `databaseId` of the run whose conclusion is `action_required` in place of `RUN_ID`:
 
@@ -21,6 +21,12 @@
 
 Only the run triggered at the merge commit publishes, because npm provenance names the commit that triggered the run. A run triggered at any other commit that creates the release fails red instead, at the step `Release tagged at another commit, not published`.
 
+## The merge queue
+
+`main` takes changes only through its merge queue. Every merge, a bot's or a person's, is added to the queue, which tests it on top of the latest `main`, one PR per group, and merges it with a rebase only once the required `test` check passes there too. `ci.yml` runs on `merge_group` for that. So a release PR can never merge stale: whatever landed on `main` before it, the queue tests and merges it on top of that, and the merge's push run is the one that releases it.
+
+A PR joins the queue once its own `test` check passes and someone, or its auto-merge, adds it. `gh pr merge <pr>` adds it, or turns on its auto-merge while its checks are still running. The queue sets the merge method, so a method flag such as `--rebase` only makes `gh` warn.
+
 ## A release without a fix or a feature
 
 release-please opens a release PR only for a releasable commit. A `docs:` or a `chore:` is not one, so a README that changed stays off the npm page until the next `fix:` or `feat:`. To release anyway, land a commit whose message ends with a `Release-As` footer naming the version:
@@ -31,7 +37,7 @@ docs: say how to release without a fix or a feature
 Release-As: 0.6.3
 ```
 
-Merge it with a rebase, which keeps the message as it is. A squash merge keeps the footer only when you leave it in the squash message. The push opens the release PR for that version, and from there it is [A normal release](#a-normal-release). `0.6.3` was released this way, to publish the README written for visitors.
+Add its PR to the merge queue, which merges it with a rebase and keeps the message as it is. The push opens the release PR for that version, and from there it is [A normal release](#a-normal-release). `0.6.3` was released this way, to publish the README written for visitors.
 
 ## Where to look
 
@@ -71,7 +77,7 @@ gh release view "v$VERSION"
 ```
 
 - `release not found`: nothing was created. Re-run the failed job with `gh run rerun "$RUN" --failed`. That is not a re-run of a release, because the run released nothing. The re-run keeps the run's commit, so a release it creates is published as in [A normal release](#a-normal-release).
-- The release exists: never re-run the job. Check whether npm has the version with `npm view @tibia.sh/tibiawiki-mcp versions --json`. When it lists the version, the run's commit was not a release, and its manifest names the release before it, or that release was published already. Nothing is left to recover, and the next push to `main` runs release-please again and turns on the open release PR's auto-merge. To merge that PR before then, merge it yourself with `gh pr merge <pr> --rebase --match-head-commit <its head commit>`. When npm does not list it, release-please created the release before a later step failed, so follow [A release npm does not have](#a-release-npm-does-not-have).
+- The release exists: never re-run the job. Check whether npm has the version with `npm view @tibia.sh/tibiawiki-mcp versions --json`. When it lists the version, the run's commit was not a release, and its manifest names the release before it, or that release was published already. Nothing is left to recover, and the next push to `main` runs release-please again and turns on the open release PR's auto-merge. To merge that PR before then, add it to the merge queue yourself with `gh pr merge <pr> --match-head-commit <its head commit>`. When npm does not list it, release-please created the release before a later step failed, so follow [A release npm does not have](#a-release-npm-does-not-have).
 
 ## A merged release PR with no release
 
@@ -163,7 +169,7 @@ The tag and the GitHub release exist, and `npm view @tibia.sh/tibiawiki-mcp vers
 | How it happened | What you see |
 |---|---|
 | The run for the merge commit failed or was cancelled after release-please created the release. npm was down, the trusted publisher did not match, or a test failed on the runner. | That run is red at the step that failed. A trusted publisher that does not match fails `npm publish` with `ENEEDAUTH`. |
-| A run triggered at another commit reached the merged release PR first. Release runs wait their turn, and GitHub does not guarantee their order. | That run is red at `Release tagged at another commit, not published`, and its error names the tag and both commits. The merge commit's own run is green and published nothing. |
+| A run triggered at another commit reached the merged release PR first. Release runs wait their turn, and GitHub does not guarantee their order. The merge queue closes the stale-release-PR case: a release PR merges only after `test` passed on top of the latest `main`. | That run is red at `Release tagged at another commit, not published`, and its error names the tag and both commits. The merge commit's own run is green and published nothing. |
 | Someone re-ran one of those runs. | The latest attempt is green, and the red one is behind the **Latest** menu. |
 
 This is urgent. The release commit pinned `.mcp.json` to the new version, so the plugin on `main` cannot start until npm has it. Once [the re-run](#re-run-the-merge-commits-run) deletes the release tag, installs and updates of the plugin from the marketplace fail until release-please creates it again. While you follow either recovery below, merge nothing to `main`.
@@ -238,13 +244,13 @@ Any other release run that starts between steps 3 and 5 undoes this. After step 
 
 #### A stray release PR
 
-Any release PR opened or updated between steps 3 and 5 merges itself. The run that opens or updates it turns on its auto-merge, and it merges as soon as its CI passes, which takes minutes. A stray PR that shows a version past `$VERSION` then publishes that wrong version, and npm never lets a version be taken back. So check for one right after step 3, and again before the re-run in step 5. The command lists the open release PRs, and prints `[]` when there is none:
+Any release PR opened or updated between steps 3 and 5 merges itself. The run that opens or updates it turns on its auto-merge, it is added to the merge queue as soon as its CI passes, and the queue merges it once `test` passes on top of `main`, all within minutes. A stray PR that shows a version past `$VERSION` then publishes that wrong version, and npm never lets a version be taken back. So check for one right after step 3, and again before the re-run in step 5. The command lists the open release PRs, and prints `[]` when there is none:
 
 ```bash
 gh pr list --label "autorelease: pending" --json number,title,autoMergeRequest
 ```
 
-For each PR it lists, turn off its auto-merge, or close it, before its CI can pass. Then list them again, and go on only when none that you left open shows `autoMergeRequest` other than `null`:
+For each PR it lists, turn off its auto-merge, or close it, before its CI can pass. Once a PR is in the merge queue, `gh pr merge --disable-auto` leaves it there and only says it is already queued to merge, so close that PR, which takes it out of the queue. Then list them again, and go on only when none that you left open shows `autoMergeRequest` other than `null`:
 
 ```bash
 gh pr merge --disable-auto N
@@ -420,7 +426,7 @@ npm deprecate "@tibia.sh/tibiawiki-mcp@$VERSION" "<what is wrong>. Use the next 
 ```
 
 1. Land the fix on `main` as a `fix:` commit. release-please opens or updates the release PR for the next version.
-2. Let the release PR merge itself, as in [A normal release](#a-normal-release).
+2. Let the release PR be added to the merge queue, as in [A normal release](#a-normal-release).
 3. If npm does not have the bad version, retitle its GitHub release, so nobody takes it for a published one:
 
    ```bash

@@ -66,11 +66,12 @@ jobs:
           token: ${{ steps.token.outputs.token }}
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
-      # The release PR merges itself once its checks pass, and the merge is the push that publishes.
-      # release-please hands the PR on as the JSON of an object whose number is a JSON number. A job
-      # output is data, so only a number whose text is digits alone reaches gh. Auto-merge is turned on
-      # only when it is off, and a rebase merge lands release-please's one commit with its message
-      # unchanged. A run that created a release has no PR to merge.
+      # The release PR joins main's merge queue once its checks pass, and the queue's merge is the push
+      # that publishes. release-please hands the PR on as the JSON of an object whose number is a JSON
+      # number. A job output is data, so only a number whose text is digits alone reaches gh. Auto-merge
+      # is turned on only when it is off. The merge queue sets the merge method: with a queue required,
+      # gh only warns about --rebase and the API ignores it, and without one, gh needs a method to run
+      # unattended. A run that created a release has no PR to merge.
       - name: Turn on auto-merge for the release PR
         id: merge
         if: ${{ github.event_name == 'push' && steps.release.outputs.pr && steps.release.outputs.release_created != 'true' }}

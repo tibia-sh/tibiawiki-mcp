@@ -4,6 +4,9 @@ on:
   push:
     branches: [main]
   pull_request:
+  # main's merge queue tests each entry on top of the latest main, and waits for the required test
+  # check to report on it.
+  merge_group:
 
 permissions:
   contents: read

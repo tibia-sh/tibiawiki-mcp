@@ -1,14 +1,14 @@
 name: alert
 
-# Tells the maintainer when a release run did not pass. It comments `<workflow> <conclusion>: <run url>` on
-# the open issue titled `Automation needs a look`, or opens that issue assigned to drptbl. workflow_run
-# matches a workflow by its name:, so the name below is release.yml's. A pull request runs no release, and
-# one never alerts. Runs of every workflow that writes the issue share the concurrency group
-# automation-alert, wait for each other and are never replaced, so no alert is dropped and no second issue
-# is opened.
+# Tells the maintainer when a release or generator run did not pass. It comments `<workflow> <conclusion>:
+# <run url>` on the open issue titled `Automation needs a look`, or opens that issue assigned to drptbl.
+# workflow_run matches a workflow by its name:, so the names below are release.yml's and generator.yml's.
+# A pull request runs neither, and one never alerts. Runs of every workflow that writes the issue share the
+# concurrency group automation-alert, wait for each other and are never replaced, so no alert is dropped
+# and no second issue is opened.
 on:
   workflow_run:
-    workflows: [release]
+    workflows: [release, generator]
     types: [completed]
 
 permissions: {}

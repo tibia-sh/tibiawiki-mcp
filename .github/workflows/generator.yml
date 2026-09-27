@@ -1,0 +1,389 @@
+name: generator
+
+# Moves the generator pin to a new release of tibia-sh/tibiawiki-sql. Its release workflow sends
+# generator-release with {"version": "<x.y.z+tibiash.N>"} once the release is published, and a
+# maintainer can dispatch this workflow by hand with the version. The prepare job moves
+# GENERATOR_VERSION and GENERATOR_SHA256 in src/indexer/build-index.ts, regenerates the attested
+# lock and runs the suite. The propose job checks what prepare handed on against its own work and
+# opens an auto-merging pull request, fix: move the generator to <version>, as the tibia-sh App.
+# That merge releases a patch through release.yml.
+on:
+  repository_dispatch:
+    types: [generator-release]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Generator version to pin, such as 9.0.0+tibiash.3
+        required: true
+
+permissions: {}
+
+# Runs take turns, and a pending run is never replaced, so a second release's request waits for the
+# first one's pull request and then supersedes it.
+concurrency:
+  group: generator
+  cancel-in-progress: false
+  queue: max
+
+jobs:
+  # Holds no App token and names no environment: it runs the generator's lock sequence, the
+  # package's dependencies and the suite, so everything it hands on is data the propose job checks.
+  prepare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read        # the checkout, and main's pin, which decide fetches
+      pull-requests: read   # the open generator/* pull requests decide reads
+    outputs:
+      decision: ${{ steps.decide.outputs.decision }}
+      build_index_sha256: ${{ steps.hash.outputs.build_index_sha256 }}
+      requirements_sha256: ${{ steps.hash.outputs.requirements_sha256 }}
+    env:
+      VERSION: ${{ github.event_name == 'repository_dispatch' && github.event.client_payload.version || inputs.version }}
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8  # v5.0.0
+        with:
+          persist-credentials: false
+      # No cache: this setup-node restores one by itself whenever package.json names a
+      # packageManager, so it is switched off by name.
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444  # v5.0.0
+        with:
+          node-version: '26'
+          package-manager-cache: false
+      # The dispatch's version is data, checked whole before any use. It is not printed, since a
+      # line break in it would start a workflow command of its own.
+      - name: Check the version
+        run: |
+          if [[ ! $VERSION =~ ^[0-9]+\.[0-9]+\.[0-9]+\+tibiash\.[0-9]+$ ]]; then
+            echo "::error::The requested generator version is not x.y.z+tibiash.N."
+            exit 1
+          fi
+      # Runs whatever the decision will be, so every request proves the attestation path first:
+      # tibia-sh/tibiawiki-sql's release workflow built the wheel from the version's tag on a
+      # GitHub-hosted runner. The URL and the flags come from src/indexer/generator-release.ts.
+      - name: Verify the requested wheel's attestation
+        id: attest
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          url="$(node --input-type=module -e '
+            import { generatorWheelUrl } from "./src/indexer/generator-release.ts";
+            process.stdout.write(generatorWheelUrl(process.argv[1]));
+          ' "$VERSION")"
+          flag_lines="$(node --input-type=module -e '
+            import { attestationFlags } from "./src/indexer/generator-release.ts";
+            process.stdout.write(attestationFlags(process.argv[1]).join("\n"));
+          ' "$VERSION")"
+          mapfile -t flags <<< "$flag_lines"
+          wheel="$RUNNER_TEMP/generator.whl"
+          curl -fsSL --max-time 300 -o "$wheel" "$url"
+          timeout --kill-after=10 300 gh attestation verify "$wheel" "${flags[@]}"
+          sha256="$(sha256sum "$wheel")"
+          echo "sha256=${sha256%% *}" >> "$GITHUB_OUTPUT"
+      # Fetches main and reads its pin there, since main can have moved since this run started, and
+      # reads the open generator/* pull requests with github.token. A request below main's pin is a
+      # mistake someone should see, so it fails the run.
+      - name: Decide
+        id: decide
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          decision="$(node scripts/set-generator.ts decide "$VERSION")"
+          action="$(jq -r .action <<< "$decision")"
+          echo "decision=$action" >> "$GITHUB_OUTPUT"
+          case $action in
+            propose) echo "Pinning $VERSION: $decision" ;;
+            rearm) echo "The pull request for $VERSION is open with auto-merge off, so the propose job turns it on: $decision" ;;
+            noop) echo "Nothing to do for $VERSION: main pins it, its pull request is open with auto-merge on, or a newer version's is open." ;;
+            refuse)
+              echo "::error::main pins a newer generator than $VERSION, so it was not pinned."
+              exit 1
+              ;;
+            *)
+              echo "::error::set-generator.ts decide printed an unknown decision."
+              exit 1
+              ;;
+          esac
+      - uses: pnpm/setup@703c52620218391530e48b9e8870d5c0082e1b9b  # v2.1.0
+        if: ${{ steps.decide.outputs.decision == 'propose' }}
+        with:
+          install: true
+          require-lockfile: true
+      # The uv tibiawiki-sql's CI uses. No cache, as nothing outside ci.yml's test job restores one.
+      - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4  # v10.1.0
+        if: ${{ steps.decide.outputs.decision == 'propose' }}
+        with:
+          version: "0.12.12"
+          enable-cache: false
+      # set writes build-index.ts once it has hashed the downloaded wheel. lock-generator then
+      # verifies that wheel's attestation again, with gh and github.token, and writes the lock.
+      - name: Pin the version and regenerate the lock
+        if: ${{ steps.decide.outputs.decision == 'propose' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          node scripts/set-generator.ts set "$VERSION"
+          pnpm lock-generator
+      - run: pnpm test
+        if: ${{ steps.decide.outputs.decision == 'propose' }}
+      - name: Hash the prepared files
+        id: hash
+        if: ${{ steps.decide.outputs.decision == 'propose' }}
+        run: |
+          build_index="$(sha256sum src/indexer/build-index.ts)"
+          requirements="$(sha256sum data/tibiawikisql-requirements.txt)"
+          echo "build_index_sha256=${build_index%% *}" >> "$GITHUB_OUTPUT"
+          echo "requirements_sha256=${requirements%% *}" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        if: ${{ steps.decide.outputs.decision == 'propose' }}
+        with:
+          name: generator
+          path: |
+            src/indexer/build-index.ts
+            data/tibiawikisql-requirements.txt
+          if-no-files-found: error
+          retention-days: 1
+
+  # The one job that writes, and only through a token of the tibia-sh App for this repository, with
+  # contents and pull requests write, minted in the release-trigger environment, which deploys from
+  # main alone. A pull request opened with github.token would run no CI, and its merge no
+  # release.yml. The job installs nothing, restores no cache and runs no dependency code: only git,
+  # gh, curl, jq and node on src/indexer/generator-release.ts and scripts/set-generator.ts from its
+  # own checkout, which import nothing but node: modules and each other. Everything prepare handed
+  # on is data. Before the token exists, this job decides again against main, and binds the
+  # requested version, the attested wheel and the committed hash itself.
+  propose:
+    needs: prepare
+    if: ${{ needs.prepare.outputs.decision == 'propose' || needs.prepare.outputs.decision == 'rearm' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: release-trigger
+    permissions:
+      contents: read        # the checkout, and main's pin, which decide fetches
+      pull-requests: read   # the open generator/* pull requests decide reads
+    env:
+      VERSION: ${{ github.event_name == 'repository_dispatch' && github.event.client_payload.version || inputs.version }}
+    steps:
+      # No ref: the commit that triggered the run, the one prepare checked out.
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8  # v5.0.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444  # v5.0.0
+        with:
+          node-version: '26'
+          package-manager-cache: false
+      # The version comes from the event, checked whole as prepare checks it, and every value
+      # prepare handed on is checked whole before any use.
+      - name: Check the version and what prepare handed on
+        env:
+          PREPARED: ${{ needs.prepare.outputs.decision }}
+          BUILD_INDEX_SHA256: ${{ needs.prepare.outputs.build_index_sha256 }}
+          REQUIREMENTS_SHA256: ${{ needs.prepare.outputs.requirements_sha256 }}
+        run: |
+          if [[ ! $VERSION =~ ^[0-9]+\.[0-9]+\.[0-9]+\+tibiash\.[0-9]+$ ]]; then
+            echo "::error::The requested generator version is not x.y.z+tibiash.N."
+            exit 1
+          fi
+          if [[ ! $PREPARED =~ ^(propose|rearm)$ ]]; then
+            echo "::error::prepare decided neither propose nor rearm."
+            exit 1
+          fi
+          if [[ $PREPARED == propose && ( ! $BUILD_INDEX_SHA256 =~ ^[0-9a-f]{64}$ || ! $REQUIREMENTS_SHA256 =~ ^[0-9a-f]{64}$ ) ]]; then
+            echo "::error::prepare handed on a hash of the prepared files that is not a SHA-256 hex digest."
+            exit 1
+          fi
+      # main can have moved while prepare ran: a newer pin landed, or a newer version's pull request
+      # opened. Only a decision that is still propose or rearm goes on. Anything else ends the run
+      # green, with nothing written.
+      - name: Decide again
+        id: decide
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          PREPARED: ${{ needs.prepare.outputs.decision }}
+        run: |
+          decision="$(node scripts/set-generator.ts decide "$VERSION")"
+          action="$(jq -r .action <<< "$decision")"
+          supersede="$(jq -r '.supersede | map(tostring) | join(" ")' <<< "$decision")"
+          pr="$(jq -r '.pr // ""' <<< "$decision")"
+          if [[ ! $action =~ ^(noop|refuse|rearm|propose)$ || ! $supersede =~ ^([0-9]+( [0-9]+)*)?$ || ! $pr =~ ^[0-9]*$ ]]; then
+            echo "::error::set-generator.ts decide printed a decision this step cannot read."
+            exit 1
+          fi
+          if [[ $action == propose && $PREPARED != propose ]]; then
+            echo "::error::$VERSION needs a new pull request now, but prepare decided $PREPARED and prepared nothing. Dispatch generator.yml again with the version."
+            exit 1
+          fi
+          if [[ $action == noop || $action == refuse ]]; then
+            echo "main moved since prepare decided, and now nothing is to be done for $VERSION: $decision"
+          fi
+          {
+            echo "action=$action"
+            echo "supersede=$supersede"
+            echo "pr=$pr"
+          } >> "$GITHUB_OUTPUT"
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8.0.1
+        if: ${{ steps.decide.outputs.action == 'propose' }}
+        with:
+          name: generator
+          path: ${{ runner.temp }}/prepared
+      # The files are the ones prepare hashed, they change nothing but build-index.ts and the lock,
+      # and build-index.ts changes in its two constant lines alone.
+      - name: Take the prepared files, and check what they change
+        if: ${{ steps.decide.outputs.action == 'propose' }}
+        env:
+          BUILD_INDEX_SHA256: ${{ needs.prepare.outputs.build_index_sha256 }}
+          REQUIREMENTS_SHA256: ${{ needs.prepare.outputs.requirements_sha256 }}
+        run: |
+          prepared="$RUNNER_TEMP/prepared"
+          build_index="$(sha256sum "$prepared/src/indexer/build-index.ts")"
+          requirements="$(sha256sum "$prepared/data/tibiawikisql-requirements.txt")"
+          if [[ ${build_index%% *} != "$BUILD_INDEX_SHA256" || ${requirements%% *} != "$REQUIREMENTS_SHA256" ]]; then
+            echo "::error::The prepared files are not the ones prepare hashed."
+            exit 1
+          fi
+          cp "$prepared/src/indexer/build-index.ts" src/indexer/build-index.ts
+          cp "$prepared/data/tibiawikisql-requirements.txt" data/tibiawikisql-requirements.txt
+          if [[ "$(git diff --name-only)" != $'data/tibiawikisql-requirements.txt\nsrc/indexer/build-index.ts' ]]; then
+            echo "::error::The prepared files change other files than build-index.ts and the lock, or leave one of them as it was."
+            exit 1
+          fi
+          numstat="$(git diff --numstat -- src/indexer/build-index.ts)"
+          constants="$(git diff --unified=0 --no-color -- src/indexer/build-index.ts | grep -cE "^[-+]export const GENERATOR_(VERSION|SHA256) = '[^']*';$" || true)"
+          if [[ $numstat != $'2\t2\tsrc/indexer/build-index.ts' || $constants != 4 ]]; then
+            echo "::error::The prepared build-index.ts changes more than GENERATOR_VERSION and GENERATOR_SHA256."
+            exit 1
+          fi
+      # This job's own download and verification, the same as prepare's, independent of it.
+      - name: Verify the requested wheel's attestation
+        id: attest
+        if: ${{ steps.decide.outputs.action == 'propose' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          url="$(node --input-type=module -e '
+            import { generatorWheelUrl } from "./src/indexer/generator-release.ts";
+            process.stdout.write(generatorWheelUrl(process.argv[1]));
+          ' "$VERSION")"
+          flag_lines="$(node --input-type=module -e '
+            import { attestationFlags } from "./src/indexer/generator-release.ts";
+            process.stdout.write(attestationFlags(process.argv[1]).join("\n"));
+          ' "$VERSION")"
+          mapfile -t flags <<< "$flag_lines"
+          wheel="$RUNNER_TEMP/generator.whl"
+          curl -fsSL --max-time 300 -o "$wheel" "$url"
+          timeout --kill-after=10 300 gh attestation verify "$wheel" "${flags[@]}"
+          sha256="$(sha256sum "$wheel")"
+          echo "sha256=${sha256%% *}" >> "$GITHUB_OUTPUT"
+      # The lock's generator entry is the requested version's wheel, with the attested wheel's
+      # sha256 as its one hash, read by the lock's one parser. The lock's other entries are hash
+      # pinned, and the pull request's CI checks them again.
+      - name: Require the attested wheel in the prepared lock
+        if: ${{ steps.decide.outputs.action == 'propose' }}
+        env:
+          SHA256: ${{ steps.attest.outputs.sha256 }}
+        run: |
+          # shellcheck disable=SC2016 # the ${} is JavaScript's, inside the node script
+          node --input-type=module -e '
+            import { readFileSync } from "node:fs";
+            import { assertGeneratorLocked, generatorWheelUrl } from "./src/indexer/generator-release.ts";
+            const [version, sha256] = process.argv.slice(1);
+            const lock = readFileSync("data/tibiawikisql-requirements.txt", "utf8");
+            assertGeneratorLocked(lock, `tibiawikisql @ ${generatorWheelUrl(version)}`, sha256);
+          ' "$VERSION" "$SHA256"
+      # The version and hash constants are this job's own: the prepared build-index.ts must be byte
+      # for byte the checked-out one with the requested version and the attested wheel's sha256.
+      - name: Require the prepared build-index.ts to be the pin recomputed here
+        if: ${{ steps.decide.outputs.action == 'propose' }}
+        env:
+          SHA256: ${{ steps.attest.outputs.sha256 }}
+        run: |
+          git show HEAD:src/indexer/build-index.ts > "$RUNNER_TEMP/checked-out-build-index.ts"
+          node --input-type=module -e '
+            import { readFileSync } from "node:fs";
+            import { setGenerator } from "./scripts/set-generator.ts";
+            const [version, sha256, checkedOut] = process.argv.slice(1);
+            const expected = setGenerator(readFileSync(checkedOut, "utf8"), version, sha256);
+            if (readFileSync("src/indexer/build-index.ts", "utf8") !== expected) {
+              throw new Error("The prepared build-index.ts is not the checked-out one with " + version + " and sha256:" + sha256 + ".");
+            }
+          ' "$VERSION" "$SHA256" "$RUNNER_TEMP/checked-out-build-index.ts"
+      # A token of the tibia-sh App for this repository alone, which expires within the hour:
+      # contents to push generator/<version>, and pull requests to open, close and comment on pull
+      # requests and turn on auto-merge. Minted after every check, so none of them runs with it.
+      - id: token
+        if: ${{ steps.decide.outputs.action == 'propose' || steps.decide.outputs.action == 'rearm' }}
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1  # v3.2.0
+        with:
+          client-id: ${{ vars.TIBIA_SH_APP_CLIENT_ID }}
+          private-key: ${{ secrets.TIBIA_SH_APP_PRIVATE_KEY }}
+          owner: tibia-sh
+          repositories: tibiawiki-mcp
+          permission-contents: write
+          permission-pull-requests: write
+      - name: Close the pull requests the request supersedes
+        if: ${{ steps.decide.outputs.supersede != '' && (steps.decide.outputs.action == 'propose' || steps.decide.outputs.action == 'rearm') }}
+        env:
+          GH_TOKEN: ${{ steps.token.outputs.token }}
+          GH_REPO: ${{ github.repository }}
+          SUPERSEDE: ${{ steps.decide.outputs.supersede }}
+        run: |
+          for number in $SUPERSEDE; do
+            if [[ ! $number =~ ^[0-9]+$ ]]; then
+              echo "::error::A pull request to close has no plain number."
+              exit 1
+            fi
+            timeout --kill-after=10 120 gh pr close "$number" --comment "Superseded by the pull request for the generator $VERSION."
+          done
+      # A run interrupted after it opened the pull request left auto-merge off. Turning it on is all
+      # this path does: it pushes nothing and takes nothing from prepare.
+      - name: Turn on auto-merge for the open pull request
+        if: ${{ steps.decide.outputs.action == 'rearm' }}
+        env:
+          GH_TOKEN: ${{ steps.token.outputs.token }}
+          GH_REPO: ${{ github.repository }}
+          PR: ${{ steps.decide.outputs.pr }}
+        run: |
+          if [[ ! $PR =~ ^[0-9]+$ ]]; then
+            echo "::error::The pull request to re-arm has no plain number."
+            exit 1
+          fi
+          timeout --kill-after=10 120 gh pr merge "$PR" --auto --rebase
+      # Force-pushes generator/<version>, which replaces a branch an interrupted run left, then opens
+      # the pull request, or reuses this repository's open one, and turns on its auto-merge. The token
+      # reaches git through a credential helper that reads it from the environment, so it is never
+      # written to .git/config and never appears on a command line.
+      - name: Push generator/<version>, open its pull request, and turn on auto-merge
+        if: ${{ steps.decide.outputs.action == 'propose' }}
+        env:
+          GH_TOKEN: ${{ steps.token.outputs.token }}
+          GH_REPO: ${{ github.repository }}
+          SHA256: ${{ steps.attest.outputs.sha256 }}
+          GIT_AUTHOR_NAME: github-actions[bot]
+          GIT_AUTHOR_EMAIL: 41898282+github-actions[bot]@users.noreply.github.com
+          GIT_COMMITTER_NAME: github-actions[bot]
+          GIT_COMMITTER_EMAIL: 41898282+github-actions[bot]@users.noreply.github.com
+        run: |
+          branch="generator/$VERSION"
+          title="fix: move the generator to $VERSION"
+          git add src/indexer/build-index.ts data/tibiawikisql-requirements.txt
+          git commit --quiet -m "$title"
+          # shellcheck disable=SC2016 # git's shell expands $GH_TOKEN when it runs the helper
+          timeout --kill-after=10 120 git -c credential.helper= \
+            -c 'credential.helper=!f() { echo username=x-access-token; echo "password=$GH_TOKEN"; }; f' \
+            push --force origin "HEAD:refs/heads/$branch"
+          number="$(timeout --kill-after=10 120 gh pr list --head "$branch" --base main --state open --json number,isCrossRepository \
+            --jq 'map(select(.isCrossRepository | not)) | .[0].number // empty')"
+          # shellcheck disable=SC2016 # the backticks are Markdown, not command substitution
+          if [[ -z $number ]]; then
+            body="$(printf 'Moves the generator pin to `%s`, the wheel with sha256 `%s`, whose attestation this run verified for `refs/tags/v%s`, and regenerates `data/tibiawikisql-requirements.txt`.\n\nRun: %s/%s/actions/runs/%s\n' \
+              "$VERSION" "$SHA256" "$VERSION" "$GITHUB_SERVER_URL" "$GITHUB_REPOSITORY" "$GITHUB_RUN_ID")"
+            url="$(timeout --kill-after=10 120 gh pr create --head "$branch" --base main --title "$title" --body "$body")"
+            number="${url##*/}"
+          fi
+          if [[ ! $number =~ ^[0-9]+$ ]]; then
+            echo "::error::The pull request for $branch has no plain number."
+            exit 1
+          fi
+          timeout --kill-after=10 120 gh pr merge "$number" --auto --rebase

@@ -2,10 +2,10 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { GENERATOR, GENERATOR_VERSION, GENERATOR_WHEEL_URL } from '../src/indexer/build-index.ts';
-import { generatorWheelUrl } from '../src/indexer/generator-release.ts';
 import {
-  assertGeneratorLocked, generatorEntry, lockGenerator, parseLock, type LockSteps,
-} from '../src/indexer/generator-lock.ts';
+  assertGeneratorLocked, generatorEntry, generatorWheelUrl, parseLock,
+} from '../src/indexer/generator-release.ts';
+import { lockGenerator, type LockSteps } from '../src/indexer/generator-lock.ts';
 
 const ATTESTED = 'c0bbb67c7ffe31f2a6d8ad6f9338683e52c6f526c4ecceaf306ddbb792395d4a';
 const OTHER = '6b779871820528bb800e96a46b38efdd3cd89355985e0b406da32d838e021a5b';
@@ -38,7 +38,7 @@ test('the wheel URL is the release asset of the pinned version', () => {
 
 test('a lock with one URL entry and one hash passes', () => {
   const entry = lock(urlEntry(ATTESTED));
-  assert.deepEqual(generatorEntry(entry), { requirement: GENERATOR, hashes: [ATTESTED] });
+  assert.deepEqual(generatorEntry(entry, GENERATOR), { requirement: GENERATOR, hashes: [ATTESTED] });
   assert.doesNotThrow(() => assertGeneratorLocked(entry, GENERATOR, ATTESTED));
 });
 
@@ -57,23 +57,23 @@ test('a generator entry with two hashes throws', () => {
 });
 
 test('a lock without a tibiawikisql entry throws', () => {
-  assert.throws(() => generatorEntry(lock('')), /found 0/);
+  assert.throws(() => generatorEntry(lock(''), GENERATOR), /found 0/);
   assert.throws(() => assertGeneratorLocked(lock(''), GENERATOR, ATTESTED), /found 0/);
   // A project whose name only starts with the generator's is another project.
-  assert.throws(() => generatorEntry(lock(`tibiawikisql-extra==1.0 \\\n    --hash=sha256:${OTHER}`)), /found 0/);
+  assert.throws(() => generatorEntry(lock(`tibiawikisql-extra==1.0 \\\n    --hash=sha256:${OTHER}`), GENERATOR), /found 0/);
 });
 
 test('a lock with two tibiawikisql entries throws', () => {
   const twice = lock(`${urlEntry(ATTESTED)}\n${urlEntry(ATTESTED)}`);
-  assert.throws(() => generatorEntry(twice), /names tibiawikisql a second time/);
+  assert.throws(() => generatorEntry(twice, GENERATOR), /names tibiawikisql a second time/);
   // The name is matched as a project name, so another spelling of it is the same entry.
   const respelled = lock(`${urlEntry(ATTESTED)}\nTibiaWikiSQL==9.0.0 \\\n    --hash=sha256:${OTHER}`);
-  assert.throws(() => generatorEntry(respelled), /names tibiawikisql a second time/);
+  assert.throws(() => generatorEntry(respelled, GENERATOR), /names tibiawikisql a second time/);
 });
 
 test('a PyPI pin of the generator throws, since it is not the attested wheel', () => {
   const pypi = lock(`tibiawikisql==9.0.0 \\\n    --hash=sha256:${ATTESTED}`);
-  assert.equal(generatorEntry(pypi).requirement, 'tibiawikisql==9.0.0');
+  assert.equal(generatorEntry(pypi, GENERATOR).requirement, 'tibiawikisql==9.0.0');
   assert.throws(() => assertGeneratorLocked(pypi, GENERATOR, ATTESTED), /tibiawikisql==9\.0\.0/);
 });
 
@@ -81,7 +81,7 @@ test('a PyPI pin of the generator throws, since it is not the attested wheel', (
 // not continue it. Read the other way, the next line would hide inside the comment.
 test('a requirement after a comment ending in a backslash is rejected', () => {
   const hidden = `${lock(urlEntry(ATTESTED))}# note \\\n${GENERATOR} --hash=sha256:${OTHER}\n`;
-  assert.throws(() => generatorEntry(hidden), /Line 10 of the lock is not a requirement with its hashes/);
+  assert.throws(() => generatorEntry(hidden, GENERATOR), /Line 10 of the lock is not a requirement with its hashes/);
   assert.throws(() => assertGeneratorLocked(hidden, GENERATOR, ATTESTED), /Line 10 of the lock/);
 });
 
@@ -103,7 +103,7 @@ test('parseLock reads a lock with markers, via notes and several hashes per entr
     `${GENERATOR} \\`,
     `    --hash=sha256:${ATTESTED}`,
     '',
-  ].join('\n')), [
+  ].join('\n'), GENERATOR), [
     { name: 'requests', requirement: 'requests==2.34.2', hashes: [a, b] },
     { name: 'typing-extensions', requirement: 'Typing_Extensions==4.16.0', hashes: [a] },
     { name: 'colorama', requirement: "colorama==0.4.6 ; sys_platform == 'win32'", hashes: [b] },
@@ -141,7 +141,7 @@ for (const [what, char] of HIDING) {
   test(`parseLock rejects ${what}, naming its line and column`, () => {
     const hidden = `# note${char}${GENERATOR} \\\n${lock(urlEntry(ATTESTED))}`;
     const code = char.codePointAt(0)!.toString(16).toUpperCase().padStart(4, '0');
-    assert.throws(() => parseLock(hidden), new RegExp(`^Error: Line 1, column 7 of the lock has U\\+${code}\\.`));
+    assert.throws(() => parseLock(hidden, GENERATOR), new RegExp(`^Error: Line 1, column 7 of the lock has U\\+${code}\\.`));
     assert.throws(() => assertGeneratorLocked(hidden, GENERATOR, ATTESTED), /Line 1, column 7/);
   });
 }
@@ -151,7 +151,7 @@ for (const [what, char] of HIDING) {
 for (const declaration of ['# coding: unicode_escape', '# -*- coding: latin-1 -*-']) {
   test(`parseLock rejects the encoding declaration ${declaration}`, () => {
     const declared = `# a header line\n${declaration}\n${lock(urlEntry(ATTESTED))}`;
-    assert.throws(() => parseLock(declared), /Line 2 of the lock is an encoding declaration/);
+    assert.throws(() => parseLock(declared, GENERATOR), /Line 2 of the lock is an encoding declaration/);
   });
 }
 
@@ -163,13 +163,13 @@ const DOLLARS: Array<[string, string, RegExp]> = [
 ];
 for (const [what, text, error] of DOLLARS) {
   test(`parseLock rejects ${what}, naming its line and column`, () => {
-    assert.throws(() => parseLock(text), error);
+    assert.throws(() => parseLock(text, GENERATOR), error);
   });
 }
 
 for (const [what, text, error] of REJECTED) {
   test(`parseLock rejects ${what}`, () => {
-    assert.throws(() => parseLock(text), error);
+    assert.throws(() => parseLock(text, GENERATOR), error);
   });
 }
 

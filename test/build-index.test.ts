@@ -12,7 +12,7 @@ import { resolveDbPath } from '../src/db.ts';
 import {
   buildIndex, GENERATOR, GENERATOR_PYTHON, GENERATOR_SHA256, GENERATOR_VERSION, type Runner,
 } from '../src/indexer/build-index.ts';
-import { generatorEntry, parseLock } from '../src/indexer/generator-lock.ts';
+import { generatorEntry, parseLock } from '../src/indexer/generator-release.ts';
 import { eligibleScenes, MCP_SCHEMA_VERSION, type EnrichStats } from '../src/indexer/enrich.ts';
 import { FIXTURE, tempDirs } from './harness.ts';
 
@@ -102,7 +102,7 @@ function captureStderr() {
  * The committed lock's requirements, read by the lock's own grammar rather than through
  * build-index's count, so a miscount there cannot pass by agreeing with itself.
  */
-const lockEntries = () => parseLock(readFileSync(LOCK, 'utf8'));
+const lockEntries = () => parseLock(readFileSync(LOCK, 'utf8'), GENERATOR);
 
 test('runs uv venv, uv pip install and uv run in that order, then installs atomically', async () => {
   const dir = scratch();
@@ -684,7 +684,7 @@ test('the generator lock pins every dependency with == and hashes it', () => {
  * whatever wrote it.
  */
 const assertApprovedWheel = (lock: string) =>
-  assert.deepEqual(generatorEntry(lock), { requirement: GENERATOR, hashes: [GENERATOR_SHA256] });
+  assert.deepEqual(generatorEntry(lock, GENERATOR), { requirement: GENERATOR, hashes: [GENERATOR_SHA256] });
 
 test('the lock pins the generator build-index runs to the approved wheel', () => {
   assertApprovedWheel(readFileSync(LOCK, 'utf8'));
@@ -715,7 +715,7 @@ test('the lock header records the cutoff, the uv version, the Python range, the 
   const header = /^(?:#.*\n)+/.exec(lock)?.[0] ?? '';
   const field = (name: string) => new RegExp(`^# ${name}: (.+)$`, 'm').exec(header)?.[1];
   // The attestation lock-generator verified is for the wheel the lock records.
-  const [hash] = generatorEntry(lock).hashes;
+  const [hash] = generatorEntry(lock, GENERATOR).hashes;
   assert.equal(field('attested'), `sha256:${hash} refs/tags/v${GENERATOR_VERSION}`);
   const cutoff = field('cutoff');
   assert.match(cutoff ?? '', /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/, 'an absolute cutoff, as re-running needs it');

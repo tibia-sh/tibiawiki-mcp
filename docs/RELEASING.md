@@ -33,7 +33,7 @@ A PR joins the queue once its own `test` check passes and someone, or its auto-m
 
 The step reads the merge group's ref in its full form, `refs/heads/gh-readonly-queue/…`, as GitHub's webhook schema describes it: "The full ref of the merge group". No run of this repository has shown the value yet, so check the first release PR that goes through the queue. Its merge group's `test` run prints `The release PR was built on <sha>, the commit this queue entry merges onto.` in the step `Keep a release PR older than main out of the queue`.
 
-If the ref arrives in another form, such as without `refs/heads/`, the step fails closed. It refuses every release PR with `The merge group's ref names no pull request and base commit`, so no release PR merges and nothing is published. The alert does not fire for it, because `alert.yml` watches only `release` runs, and a release PR that leaves the queue fails no release run. What you see instead is the release PR leaving the queue after every push to `main`, with that error in its merge group's `test` run. Fix the ref pattern in `ci.yml` in a PR of its own. That PR changes no manifest, so the step lets it through, and the release PR goes through on the push after it merges.
+If the ref arrives in another form, such as without `refs/heads/`, the step fails closed. It refuses every release PR with `The merge group's ref names no pull request and base commit`, so no release PR merges and nothing is published. The alert does not fire for it, because `alert.yml` watches only `release` and `generator` runs, and a release PR that leaves the queue fails neither. What you see instead is the release PR leaving the queue after every push to `main`, with that error in its merge group's `test` run. Fix the ref pattern in `ci.yml` in a PR of its own. That PR changes no manifest, so the step lets it through, and the release PR goes through on the push after it merges.
 
 The step's read of `main`'s release run has not run live yet either. If the `test` job's token cannot read it, the step refuses every release PR the same way, with `Could not read main's release run for <sha>`, and the alert does not fire for that either. Check the job's `actions: read` and the query in `ci.yml`, and fix them in a PR of their own.
 
@@ -59,10 +59,35 @@ Add its PR to the merge queue, which merges it with a rebase and keeps the messa
 | Versions in the MCP registry | `curl -sS https://registry.modelcontextprotocol.io/v0.1/servers/sh.tibia%2Ftibiawiki-mcp/versions` |
 | A GitHub release and its commit | `gh release view vX.Y.Z --json targetCommitish,isImmutable` |
 | A release PR's labels and merge commit | `gh pr view <pr> --json labels,mergeCommit` |
+| Generator runs, and their open pull requests | `gh run list --workflow generator.yml`, `gh pr list --json number,headRefName --jq '.[] \| select(.headRefName \| startswith("generator/"))'` |
 
 Run `gh` from a checkout of this repository, or add `-R tibia-sh/tibiawiki-mcp`.
 
 Read the whole version list. `npm view @tibia.sh/tibiawiki-mcp@X.Y.Z` exits 1 both for a version npm lacks and for a registry it cannot read. A new version can also be missing from the list for a few minutes. `0.1.0` took about 5 minutes to show up.
+
+## A new generator release
+
+`build-index` runs the generator release that `GENERATOR_VERSION` and `GENERATOR_SHA256` in `src/indexer/build-index.ts` pin, as [The generator](MAINTAINING.md#the-generator) in `docs/MAINTAINING.md` describes. `.github/workflows/generator.yml` moves that pin. When `tibia-sh/tibiawiki-sql` publishes a release, its release workflow sends a `repository_dispatch` of type `generator-release` with `{"version": "X.Y.Z+tibiash.N"}`, which starts it. A maintainer can start it by hand with the version too. Runs take turns, and a waiting run is never replaced.
+
+1. The `prepare` job holds no App token and names no environment. It checks the version whole, downloads the wheel and runs `gh attestation verify` on it with `github.token`, on every run, whatever the decision. Then `node scripts/set-generator.ts decide <version>` fetches `main`, reads its pin there, reads this repository's open pull requests from `generator/*` branches, and decides:
+   - `noop` when `main` pins the version, when its pull request is open with auto-merge on, or when a newer version's pull request is open. The run ends green.
+   - `refuse` when the version is below `main`'s pin. The run fails, and `alert.yml` comments on the issue.
+   - `rearm` when its pull request is open with auto-merge off, as a run interrupted after it opened the pull request leaves it.
+   - `propose` otherwise. The job installs, runs `node scripts/set-generator.ts set <version>` and `pnpm lock-generator`, which verifies the attestation again and writes the lock, runs `pnpm test`, and hands on `build-index.ts` and the lock with their sha256.
+2. The `propose` job runs in the `release-trigger` environment and installs nothing. It runs `decide` again, and ends green with nothing done when `main` moved meanwhile, such as a newer pin that landed. On `propose` it takes the two files only if they are the ones `prepare` hashed and change nothing but the two constants and the lock. It downloads the wheel itself and verifies its attestation, requires the lock's generator entry to hold that wheel's sha256 and nothing else, and requires `build-index.ts` to be byte for byte the checked-out one with the version and that sha256. Only then does it mint the App's token, for this repository alone. It closes the pull requests for older versions with a comment. On `rearm` it only turns auto-merge back on. On `propose` it force-pushes `generator/<version>`, over a branch an interrupted run left, opens `fix: move the generator to <version>`, or reuses this repository's open one, and turns on auto-merge.
+3. The pull request's CI checks the lock again, and the merge queue merges it. The merge releases a patch, as in [A normal release](#a-normal-release).
+
+A generator pull request that waits in the queue behind other entries is fine. It changes no `.release-please-manifest.json`, so the queue check lets it through, and no stale-base rule applies to it.
+
+### A failed generator run
+
+`alert.yml` comments `generator failure: <run url>` on the issue. Read the run's red step, fix what it names, and start the workflow again by hand on `main` with the version:
+
+```bash
+gh workflow run generator.yml --ref main -f version=X.Y.Z+tibiash.N
+```
+
+The run decides afresh. A version `main` pins already, or whose pull request is open with auto-merge on, ends it green with nothing to do, and a pull request an earlier run left open with auto-merge off gets its auto-merge back. A version below `main`'s pin fails it again, which is right: nothing moves the pin backwards.
 
 ## Re-running a release run
 

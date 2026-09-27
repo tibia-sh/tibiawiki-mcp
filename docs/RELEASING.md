@@ -16,7 +16,7 @@
    gh api -X POST repos/tibia-sh/tibiawiki-mcp/actions/runs/RUN_ID/approve
    ```
 
-3. The merge publishes. The merge's push run creates the tag `vX.Y.Z` and the GitHub release at the merge commit in its `please` job, and relabels the PR `autorelease: tagged`. Then its `release` job checks out that commit, runs `pnpm install --frozen-lockfile` and `pnpm test`, and runs `npm publish` through npm trusted publishing. npm adds provenance for that commit when it confirms that the repository and the package are public. Once npm accepts the publish, the run's `registry` job checks out the tag, checks that `server.json` carries its version, and waits until npm serves that version. Then one step, `Publish to the MCP registry`, publishes `server.json` to the MCP registry in up to three attempts, 30 seconds apart. Each attempt runs its own login. Beside the `registry` job, the run's `hosting` job tells `tibia-sh/mcp.tibia.sh` about the release, and that repository pins the version and deploys it, as [The hosting dispatch](#the-hosting-dispatch) describes.
+3. The merge publishes. The merge's push run creates the tag `vX.Y.Z` and the GitHub release at the merge commit in its `please` job, and relabels the PR `autorelease: tagged`. Then its `release` job checks out that commit, runs `pnpm install --frozen-lockfile` and `pnpm test`, and runs `npm publish` through npm trusted publishing. npm adds provenance for that commit when it confirms that the repository and the package are public. Once npm accepts the publish, the run's `registry` job checks out the tag, checks that `server.json` carries its version, and waits until npm serves that version. Then one step, `Publish to the MCP registry`, publishes `server.json` to the MCP registry in up to three attempts, 30 seconds apart. Each attempt runs its own login. Beside the `registry` job, the run's `hosting` job tells `tibia-sh/mcp.tibia.sh` about the release, and that repository pins the version and deploys it, as [The hosting dispatch](#the-hosting-dispatch) describes. Its `data` job tells `tibia-sh/tibiawiki-data` about it too, as [The data dispatch](#the-data-dispatch) describes.
 4. The release is done when that run is green, its `npm publish` and `Publish to the MCP registry` steps ran, and both npm and the MCP registry list the version.
 
 Only the run triggered at the merge commit publishes, because npm provenance names the commit that triggered the run. A run triggered at any other commit that creates the release fails red instead, at the step `Release tagged at another commit, not published`.
@@ -93,8 +93,8 @@ The run decides afresh. A version `main` pins already, or whose pull request is 
 
 GitHub re-runs a run in two ways, and since release-please and the publish run in separate jobs, they end differently.
 
-- **Re-run all jobs**, `gh run rerun <run-id>`, runs every job again, `please` included. After a failed attempt that created the GitHub release, it publishes nothing. The failed attempt already relabelled the PR `autorelease: tagged`, so the re-run's `please` job finds no release PR left to release. `release_created` stays unset, so no step of the `release` job builds or publishes anything, `released` stays empty, and the `registry` and `hosting` jobs are skipped. The run turns green, unless another merged release PR still carries `autorelease: pending`, and the red attempt is then only behind the **Latest** menu.
-- **Re-run failed jobs**, `gh run rerun <run-id> --failed`, runs only the jobs that failed and the jobs that need them, and hands them the outputs that the jobs which passed set in the failed attempt. After a failed `release` job, the re-run reuses the `please` job's outputs, so the `release` job runs its checks and the publish again for the release that attempt created, in the same run and at the same commit, and the `registry` and `hosting` jobs run once npm accepts it. After a failed `registry` or `hosting` job, the re-run runs that job again with the `release` job's outputs.
+- **Re-run all jobs**, `gh run rerun <run-id>`, runs every job again, `please` included. After a failed attempt that created the GitHub release, it publishes nothing. The failed attempt already relabelled the PR `autorelease: tagged`, so the re-run's `please` job finds no release PR left to release. `release_created` stays unset, so no step of the `release` job builds or publishes anything, `released` stays empty, and the `registry`, `hosting` and `data` jobs are skipped. The run turns green, unless another merged release PR still carries `autorelease: pending`, and the red attempt is then only behind the **Latest** menu.
+- **Re-run failed jobs**, `gh run rerun <run-id> --failed`, runs only the jobs that failed and the jobs that need them, and hands them the outputs that the jobs which passed set in the failed attempt. After a failed `release` job, the re-run reuses the `please` job's outputs, so the `release` job runs its checks and the publish again for the release that attempt created, in the same run and at the same commit, and the `registry`, `hosting` and `data` jobs run once npm accepts it. After a failed `registry`, `hosting` or `data` job, the re-run runs that job again with the `release` job's outputs.
 
 A green release run does not prove a publish. Check npm. A re-run of all jobs publishes only in [the recovery below](#re-run-the-merge-commits-run), after the release, the tag and the label are reset.
 
@@ -441,6 +441,20 @@ gh workflow run bump.yml -R tibia-sh/mcp.tibia.sh --ref main -f package=@tibia.s
 ```
 
 The run it starts does what the dispatch would have. A version the hosting repo already pins ends it green with nothing to do, so a dispatch that arrived after all costs nothing. A version below the pinned one fails it, because `bump.yml` refuses a downgrade.
+
+## The data dispatch
+
+Once npm accepts the publish, the run's `data` job tells `tibia-sh/tibiawiki-data` about the release, beside the `hosting` job and in the same way. Its step `Tell tibiawiki-data about the release` sends a `repository_dispatch` of type `server-release` with `{"version": "X.Y.Z"}`, as the tibia-sh App, with a token for `tibia-sh/tibiawiki-data` alone, with contents write. It makes up to three attempts, 30 seconds apart, and prints `Told tibia-sh/tibiawiki-data about @tibia.sh/tibiawiki-mcp X.Y.Z in attempt N.` once one got through.
+
+The dispatch starts `drift.yml` in the data repo, which pins the version, rebuilds the index with it and opens a pull request. When the wiki has not changed, the pull request moves the pin alone and publishes nothing. Otherwise it releases a patch of the data package that also moves the pin. `gh run list --workflow drift.yml -R tibia-sh/tibiawiki-data` lists its runs.
+
+A red `data` job leaves npm, the MCP registry and the hosting dispatch untouched. Never re-run the release run for it, for the reasons [The hosting dispatch](#the-hosting-dispatch) gives. Start `drift.yml` by hand on `main` of the data repo instead. Without a version it pins the newest one npm lists:
+
+```bash
+gh workflow run drift.yml -R tibia-sh/tibiawiki-data --ref main
+```
+
+Or wait for its scheduled run on Tuesdays and Fridays, which does the same.
 
 ## A bad release
 

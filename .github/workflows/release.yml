@@ -338,3 +338,51 @@ jobs:
           done
           echo "::error::Could not tell tibia-sh/mcp.tibia.sh about @tibia.sh/tibiawiki-mcp ${TAG#v} in 3 attempts, 30 seconds apart. Run bump.yml there by hand, as \"The hosting dispatch\" in docs/RELEASING.md describes."
           exit 1
+
+  # Tells tibia-sh/tibiawiki-data about the release, so its drift.yml pins the version, rebuilds the
+  # index with it and opens its pull request. The same pattern as the hosting job, beside it: a job of
+  # its own in the release-trigger environment, which needs only the release job.
+  data:
+    needs: release
+    if: ${{ needs.release.outputs.released == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    environment: release-trigger
+    permissions:
+      contents: read
+    env:
+      TAG: ${{ needs.release.outputs.tag }}
+    steps:
+      # A token of the App for the data repository alone, which expires within the hour. A
+      # repository_dispatch needs contents write, and the token can do nothing else.
+      - id: token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1  # v3.2.0
+        with:
+          client-id: ${{ vars.TIBIA_SH_APP_CLIENT_ID }}
+          private-key: ${{ secrets.TIBIA_SH_APP_PRIVATE_KEY }}
+          owner: tibia-sh
+          repositories: tibiawiki-data
+          permission-contents: write
+      # As the hosting dispatch: three attempts 30 seconds apart, each bounded by timeout. A dispatch
+      # that got through twice is harmless, because drift.yml finds the version pinned or its pull
+      # request open.
+      - name: Tell tibiawiki-data about the release
+        env:
+          GH_TOKEN: ${{ steps.token.outputs.token }}
+        run: |
+          if [[ ! "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::The released tag must look like v1.2.3, and this run has \"$TAG\"."
+            exit 1
+          fi
+          body="$(jq -n --arg version "${TAG#v}" '{event_type: "server-release", client_payload: {version: $version}}')"
+          for attempt in 1 2 3; do
+            if [ "$attempt" -gt 1 ]; then
+              sleep 30
+            fi
+            if timeout --kill-after=10 120 gh api repos/tibia-sh/tibiawiki-data/dispatches --input - <<< "$body"; then
+              echo "Told tibia-sh/tibiawiki-data about @tibia.sh/tibiawiki-mcp ${TAG#v} in attempt $attempt."
+              exit 0
+            fi
+          done
+          echo "::error::Could not tell tibia-sh/tibiawiki-data about @tibia.sh/tibiawiki-mcp ${TAG#v} in 3 attempts, 30 seconds apart. Run drift.yml there by hand, or wait for its next scheduled run, as \"The data dispatch\" in docs/RELEASING.md describes."
+          exit 1

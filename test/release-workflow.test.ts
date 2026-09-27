@@ -24,6 +24,8 @@ const registryJob = (): string => under(under(workflowCode(), 'jobs'), 'registry
 
 const hostingJob = (): string => under(under(workflowCode(), 'jobs'), 'hosting');
 
+const dataJob = (): string => under(under(workflowCode(), 'jobs'), 'data');
+
 /**
  * The release job's own permissions block. It replaces the workflow-level block instead
  * of adding to it, so every grant the job needs has to sit here.
@@ -41,6 +43,9 @@ const registryJobSteps = (): string[] => jobSteps(registryJob());
 
 /** The hosting job's steps, one string per list item. */
 const hostingJobSteps = (): string[] => jobSteps(hostingJob());
+
+/** The data job's steps, one string per list item. */
+const dataJobSteps = (): string[] => jobSteps(dataJob());
 
 const scratch = tempDirs('twmcp-release-workflow-');
 
@@ -147,6 +152,9 @@ const PLEASE_TOKEN_INPUTS = {
 
 /** What the hosting dispatch's token may do: the hosting repository alone, and a repository_dispatch. */
 const HOSTING_TOKEN_INPUTS = { ...APP, repositories: 'mcp.tibia.sh', 'permission-contents': 'write' };
+
+/** What the data dispatch's token may do: the data repository alone, and a repository_dispatch. */
+const DATA_TOKEN_INPUTS = { ...APP, repositories: 'tibiawiki-data', 'permission-contents': 'write' };
 
 /** The token step's inputs. */
 const pleaseTokenInputs = (): Record<string, string> => mappingOf(stepInputs(appTokenStep(pleaseJob(), 'please')));
@@ -561,8 +569,10 @@ test('release-please runs as the App in its own job, which checks nothing out th
     .split('\n')
     .filter((line) => /\bsteps\.token\b/.test(line))
     .map((line) => line.trim());
+  // The hosting and data jobs' dispatch steps read their own jobs' tokens.
   assert.deepEqual(readers, [
     'token: ${{ steps.token.outputs.token }}',
+    'GH_TOKEN: ${{ steps.token.outputs.token }}',
     'GH_TOKEN: ${{ steps.token.outputs.token }}',
     'GH_TOKEN: ${{ steps.token.outputs.token }}',
   ]);
@@ -728,8 +738,9 @@ test('a workflow_dispatch still reaches registry', () => {
     release: 'success',
     registry: 'success',
     hosting: 'skipped',
+    data: 'skipped',
   });
-  // A push that published reaches both jobs after the publish, and one that released nothing neither.
+  // A push that published reaches every job after the publish, and one that released nothing none of them.
   const released = {
     please: { release_created: 'true', tag: 'v1.2.3', sha: '0123456789abcdef0123456789abcdef01234567' },
     release: { released: 'true', tag: 'v1.2.3' },
@@ -739,12 +750,14 @@ test('a workflow_dispatch still reaches registry', () => {
     release: 'success',
     registry: 'success',
     hosting: 'success',
+    data: 'success',
   });
   assert.deepEqual(walk(code, { event: 'push', outputs: { please: { pr_number: '42' } } }), {
     please: 'success',
     release: 'success',
     registry: 'skipped',
     hosting: 'skipped',
+    data: 'skipped',
   });
   // A failed please job publishes nothing.
   assert.deepEqual(walk(code, { event: 'push', outputs: released, failing: ['please'] }), {
@@ -752,6 +765,7 @@ test('a workflow_dispatch still reaches registry', () => {
     release: 'skipped',
     registry: 'skipped',
     hosting: 'skipped',
+    data: 'skipped',
   });
   // The walk follows the graph, not one gate: the push gate moved from the steps to the please job
   // skips the registry job two jobs later, although that job's own if lets a dispatch through.
@@ -762,6 +776,7 @@ test('a workflow_dispatch still reaches registry', () => {
     release: 'skipped',
     registry: 'skipped',
     hosting: 'skipped',
+    data: 'skipped',
   });
 });
 
@@ -942,6 +957,12 @@ const registryPublishStep = (): string => {
 const hostingDispatchStep = (): string => {
   const steps = hostingJobSteps().filter((step) => /\bgh +api +repos\/tibia-sh\/mcp\.tibia\.sh\/dispatches\b/.test(stepScript(step) ?? ''));
   assert.equal(steps.length, 1, 'expected exactly one hosting job step that runs gh api repos/tibia-sh/mcp.tibia.sh/dispatches');
+  return steps[0]!;
+};
+
+const dataDispatchStep = (): string => {
+  const steps = dataJobSteps().filter((step) => /\bgh +api +repos\/tibia-sh\/tibiawiki-data\/dispatches\b/.test(stepScript(step) ?? ''));
+  assert.equal(steps.length, 1, 'expected exactly one data job step that runs gh api repos/tibia-sh/tibiawiki-data/dispatches');
   return steps[0]!;
 };
 
@@ -1172,7 +1193,7 @@ if [ "$#" -ge 2 ] && [ "$1" = api ] && [ "$2" = graphql ]; then
   cat "$here/response"
   exit "$(cat "$here/exit")"
 fi
-if [ "$#" -ne 4 ] || [ "$1" != api ] || [ "$2" != repos/tibia-sh/mcp.tibia.sh/dispatches ] || [ "$3" != --input ] || [ "$4" != - ]; then
+if [ "$#" -ne 4 ] || [ "$1" != api ] || { [ "$2" != repos/tibia-sh/mcp.tibia.sh/dispatches ] && [ "$2" != repos/tibia-sh/tibiawiki-data/dispatches ]; } || [ "$3" != --input ] || [ "$4" != - ]; then
   echo "fake gh: unsupported command: $*" >&2
   exit 2
 fi
@@ -1355,6 +1376,7 @@ const JOB_SECRETS: Array<{ job: string; secret: string; block: 'env' | 'with'; k
   { job: 'please', secret: 'TIBIA_SH_APP_PRIVATE_KEY', block: 'with', key: 'private-key', step: () => appTokenStep(pleaseJob(), 'please') },
   { job: 'registry', secret: 'MCP_PRIVATE_KEY', block: 'env', key: 'MCP_PRIVATE_KEY', step: registryPublishStep },
   { job: 'hosting', secret: 'TIBIA_SH_APP_PRIVATE_KEY', block: 'with', key: 'private-key', step: () => appTokenStep(hostingJob(), 'hosting') },
+  { job: 'data', secret: 'TIBIA_SH_APP_PRIVATE_KEY', block: 'with', key: 'private-key', step: () => appTokenStep(dataJob(), 'data') },
 ];
 
 test("each environment job's secret reaches one of its steps, and the registry key only the login command", () => {
@@ -1834,11 +1856,11 @@ const json = (body: string): unknown => {
  * calls in order. The step holds the token in its env, so any command that prints it, such as an
  * environment dump or a trace, fails every run.
  */
-const runHostingDispatch = (tag: string, answers: GhReply[]) => {
+const runHostingDispatch = (tag: string, answers: GhReply[], step = hostingDispatchStep()) => {
   const dir = scratch();
   writeFileSync(join(dir, 'answers'), answers.map(({ code, text }) => `${code} ${text}\n`).join(''));
   const env = { TAG: tag, GH_TOKEN: HOSTING_TOKEN, PATH: `${fakeBin()}:${process.env['PATH'] ?? ''}`, FAKE_RUN: dir, GH_RUN: dir };
-  const run = bash(stepScript(hostingDispatchStep())!, env, dir);
+  const run = bash(stepScript(step)!, env, dir);
   assert.ok(!`${run.stdout}${run.stderr}`.includes(HOSTING_TOKEN), 'the dispatch step printed the token');
   return {
     status: run.status,
@@ -1939,6 +1961,86 @@ test('the hosting dispatch uses an App token limited to mcp.tibia.sh', () => {
   const readers = hosting.split('\n').filter((line) => /\bsteps\.token\b/.test(line));
   assert.equal(readers.length, 1, 'the token reaches another step of the hosting job');
   assert.ok(hostingDispatchStep().split('\n').includes(readers[0]!), 'the token reaches another step of the hosting job');
+});
+
+test('release.yml dispatches server-release only after a publish', () => {
+  // tibiawiki-data's drift.yml pins the released server on this dispatch. The job follows the hosting
+  // job's pattern: its own job in the release-trigger environment, needing only the release job, run
+  // once npm accepted the publish, so a dispatched run, which releases nothing, skips it. It runs no
+  // action but the token action, and checks nothing out.
+  const data = dataJob();
+  assert.notEqual(data, '', 'the workflow has no data job');
+  assert.equal(scalar(data, 'needs'), 'release');
+  assert.equal(scalar(data, 'if'), HOSTING_GATE);
+  assert.equal(scalar(data, 'runs-on'), 'ubuntu-latest');
+  assert.equal(scalar(data, 'environment'), 'release-trigger');
+  assert.equal(scalar(data, 'timeout-minutes'), '8');
+  assert.deepEqual(mappingOf(under(data, 'permissions')), { contents: 'read' });
+  assert.deepEqual(mappingOf(under(data, 'env')), { TAG: '${{ needs.release.outputs.tag }}' });
+  assert.equal(data.split('uses:').length - 1, 1, 'the data job runs an action besides the token action');
+  const steps = dataJobSteps();
+  assert.equal(steps.length, 2, 'expected the token step, then the dispatch');
+  const [token, step] = steps as [string, string];
+  assert.equal(token, appTokenStep(data, 'data'), 'the data job does not mint its token first');
+  assert.equal(step, dataDispatchStep(), 'the data job step does not send the dispatch');
+  // docs/RELEASING.md names the step.
+  assert.equal(scalar(stepBody(step), 'name'), 'Tell tibiawiki-data about the release');
+  for (const each of steps) {
+    assert.equal(stepIf(each), undefined, `${stepName(each)} sets if`);
+    assertDefaultShell(data, each);
+  }
+  // It checks the tag before it calls gh, and sends the tag's version as drift.yml reads it.
+  for (const tag of ['', '0.6.1', 'v0.6.1-rc.1', 'v0.6.1; true']) {
+    const run = runHostingDispatch(tag, [DISPATCHED], step);
+    assert.equal(run.status, 1, `${JSON.stringify(tag)} is accepted: ${run.output}`);
+    assert.deepEqual(run.events, [], `${JSON.stringify(tag)} reaches gh or sleep`);
+  }
+  const run = runHostingDispatch('v0.6.1', [GITHUB_FAILED, DISPATCHED], step);
+  assert.equal(run.status, 0, run.output);
+  assert.deepEqual(run.events, [DATA_DISPATCH, PAUSE, DATA_DISPATCH]);
+  assert.deepEqual(run.bodies.map(json), [SERVER_RELEASE, SERVER_RELEASE]);
+  assert.ok(
+    run.stdout.split('\n').includes('Told tibia-sh/tibiawiki-data about @tibia.sh/tibiawiki-mcp 0.6.1 in attempt 2.'),
+    `the log does not say which attempt got through: ${run.output}`,
+  );
+});
+
+/** What the fakes record for the data dispatch, and the body drift.yml reads. */
+const DATA_DISPATCH = 'gh api repos/tibia-sh/tibiawiki-data/dispatches --input -';
+const SERVER_RELEASE = { event_type: 'server-release', client_payload: { version: '0.6.1' } };
+
+test('the data dispatch fails after 3 attempts, 30 seconds apart, and names the runbook section with the manual run', () => {
+  const failures = [HOSTING_UNREACHABLE, TOKEN_REJECTED, GITHUB_FAILED];
+  const run = runHostingDispatch('v0.6.1', failures, dataDispatchStep());
+  assert.equal(run.status, 1, run.output);
+  assert.deepEqual(run.events, [DATA_DISPATCH, PAUSE, DATA_DISPATCH, PAUSE, DATA_DISPATCH]);
+  assert.deepEqual(run.errors, [
+    '::error::Could not tell tibia-sh/tibiawiki-data about @tibia.sh/tibiawiki-mcp 0.6.1 in 3 attempts, 30 seconds apart. Run drift.yml there by hand, or wait for its next scheduled run, as "The data dispatch" in docs/RELEASING.md describes.',
+  ]);
+  const lines = read('docs/RELEASING.md').split('\n');
+  const start = lines.indexOf('## The data dispatch');
+  assert.notEqual(start, -1, 'docs/RELEASING.md has no section "The data dispatch"');
+  const end = lines.findIndex((line, index) => index > start && line.startsWith('## '));
+  assert.ok(
+    lines.slice(start, end === -1 ? undefined : end).includes('gh workflow run drift.yml -R tibia-sh/tibiawiki-data --ref main'),
+    '"The data dispatch" in docs/RELEASING.md does not give the manual run',
+  );
+});
+
+test('the data dispatch uses an App token limited to tibiawiki-data', () => {
+  // One repository, contents write, which a repository_dispatch needs, and nothing more. Only the
+  // dispatch step reads it, through its env, where gh finds it by itself.
+  const data = dataJob();
+  const token = appTokenStep(data, 'data');
+  assert.equal(scalar(stepBody(token), 'uses'), APP_TOKEN_ACTION);
+  assert.equal(scalar(stepBody(token), 'id'), 'token');
+  assert.deepEqual(mappingOf(stepInputs(token)), DATA_TOKEN_INPUTS);
+  assert.equal(under(stepBody(token), 'env'), '', 'the token step has an env');
+  assert.deepEqual(mappingOf(under(stepBody(dataDispatchStep()), 'env')), { GH_TOKEN: '${{ steps.token.outputs.token }}' });
+  const readers = data.split('\n').filter((line) => /\bsteps\.token\b/.test(line));
+  assert.equal(readers.length, 1, 'the token reaches another step of the data job');
+  assert.ok(dataDispatchStep().split('\n').includes(readers[0]!), 'the token reaches another step of the data job');
+  assert.doesNotMatch(stepScript(dataDispatchStep()) ?? '', /GH_TOKEN|\btoken\b/, 'the data dispatch script names its token');
 });
 
 /** The auto-merge step's condition: a push run where release-please reported a PR and created no release. */
@@ -2071,9 +2173,11 @@ test('no workflow reads a PAT secret', () => {
     'release.yml private-key: ${{ secrets.TIBIA_SH_APP_PRIVATE_KEY }}',
     'release.yml MCP_PRIVATE_KEY: ${{ secrets.MCP_PRIVATE_KEY }}',
     'release.yml private-key: ${{ secrets.TIBIA_SH_APP_PRIVATE_KEY }}',
+    'release.yml private-key: ${{ secrets.TIBIA_SH_APP_PRIVATE_KEY }}',
   ]);
   assert.deepEqual(context('vars'), [
     'generator.yml client-id: ${{ vars.TIBIA_SH_APP_CLIENT_ID }}',
+    'release.yml client-id: ${{ vars.TIBIA_SH_APP_CLIENT_ID }}',
     'release.yml client-id: ${{ vars.TIBIA_SH_APP_CLIENT_ID }}',
     'release.yml client-id: ${{ vars.TIBIA_SH_APP_CLIENT_ID }}',
   ]);

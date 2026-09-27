@@ -35,9 +35,13 @@ to the GitHub release and attests it. The server pins that wheel in
   `pnpm test` fails on a lock that records any other wheel, so a release asset replaced
   after the fact cannot reach a build.
 
-To move to a new release, set `GENERATOR_VERSION` and `GENERATOR_SHA256` to the new
-wheel's, then run `pnpm lock-generator`, which needs `gh` signed in. The change goes
-through a pull request like any other, because the new digest is a new approval.
+A new release of the copy moves the pin by itself: its release workflow starts
+`generator.yml` here, which opens an auto-merging pull request, as
+[A new generator release](RELEASING.md#a-new-generator-release) in `docs/RELEASING.md`
+describes. To move it by hand, run `node scripts/set-generator.ts set <version>`, which
+sets `GENERATOR_VERSION` and the downloaded wheel's `GENERATOR_SHA256`, then
+`pnpm lock-generator`, which needs `gh` signed in. The change goes through a pull request
+like any other, because the new digest is a new approval.
 
 `pnpm lock-generator` checks the attestation before it writes the lock. It downloads the
 wheel, refuses it unless its sha256 is `GENERATOR_SHA256`, and runs

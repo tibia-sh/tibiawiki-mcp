@@ -267,5 +267,7 @@ test('the decide CLI reads the pin from origin/main after a fetch, and only this
   // tibiash.3 is main's pin, so nothing is done, although the checkout pins tibiash.2.
   assert.deepEqual(decide('9.0.0+tibiash.3'), { action: 'noop', supersede: [] });
   assert.deepEqual(decide('9.0.0+tibiash.5'), { action: 'propose', supersede: [21] });
+  // tibiash.2 is below main's pin, so it is refused. Read from the checkout, it would be the pin, a noop.
+  assert.deepEqual(decide('9.0.0+tibiash.2'), { action: 'refuse', supersede: [] });
   assert.equal(readFileSync(buildIndex, 'utf8').includes(versionLine('9.0.0+tibiash.2')), true, 'decide wrote the checkout');
 });

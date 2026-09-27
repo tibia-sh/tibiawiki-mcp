@@ -106,7 +106,8 @@ the range together.
 The caret is a deliberate exception to this repository's exact pins. An exact `3.3.0`
 would keep major 4 out just as well, so the caret is not what guards the schema. It lets
 an install pick up each compatible data release without a
-server release. `pnpm add` does not write `^3.3.0`, so edit the range by hand.
+server release. With the range already a caret, `pnpm add @tibia.sh/tibiawiki-data@3.3.0`
+kept the caret and wrote `^3.3.0`. Check the range in `package.json` afterwards.
 
 The tarball ships exactly `dist/`, `data/spell-areas.json` and
 `data/tibiawikisql-requirements.txt`, plus the `package.json`,

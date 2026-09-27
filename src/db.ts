@@ -31,7 +31,7 @@ export const MCP_SCHEMA_VERSION = 3;
  * `^MIN_DATA_VERSION`, so npm never pairs this server with an older index in the same
  * major, which would fail the probe below at startup.
  */
-export const MIN_DATA_VERSION = '3.3.0';
+export const MIN_DATA_VERSION = '3.4.0';
 
 /**
  * The shape the tools require. Probed once at startup so a generator-version drift
@@ -48,8 +48,8 @@ export const REQUIRED_COLUMNS: Readonly<Record<string, readonly string[]>> = {
   ],
   item: [
     'article_id', 'title', 'item_class', 'item_type', 'type_secondary', 'weight',
-    'value_buy', 'value_sell', 'is_marketable', 'flavor_text', 'status', 'client_id',
-    'actual_name', 'plural', 'is_stackable', 'is_pickupable', 'is_immobile',
+    'value_buy', 'value_buy_currency', 'value_sell', 'is_marketable', 'flavor_text', 'status',
+    'client_id', 'actual_name', 'plural', 'is_stackable', 'is_pickupable', 'is_immobile',
   ],
   item_attribute: ['item_id', 'name', 'value'],
   // Written by the build-time enrichment pass, not by the generator.

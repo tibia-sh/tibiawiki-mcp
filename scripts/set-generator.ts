@@ -19,7 +19,7 @@ import { assertGeneratorVersion, GENERATOR_VERSION_PATTERN, generatorWheelUrl } 
  *
  * `decide` fetches main and reads the pin there, not in the checkout, since main can have
  * moved since the run started. It reads the open generator/* pull requests with gh, which
- * takes its token from GH_TOKEN.
+ * takes its token from GH_TOKEN, and fetches each one to tell whether it was built on an older pin.
  */
 
 const BUILD_INDEX_PATH = fileURLToPath(new URL('../src/indexer/build-index.ts', import.meta.url));
@@ -59,11 +59,35 @@ export function setGenerator(source: string, version: string, sha256: string): s
   return lines.join('\n');
 }
 
-/** An open pull request from a generator/<version> branch of this repository. */
+/**
+ * An open pull request from a generator/<version> branch of this repository. `stale` says it
+ * was built on a main whose pin is not main's now, as `isStale` reads its base: the queue's
+ * rebase would then conflict on the two constant lines, and the PR could never merge.
+ */
 export interface GeneratorPr {
   version: string;
   number: number;
   autoMerge: boolean;
+  stale: boolean;
+}
+
+/** The GENERATOR_VERSION and GENERATOR_SHA256 lines of a build-index.ts, or undefined without exactly one of each. */
+const pinLines = (source: string): string | undefined => {
+  const lines = source.split('\n');
+  const version = lines.filter((line) => VERSION_LINE.test(line));
+  const sha256 = lines.filter((line) => SHA256_LINE.test(line));
+  return version.length === 1 && sha256.length === 1 ? `${version[0]}\n${sha256[0]}` : undefined;
+};
+
+/**
+ * Whether a PR whose one commit sits on a base with build-index.ts `baseSource` is stale
+ * against main's `mainSource`: the base pins another version or sha256 than main does, or
+ * either file does not declare each constant exactly once. The PR's commit rewrites those
+ * two lines, so rebased onto main it conflicts exactly when they differ.
+ */
+export function isStale(mainSource: string, baseSource: string): boolean {
+  const main = pinLines(mainSource);
+  return main === undefined || main !== pinLines(baseSource);
 }
 
 /**
@@ -91,12 +115,13 @@ const compareVersions = (a: string, b: string): number => {
  * Decides what to do for `requested`, with main pinning `pinned` and `prs` open from this
  * repository's generator/* branches:
  *
- * - `noop` for the pinned version, for a version with an open PR whose auto-merge is on,
- *   and while a PR for a newer version is open, since that one supersedes the request;
+ * - `noop` for the pinned version, for a version with a current open PR whose auto-merge
+ *   is on, and while a PR for a newer version is open, since that one supersedes the request;
  * - `refuse` for a version below the pin;
- * - `rearm` for a version with an open PR whose auto-merge is off, as a run interrupted
- *   after it opened the PR leaves it;
- * - `propose` otherwise.
+ * - `rearm` for a version with a current open PR whose auto-merge is off, as a run
+ *   interrupted after it opened the PR leaves it;
+ * - `propose` otherwise, a version whose open PR is stale included: its branch is rebuilt on
+ *   main and force-pushed, so a repeated request repairs a PR that can no longer merge.
  *
  * `rearm` and `propose` supersede the open PRs for versions below the request.
  */
@@ -105,6 +130,9 @@ export function decideGenerator(pinned: string, requested: string, prs: readonly
   for (const pr of prs) {
     assertGeneratorVersion(pr.version);
     if (!Number.isSafeInteger(pr.number) || pr.number < 1) throw new Error(`${pr.number} is not a pull request number.`);
+    if (typeof pr.autoMerge !== 'boolean' || typeof pr.stale !== 'boolean') {
+      throw new Error(`Pull request ${pr.number} has no plain autoMerge and stale.`);
+    }
     if (prs.some((other) => other !== pr && other.version === pr.version)) {
       throw new Error(`There are two open pull requests for ${pr.version}, so which one to merge is not clear.`);
     }
@@ -114,7 +142,7 @@ export function decideGenerator(pinned: string, requested: string, prs: readonly
   if (prs.some((pr) => compareVersions(pr.version, requested) > 0)) return { action: 'noop', supersede: [] };
   const supersede = prs.filter((pr) => compareVersions(pr.version, requested) < 0).map((pr) => pr.number);
   const open = prs.find((pr) => pr.version === requested);
-  if (open === undefined) return { action: 'propose', supersede };
+  if (open === undefined || open.stale) return { action: 'propose', supersede };
   if (open.autoMerge) return { action: 'noop', supersede: [] };
   return { action: 'rearm', supersede, pr: open.number };
 }
@@ -128,12 +156,17 @@ interface PrLine {
   autoMerge: boolean;
 }
 
+/** Runs git with `args` and returns its stdout. Its errors go to stderr. */
+const git = (args: string[]): string =>
+  execFileSync('git', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'inherit'], timeout: 120_000 });
+
 /**
- * The open PRs into main from this repository's generator/<version> branches. A PR from a
- * fork counts for nothing, whatever its branch is called: its branch name is anyone's to
- * choose, and a rearm would turn on its auto-merge.
+ * The open PRs into main from this repository's generator/<version> branches, each fetched
+ * from refs/pull/<number>/head to tell whether its base is stale against `mainSource`, main's
+ * build-index.ts. A PR from a fork counts for nothing, whatever its branch is called:
+ * its branch name is anyone's to choose, and a rearm would turn on its auto-merge.
  */
-function openGeneratorPrs(): GeneratorPr[] {
+function openGeneratorPrs(mainSource: string): GeneratorPr[] {
   const output = execFileSync('gh', [
     'api', '--paginate', 'repos/{owner}/{repo}/pulls?state=open&base=main&per_page=100',
     '--jq', '.[] | {number, ref: .head.ref, headRepo: .head.repo.full_name, baseRepo: .base.repo.full_name, autoMerge: (.auto_merge != null)}',
@@ -142,8 +175,19 @@ function openGeneratorPrs(): GeneratorPr[] {
     const pr = JSON.parse(line) as PrLine;
     const version = /^generator\/(.*)$/.exec(pr.ref)?.[1];
     if (pr.headRepo !== pr.baseRepo || version === undefined || !GENERATOR_VERSION_PATTERN.test(version)) return [];
-    if (typeof pr.autoMerge !== 'boolean') throw new Error(`gh printed a pull request it could not read: ${line}`);
-    return [{ version, number: pr.number, autoMerge: pr.autoMerge }];
+    if (typeof pr.autoMerge !== 'boolean' || !Number.isSafeInteger(pr.number) || pr.number < 1) {
+      throw new Error(`gh printed a pull request it could not read: ${line}`);
+    }
+    // The PR's base is its head's parent, since generator.yml builds the PR as one commit.
+    git(['fetch', '--quiet', '--no-tags', 'origin', `refs/pull/${pr.number}/head`]);
+    let baseSource: string | undefined;
+    try {
+      baseSource = git(['show', 'FETCH_HEAD^:src/indexer/build-index.ts']);
+    } catch {
+      // A head without a parent, or a parent without build-index.ts, is rebuilt like a stale one.
+    }
+    const stale = baseSource === undefined || isStale(mainSource, baseSource);
+    return [{ version, number: pr.number, autoMerge: pr.autoMerge, stale }];
   });
 }
 
@@ -172,11 +216,9 @@ async function set(version: string): Promise<string> {
 /** What generator.yml does for `version`, from main's pin after a fetch and the open generator PRs. */
 function decide(version: string): GeneratorDecision {
   assertGeneratorVersion(version);
-  const git = (args: string[]) =>
-    execFileSync('git', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'inherit'], timeout: 120_000 });
   git(['fetch', '--quiet', '--no-tags', 'origin', '+refs/heads/main:refs/remotes/origin/main']);
-  const pinned = pinnedGenerator(git(['show', 'refs/remotes/origin/main:src/indexer/build-index.ts']));
-  return decideGenerator(pinned, version, openGeneratorPrs());
+  const mainSource = git(['show', 'refs/remotes/origin/main:src/indexer/build-index.ts']);
+  return decideGenerator(pinnedGenerator(mainSource), version, openGeneratorPrs(mainSource));
 }
 
 if (import.meta.main) {

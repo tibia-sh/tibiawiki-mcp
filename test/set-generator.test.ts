@@ -5,7 +5,7 @@ import { createHash } from 'node:crypto';
 import { copyFileSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { decideGenerator, setGenerator } from '../scripts/set-generator.ts';
+import { decideGenerator, isStale, setGenerator } from '../scripts/set-generator.ts';
 import { generatorWheelUrl } from '../src/indexer/generator-release.ts';
 import { tempDirs } from './harness.ts';
 
@@ -52,7 +52,7 @@ test('setGenerator refuses a version or sha256 that is not whole, and a source w
   }
 });
 
-const pr = (version: string, number: number, autoMerge = true) => ({ version, number, autoMerge });
+const pr = (version: string, number: number, autoMerge = true, stale = false) => ({ version, number, autoMerge, stale });
 
 test('decideGenerator does nothing for the pinned version, and refuses one below it', () => {
   assert.deepEqual(decideGenerator('9.0.0+tibiash.2', '9.0.0+tibiash.2', []), { action: 'noop', supersede: [] });
@@ -97,6 +97,30 @@ test('decideGenerator re-arms an open PR for the version whose auto-merge is off
     decideGenerator('9.0.0+tibiash.2', '9.0.0+tibiash.3', [pr('9.0.0+tibiash.3', 14)]),
     { action: 'noop', supersede: [] },
   );
+});
+
+test('decideGenerator rebuilds an open PR for the version that was built on an older pin, rather than re-arm or leave it', () => {
+  // Two requests captured main at tibiash.2, and tibiash.3 merged while tibiash.4 waited: tibiash.4's
+  // PR, built on tibiash.2, conflicts with main. A repeated request rebuilds it on main.
+  for (const autoMerge of [true, false]) {
+    assert.deepEqual(
+      decideGenerator('9.0.0+tibiash.3', '9.0.0+tibiash.4', [pr('9.0.0+tibiash.4', 14, autoMerge, true)]),
+      { action: 'propose', supersede: [] },
+    );
+  }
+  assert.deepEqual(
+    decideGenerator('9.0.0+tibiash.2', '9.0.0+tibiash.4', [pr('9.0.0+tibiash.3', 12, true, true), pr('9.0.0+tibiash.4', 14, true, true)]),
+    { action: 'propose', supersede: [12] },
+  );
+  // A PR whose base pins another version or sha256 than main is stale. One whose base pins main's is not,
+  // whatever else changed, and so is one whose base's pin cannot be read.
+  const main = setGenerator(BUILD_INDEX, '9.0.0+tibiash.3', SHA);
+  assert.equal(isStale(main, main), false);
+  assert.equal(isStale(main, `${main}// another change\n`), false);
+  assert.equal(isStale(main, setGenerator(BUILD_INDEX, '9.0.0+tibiash.2', SHA)), true);
+  assert.equal(isStale(main, setGenerator(BUILD_INDEX, '9.0.0+tibiash.3', 'b'.repeat(64))), true);
+  assert.equal(isStale(main, `${main}${versionLine('9.0.0+tibiash.3')}\n`), true);
+  assert.throws(() => decideGenerator('9.0.0+tibiash.2', '9.0.0+tibiash.3', [{ version: '9.0.0+tibiash.3', number: 3, autoMerge: true } as never]), /no plain autoMerge and stale/);
 });
 
 test('decideGenerator does nothing when an open PR is for a newer version than the one requested', () => {
@@ -223,8 +247,13 @@ cat "$GH_RUN/pulls"
 const openPr = (ref: string, number: number, autoMerge: boolean, headRepo = 'tibia-sh/tibiawiki-mcp') =>
   JSON.stringify({ number, ref, headRepo, baseRepo: 'tibia-sh/tibiawiki-mcp', autoMerge });
 
-test('the decide CLI reads the pin from origin/main after a fetch, and only this repository\'s generator PRs', () => {
-  // origin's main pins tibiash.3, while the checkout the run started from still pins tibiash.2.
+/**
+ * A checkout pinning tibiash.2, as the run that started from it has it, beside origin, whose main
+ * pins tibiash.3 at `main` and had tibiash.2 at `old`. Open PR 21 for tibiash.4 is served from
+ * refs/pull/21/head, built as one commit on `base`. `decide` runs the CLI in the checkout with the
+ * stand-in gh, which reads the open pull requests from `pulls`.
+ */
+const decideFixture = (base: 'main' | 'old', autoMerge = true) => {
   const origin = scratch();
   git(origin, ['init', '--quiet', '--bare', '--initial-branch=main']);
   const { dir, buildIndex } = cliCopy('9.0.0+tibiash.2');
@@ -232,16 +261,22 @@ test('the decide CLI reads the pin from origin/main after a fetch, and only this
   git(dir, ['add', '--all']);
   git(dir, ['commit', '--quiet', '--message', 'checkout']);
   git(dir, ['remote', 'add', 'origin', origin]);
+  const old = git(dir, ['rev-parse', 'HEAD']);
   writeFileSync(buildIndex, setGenerator(readFileSync(buildIndex, 'utf8'), '9.0.0+tibiash.3', 'b'.repeat(64)));
   git(dir, ['commit', '--quiet', '--all', '--message', 'newer pin']);
   git(dir, ['push', '--quiet', 'origin', 'HEAD:refs/heads/main']);
-  git(dir, ['reset', '--quiet', '--hard', 'HEAD~1']);
+  const main = git(dir, ['rev-parse', 'HEAD']);
+  git(dir, ['reset', '--quiet', '--hard', base === 'main' ? main : old]);
+  writeFileSync(buildIndex, setGenerator(readFileSync(buildIndex, 'utf8'), '9.0.0+tibiash.4', 'c'.repeat(64)));
+  git(dir, ['commit', '--quiet', '--all', '--message', 'fix: move the generator to 9.0.0+tibiash.4']);
+  git(dir, ['push', '--quiet', 'origin', 'HEAD:refs/pull/21/head']);
+  git(dir, ['reset', '--quiet', '--hard', old]);
   const fakes = scratch();
   writeFileSync(join(fakes, 'gh'), FAKE_GH, { mode: 0o755 });
   writeFileSync(join(dir, 'pulls'), [
-    openPr('generator/9.0.0+tibiash.4', 21, true),
+    openPr('generator/9.0.0+tibiash.4', 21, autoMerge),
     // A fork's branch of the same name, a branch that is not a generator version, and a branch
-    // outside generator/ do not count.
+    // outside generator/ do not count, and none of them is fetched.
     openPr('generator/9.0.0+tibiash.9', 22, false, 'someone/tibiawiki-mcp'),
     openPr('generator/notes', 23, false),
     openPr('release-please--branches--main', 24, false),
@@ -264,10 +299,26 @@ test('the decide CLI reads the pin from origin/main after a fetch, and only this
     assert.equal(run.status, 0, run.stderr);
     return JSON.parse(run.stdout) as unknown;
   };
+  return { buildIndex, decide };
+};
+
+test('the decide CLI reads the pin from origin/main after a fetch, and only this repository\'s generator PRs', () => {
+  const { buildIndex, decide } = decideFixture('main');
   // tibiash.3 is main's pin, so nothing is done, although the checkout pins tibiash.2.
   assert.deepEqual(decide('9.0.0+tibiash.3'), { action: 'noop', supersede: [] });
   assert.deepEqual(decide('9.0.0+tibiash.5'), { action: 'propose', supersede: [21] });
   // tibiash.2 is below main's pin, so it is refused. Read from the checkout, it would be the pin, a noop.
   assert.deepEqual(decide('9.0.0+tibiash.2'), { action: 'refuse', supersede: [] });
+  // PR 21 was built on main's pin, so its request leaves it alone.
+  assert.deepEqual(decide('9.0.0+tibiash.4'), { action: 'noop', supersede: [] });
   assert.equal(readFileSync(buildIndex, 'utf8').includes(versionLine('9.0.0+tibiash.2')), true, 'decide wrote the checkout');
+});
+
+test('the decide CLI rebuilds an open PR built on an older pin, and re-arms only a current one', () => {
+  // PR 21 for tibiash.4 was built on tibiash.2, and main has pinned tibiash.3 since: its rebase would
+  // conflict, so a repeated request rebuilds it, whether its auto-merge is on or off.
+  assert.deepEqual(decideFixture('old', true).decide('9.0.0+tibiash.4'), { action: 'propose', supersede: [] });
+  assert.deepEqual(decideFixture('old', false).decide('9.0.0+tibiash.4'), { action: 'propose', supersede: [] });
+  // Built on main's pin with auto-merge off, it is re-armed.
+  assert.deepEqual(decideFixture('main', false).decide('9.0.0+tibiash.4'), { action: 'rearm', supersede: [], pr: 21 });
 });

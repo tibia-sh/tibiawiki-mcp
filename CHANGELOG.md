@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.15.1](https://github.com/tibia-sh/tibiawiki-mcp/compare/v0.15.0...v0.15.1) (2026-09-27)
+
+
+### Bug Fixes
+
+* move the generator to 9.0.0+tibiash.3 ([ef6994a](https://github.com/tibia-sh/tibiawiki-mcp/commit/ef6994ac010d6aec170f60c49e33a66a0f7b906d))
+
 ## [0.15.0](https://github.com/tibia-sh/tibiawiki-mcp/compare/v0.14.1...v0.15.0) (2026-09-27)
 
 

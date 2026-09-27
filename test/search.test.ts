@@ -89,6 +89,10 @@ test('a malformed cursor is reported, not silently treated as page one', async (
 type ListOut = SearchOut & { totalMatches: number };
 
 test('tibia_search with types and no query lists every page of them in title order', async () => {
+  const db = new DatabaseSync(FIXTURE, { readOnly: true });
+  const spells = (db.prepare('select count(*) c from spell').get() as { c: number }).c;
+  db.close();
+  assert.ok(spells > 200, 'guard: the spells span three pages of 100');
   const h = await connect();
   try {
     const titles: string[] = [];
@@ -99,13 +103,13 @@ test('tibia_search with types and no query lists every page of them in title ord
         arguments: { types: ['spell'], include_inactive: true, limit: 100, ...(cursor ? { cursor } : {}) },
       });
       const data = res.structuredContent as ListOut;
-      assert.equal(data.totalMatches, 211);
+      assert.equal(data.totalMatches, spells);
       assert.ok(data.results.every((r) => r.type === 'spell'));
       titles.push(...data.results.map((r) => r.title));
       cursor = data.nextCursor;
     } while (cursor);
-    assert.equal(titles.length, 211);
-    assert.equal(new Set(titles).size, 211, 'no page repeats a spell');
+    assert.equal(titles.length, spells);
+    assert.equal(new Set(titles).size, spells, 'no page repeats a spell');
     for (let i = 1; i < titles.length; i++) {
       const [a, b] = [titles[i - 1]!, titles[i]!];
       assert.ok(asciiLower(a) <= asciiLower(b), `${a} before ${b}`);

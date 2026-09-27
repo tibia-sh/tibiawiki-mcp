@@ -52,7 +52,9 @@ const NAMED_BY_TYPE = {
   house: ["Warriors' Guildhall", 'The Tibianic'],   // rent 5,000,000 / 500,000
   imbuement: ['Powerful Reap', 'Powerful Venom'],   // 3 materials each
   charm: ['Adrenaline Burst', 'Bless'],
-  mount: ['Donkey', 'Racing Bird'],
+  // Landsailer costs 140 Event Points and Armoured War Horse 870 Tibia Coins, so price_currency
+  // holds both currencies beside Donkey's null.
+  mount: ['Donkey', 'Racing Bird', 'Landsailer', 'Armoured War Horse'],
   outfit: ['Assassin Outfits', 'Beggar Outfits'],   // 2 outfit_quest rows each
   book: ['Goldfinger (Book)'],                      // has item_id and the shortest text
   world: ['Antica', 'Astera'],

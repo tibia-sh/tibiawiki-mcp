@@ -34,6 +34,8 @@ nothing:
   each leg leaving from the other's destination.
 - **Cornell** — his Edron leg names no `origin` while his Grimvale leg leaves from Edron,
   the anchor proving a null-origin leg matches no `from` value.
+- **Landsailer** and **Armoured War Horse** — `price_currency` `Event Points` (140) and
+  `Tibia Coins` (870), beside Donkey, which has no price and a null currency.
 - **Golden Key** — 7 `item_key` rows. `item_key` is one-to-many (Silver Key has 61),
   so a singular field read with `.get()` would silently drop rows.
 - **The Plasmother** — three abilities all named `Poison Ball`. `(creature_id, name)`
@@ -73,8 +75,8 @@ whose key is single-quoted upstream and whose grid uses cell value 4.
 
 ## Reproducing it
 
-The committed fixture was cut from the index `@tibia.sh/tibiawiki-data` 3.2.0 ships,
-whose `database_info` `version` is `9.0.0+tibiash.2`. With that version installed:
+The committed fixture was cut from the index `@tibia.sh/tibiawiki-data` 3.3.0 ships,
+whose `database_info` `version` is `9.0.0+tibiash.5`. With that version installed:
 
 ```bash
 node scripts/make-fixture.mjs node_modules/@tibia.sh/tibiawiki-data/index.db \

@@ -39,8 +39,10 @@ jobs:
       # release workflow's push run for the base has to have succeeded too. Its please job ran
       # release-please on the base, which, with always-update, force-pushed the PR with notes computed
       # from the base. So either this entry is that commit, or that push has already taken the older
-      # entry out of the queue. The newest run by run number counts, read with the job's actions: read,
-      # and an answer the step cannot read fails it.
+      # entry out of the queue. The newest run by run number counts, read with the job's actions: read.
+      # A run that is missing, as a push's run can be for a moment, or has not completed is read again
+      # every POLL_SECONDS, 20 by default, until DEADLINE_SECONDS of waiting have passed, 1200 by
+      # default. An answer the step cannot read fails it at once.
       - name: Keep a release PR older than main out of the queue
         if: ${{ github.event_name == 'merge_group' }}
         env:
@@ -80,18 +82,35 @@ jobs:
             exit 1
           fi
           query="repos/{owner}/{repo}/actions/workflows/release.yml/runs?event=push&head_sha=$BASE_SHA"
-          if ! response="$(gh api "$query")" ||
-            ! run="$(jq -ser --arg sha "$BASE_SHA" 'if length == 1 then .[0].workflow_runs | map(select(.event == "push" and .head_sha == $sha)) | max_by(.run_number) // error("no run") | "\(.status) \(.conclusion)" else error("not one document") end' <<< "$response")" ||
-            [[ ! $run =~ ^([a-z_]+)\ ([a-z_]+)$ ]]; then
-            echo "::error::Could not read main's release run for $BASE_SHA, so this check cannot tell whether release-please has rebuilt the release PR since that commit."
+          poll=${POLL_SECONDS:-20}
+          limit=${DEADLINE_SECONDS:-1200}
+          if [[ ! $poll =~ ^[1-9][0-9]*$ || ! $limit =~ ^(0|[1-9][0-9]*)$ ]]; then
+            echo "::error::POLL_SECONDS has to be a whole number of seconds above 0, and DEADLINE_SECONDS a whole number of seconds."
             exit 1
           fi
-          if [[ ${BASH_REMATCH[1]} != completed ]]; then
-            echo "::error::main's release run for $BASE_SHA has not finished yet, so release-please may not have rebuilt this PR on that commit. release-please rebuilds it on main's tip in that run, or else on the next push to main, and its auto-merge adds it to the queue again."
-            exit 1
-          fi
-          if [[ ${BASH_REMATCH[2]} != success ]]; then
-            echo "::error::main's release run for $BASE_SHA ended ${BASH_REMATCH[2]}, not success, so release-please may not have rebuilt this PR on that commit. release-please rebuilds it on main's tip on the next push to main, and its auto-merge adds it to the queue again, which takes it once that push's release run has succeeded."
+          waited=0
+          while :; do
+            if ! response="$(gh api "$query")" ||
+              ! run="$(jq -ser --arg sha "$BASE_SHA" 'if length == 1 then .[0].workflow_runs | arrays | map(select(.event == "push" and .head_sha == $sha)) | if length == 0 then "none" else max_by(.run_number) | "\(.status) \(.conclusion)" end else error("not one document") end' <<< "$response")" ||
+              [[ ! $run =~ ^(none|([a-z_]+)\ ([a-z_]+))$ ]]; then
+              echo "::error::Could not read main's release run for $BASE_SHA, so this check cannot tell whether release-please has rebuilt the release PR since that commit."
+              exit 1
+            fi
+            run_status="${BASH_REMATCH[2]}"
+            conclusion="${BASH_REMATCH[3]}"
+            if [[ $run_status == completed ]]; then
+              break
+            fi
+            if ((waited >= limit)); then
+              echo "::error::main's release run for $BASE_SHA has not finished yet, so release-please may not have rebuilt this PR on that commit. release-please rebuilds it on main's tip in that run, or else on the next push to main, and its auto-merge adds it to the queue again."
+              exit 1
+            fi
+            echo "main's release run for $BASE_SHA has not finished yet, so it is read again in $poll seconds."
+            sleep "$poll"
+            waited=$((waited + poll))
+          done
+          if [[ $conclusion != success ]]; then
+            echo "::error::main's release run for $BASE_SHA ended $conclusion, not success, so release-please may not have rebuilt this PR on that commit. release-please rebuilds it on main's tip on the next push to main, and its auto-merge adds it to the queue again, which takes it once that push's release run has succeeded."
             exit 1
           fi
           echo "The release PR was built on $BASE_SHA, the commit this queue entry merges onto."

@@ -1307,9 +1307,10 @@ exit "$code"
  * GH_REPO, from which gh fills in {owner}/{repo} and finds the pull request outside a checkout, and
  * GH_TOKEN, or they fail.
  *
- * `api repos/{owner}/{repo}/actions/workflows/release.yml/runs?event=push&head_sha=SHA` prints `runs`,
- * what GitHub answers with the release workflow's push runs for SHA, and exits with `runs-exit`. It
- * needs GH_REPO and GH_TOKEN too, and fails when the run gave no `runs`.
+ * `api repos/{owner}/{repo}/actions/workflows/release.yml/runs?event=push&head_sha=SHA` answers call N,
+ * counting every gh call in `events`, with `runs-N`, what GitHub answers with the release workflow's
+ * push runs for SHA, and exits with `runs-exit-N`. It needs GH_REPO and GH_TOKEN too, and a call with no
+ * `runs-N` fails.
  *
  * `api repos/tibia-sh/mcp.tibia.sh/dispatches --input -` runs only under the fake timeout, so a call
  * without its bound fails. It writes its stdin, the body gh would send, to `body-N` for call N, counting
@@ -1339,12 +1340,16 @@ if [ "$#" -eq 5 ] && [ "$1" = pr ] && [ "$2" = merge ] && [ "$4" = --auto ] && [
   exit 0
 fi
 if [ "$#" -eq 2 ] && [ "$1" = api ] && [ "\${2%%head_sha=*}" = 'repos/{owner}/{repo}/actions/workflows/release.yml/runs?event=push&' ]; then
-  if [ -z "$GH_REPO" ] || [ -z "$GH_TOKEN" ] || [ ! -e "$here/runs" ]; then
-    echo "fake gh: release runs without GH_REPO, GH_TOKEN or an answer" >&2
+  count=0
+  while IFS= read -r line; do
+    case "$line" in 'gh '*) count=$((count + 1)) ;; esac
+  done < "$here/events"
+  if [ -z "$GH_REPO" ] || [ -z "$GH_TOKEN" ] || [ ! -e "$here/runs-$count" ]; then
+    echo "fake gh: release runs without GH_REPO, GH_TOKEN or an answer for call $count" >&2
     exit 2
   fi
-  cat "$here/runs"
-  exit "$(cat "$here/runs-exit")"
+  cat "$here/runs-$count"
+  exit "$(cat "$here/runs-exit-$count")"
 fi
 if [ "$#" -ge 2 ] && [ "$1" = api ] && [ "$2" = graphql ]; then
   shift 2
@@ -2376,8 +2381,10 @@ const QUEUE_CHECK_ENV = {
  * the entry's tree has to be that head's, so an entry built from an older head fails. release-please
  * computes the PR from main before it reads main's head to commit onto, so the release workflow's newest
  * push run for the base has to have completed with success too: its please job rebuilt the PR from the
- * base. Every value is checked whole before git or the error reads it, and an answer about the run the
- * step cannot read fails it. A change here has to change this test on purpose.
+ * base. A run that is missing or has not completed is read again every POLL_SECONDS, until
+ * DEADLINE_SECONDS of waiting have passed. Every value is checked whole before git or the error reads it,
+ * and an answer about the run the step cannot read fails it at once. A change here has to change this
+ * test on purpose.
  */
 const QUEUE_CHECK_SCRIPT = String.raw`[[ $BASE_SHA =~ ^[0-9a-f]{40}$ ]] || { echo "::error::The merge group names no base commit, so this check cannot tell whether a release PR is older than main."; exit 1; }
 git fetch --quiet --no-tags --depth=1 origin "$BASE_SHA"
@@ -2410,18 +2417,35 @@ if [[ $entry_tree != "$head_tree" ]]; then
   exit 1
 fi
 query="repos/{owner}/{repo}/actions/workflows/release.yml/runs?event=push&head_sha=$BASE_SHA"
-if ! response="$(gh api "$query")" ||
-  ! run="$(jq -ser --arg sha "$BASE_SHA" 'if length == 1 then .[0].workflow_runs | map(select(.event == "push" and .head_sha == $sha)) | max_by(.run_number) // error("no run") | "\(.status) \(.conclusion)" else error("not one document") end' <<< "$response")" ||
-  [[ ! $run =~ ^([a-z_]+)\ ([a-z_]+)$ ]]; then
-  echo "::error::Could not read main's release run for $BASE_SHA, so this check cannot tell whether release-please has rebuilt the release PR since that commit."
+poll=${'${'}POLL_SECONDS:-20}
+limit=${'${'}DEADLINE_SECONDS:-1200}
+if [[ ! $poll =~ ^[1-9][0-9]*$ || ! $limit =~ ^(0|[1-9][0-9]*)$ ]]; then
+  echo "::error::POLL_SECONDS has to be a whole number of seconds above 0, and DEADLINE_SECONDS a whole number of seconds."
   exit 1
 fi
-if [[ ${'${'}BASH_REMATCH[1]} != completed ]]; then
-  echo "::error::main's release run for $BASE_SHA has not finished yet, so release-please may not have rebuilt this PR on that commit. release-please rebuilds it on main's tip in that run, or else on the next push to main, and its auto-merge adds it to the queue again."
-  exit 1
-fi
-if [[ ${'${'}BASH_REMATCH[2]} != success ]]; then
-  echo "::error::main's release run for $BASE_SHA ended ${'${'}BASH_REMATCH[2]}, not success, so release-please may not have rebuilt this PR on that commit. release-please rebuilds it on main's tip on the next push to main, and its auto-merge adds it to the queue again, which takes it once that push's release run has succeeded."
+waited=0
+while :; do
+  if ! response="$(gh api "$query")" ||
+    ! run="$(jq -ser --arg sha "$BASE_SHA" 'if length == 1 then .[0].workflow_runs | arrays | map(select(.event == "push" and .head_sha == $sha)) | if length == 0 then "none" else max_by(.run_number) | "\(.status) \(.conclusion)" end else error("not one document") end' <<< "$response")" ||
+    [[ ! $run =~ ^(none|([a-z_]+)\ ([a-z_]+))$ ]]; then
+    echo "::error::Could not read main's release run for $BASE_SHA, so this check cannot tell whether release-please has rebuilt the release PR since that commit."
+    exit 1
+  fi
+  run_status="${'${'}BASH_REMATCH[2]}"
+  conclusion="${'${'}BASH_REMATCH[3]}"
+  if [[ $run_status == completed ]]; then
+    break
+  fi
+  if ((waited >= limit)); then
+    echo "::error::main's release run for $BASE_SHA has not finished yet, so release-please may not have rebuilt this PR on that commit. release-please rebuilds it on main's tip in that run, or else on the next push to main, and its auto-merge adds it to the queue again."
+    exit 1
+  fi
+  echo "main's release run for $BASE_SHA has not finished yet, so it is read again in $poll seconds."
+  sleep "$poll"
+  waited=$((waited + poll))
+done
+if [[ $conclusion != success ]]; then
+  echo "::error::main's release run for $BASE_SHA ended $conclusion, not success, so release-please may not have rebuilt this PR on that commit. release-please rebuilds it on main's tip on the next push to main, and its auto-merge adds it to the queue again, which takes it once that push's release run has succeeded."
   exit 1
 fi
 echo "The release PR was built on $BASE_SHA, the commit this queue entry merges onto."`;
@@ -2567,10 +2591,11 @@ const releaseRuns = (sha: string, ...runs: ReleaseRun[]): RunsAnswer => ({
 
 /**
  * Runs the queue check as the test job runs it on merge_group: in a checkout of the merge group's
- * commit alone, as actions/checkout leaves it, with origin serving every commit, and the fake gh first on
- * PATH answering the release runs with `runs`. Without `runs`, a gh call fails. git and jq are real.
+ * commit alone, as actions/checkout leaves it, with origin serving every commit, and the fake gh and
+ * sleep first on PATH. gh answers its reads of the release runs with `runs` in order, and a read past
+ * them fails. `env` adds to the step's environment, such as the poll interval. git and jq are real.
  */
-const runQueueCheck = (base: string, entry: string, headRef: string, runs?: RunsAnswer) => {
+const runQueueCheck = (base: string, entry: string, headRef: string, runs: RunsAnswer[] = [], extra: Record<string, string> = {}) => {
   const { origin } = queueFixture();
   const work = scratch();
   gitIn(work, ['init', '--quiet']);
@@ -2578,10 +2603,10 @@ const runQueueCheck = (base: string, entry: string, headRef: string, runs?: Runs
   gitIn(work, ['fetch', '--quiet', '--no-tags', '--depth=1', 'origin', entry]);
   gitIn(work, ['switch', '--quiet', '--detach', entry]);
   const gh = scratch();
-  if (runs !== undefined) {
-    writeFileSync(join(gh, 'runs'), runs.response);
-    writeFileSync(join(gh, 'runs-exit'), String(runs.exit ?? 0));
-  }
+  runs.forEach((answer, index) => {
+    writeFileSync(join(gh, `runs-${index + 1}`), answer.response);
+    writeFileSync(join(gh, `runs-exit-${index + 1}`), String(answer.exit ?? 0));
+  });
   const env = {
     BASE_SHA: base,
     HEAD_REF: headRef,
@@ -2589,9 +2614,11 @@ const runQueueCheck = (base: string, entry: string, headRef: string, runs?: Runs
     GH_TOKEN: 'ghs_ci',
     GH_REPO: 'tibia-sh/tibiawiki-mcp',
     GH_RUN: gh,
+    FAKE_RUN: gh,
     PATH: `${fakeBin()}:${process.env['PATH'] ?? ''}`,
     HOME: work,
     GIT_CONFIG_NOSYSTEM: '1',
+    ...extra,
   };
   const run = bash(stepScript(queueCheckStep())!, env, work);
   const has = (sha: string): boolean => spawnSync('git', ['cat-file', '-e', `${sha}^{commit}`], { cwd: work }).status === 0;
@@ -2600,12 +2627,13 @@ const runQueueCheck = (base: string, entry: string, headRef: string, runs?: Runs
     stdout: run.stdout,
     output: `${run.stdout}${run.stderr}`,
     errors: run.stdout.split('\n').filter((line) => line.startsWith('::error::')),
+    /** gh's calls and sleep's, in order. */
     events: recorded(gh, 'events'),
     has,
   };
 };
 
-/** The one gh call the queue check makes: the release workflow's push runs for `base`. */
+/** The gh call the queue check reads the release workflow's push runs for `base` with. */
 const runsQuery = (base: string): string => `gh api repos/{owner}/{repo}/actions/workflows/release.yml/runs?event=push&head_sha=${base}`;
 
 /**
@@ -2623,7 +2651,7 @@ test('the queue check passes a release PR built on its base, refuses one built o
     repo.base,
     repo.entry.fresh,
     queueRef(repo.fresh.number, repo.base),
-    releaseRuns(repo.base, { run_number: 4, status: 'completed', conclusion: 'success' }),
+    [releaseRuns(repo.base, { run_number: 4, status: 'completed', conclusion: 'success' })],
   );
   assert.equal(fresh.status, 0, fresh.output);
   assert.ok(fresh.stdout.split('\n').includes(`The release PR was built on ${repo.base}, the commit this queue entry merges onto.`), fresh.output);
@@ -2669,54 +2697,75 @@ test("the queue check waits for main's release run for the base to succeed", () 
   // head as it reads it again. A feature merged in between makes the PR one commit on the feature whose
   // notes miss it, which the parent and tree checks pass. The release run for the base rebuilds the PR
   // from the base, so the entry passes only once that run has completed with success. The newest run
-  // counts, by run number, wherever GitHub lists it.
+  // counts, by run number, wherever GitHub lists it. A run that is missing, as a push's run can be for a
+  // moment, or has not completed is read again every POLL_SECONDS until DEADLINE_SECONDS of waiting
+  // have passed. The fake sleep returns at once, so the defaults, 20 and 1200, are shortened only to
+  // keep the reads few.
   const repo = queueFixture();
-  const check = (...runs: ReleaseRun[]) =>
-    runQueueCheck(repo.base, repo.entry.fresh, queueRef(repo.fresh.number, repo.base), releaseRuns(repo.base, ...runs));
-  const passes = (what: string, run: ReturnType<typeof check>): void => {
-    assert.equal(run.status, 0, `${what} fails: ${run.output}`);
-    assert.deepEqual(run.errors, [], run.output);
-    assert.deepEqual(run.events, [runsQuery(repo.base)]);
-  };
+  const wait = { DEADLINE_SECONDS: '60' };
+  const check = (answers: ReleaseRun[][], env: Record<string, string> = wait) =>
+    runQueueCheck(repo.base, repo.entry.fresh, queueRef(repo.fresh.number, repo.base), answers.map((runs) => releaseRuns(repo.base, ...runs)), env);
+  const read = runsQuery(repo.base);
+  const pause = 'sleep 20';
   const unfinished = `::error::main's release run for ${repo.base} has not finished yet, so release-please may not have rebuilt this PR on that commit. release-please rebuilds it on main's tip in that run, or else on the next push to main, and its auto-merge adds it to the queue again.`;
   const ended = (conclusion: string): string =>
     `::error::main's release run for ${repo.base} ended ${conclusion}, not success, so release-please may not have rebuilt this PR on that commit. release-please rebuilds it on main's tip on the next push to main, and its auto-merge adds it to the queue again, which takes it once that push's release run has succeeded.`;
-  const refuses = (what: string, run: ReturnType<typeof check>, error: string): void => {
-    assert.equal(run.status, 1, `${what} passes: ${run.output}`);
-    assert.deepEqual(run.errors, [error], `${what}: ${run.output}`);
-    assert.deepEqual(run.events, [runsQuery(repo.base)]);
+  const outcome = (what: string, run: ReturnType<typeof check>, status: number, errors: string[], events: string[]): void => {
+    assert.equal(run.status, status, `${what}: ${run.output}`);
+    assert.deepEqual(run.errors, errors, `${what}: ${run.output}`);
+    assert.deepEqual(run.events, events, `${what}: ${run.output}`);
   };
-  passes('a run that succeeded', check({ run_number: 4, status: 'completed', conclusion: 'success' }));
-  for (const status of ['in_progress', 'queued', 'waiting']) {
-    refuses(`a run ${status}`, check({ run_number: 4, status, conclusion: null }), unfinished);
-  }
+  const succeeded: ReleaseRun = { run_number: 4, status: 'completed', conclusion: 'success' };
+  const running = (status: string): ReleaseRun => ({ run_number: 4, status, conclusion: null });
+
+  outcome('a run that succeeded', check([[succeeded]]), 0, [], [read]);
+  outcome('a run that succeeded, read with the default bounds', check([[succeeded]], {}), 0, [], [read]);
+  outcome('a run in progress, then succeeded', check([[running('in_progress')], [running('in_progress')], [succeeded]]), 0, [], [read, pause, read, pause, read]);
+  outcome('a run queued, then waiting, then succeeded', check([[running('queued')], [running('waiting')], [succeeded]]), 0, [], [read, pause, read, pause, read]);
+  // A push's run can be missing for a moment after the push, and a run for another commit or of another
+  // event does not stand in for it.
+  outcome('no run yet, then a run that succeeded', check([[], [succeeded]]), 0, [], [read, pause, read]);
+  outcome(
+    'only runs for another commit or of another event, then a run that succeeded',
+    runQueueCheck(repo.base, repo.entry.fresh, queueRef(repo.fresh.number, repo.base), [
+      releaseRuns(repo.old, succeeded),
+      releaseRuns(repo.base, { ...succeeded, event: 'workflow_dispatch' }),
+      releaseRuns(repo.base, succeeded),
+    ], wait),
+    0,
+    [],
+    [read, pause, read, pause, read],
+  );
+  // 60 seconds of waiting are three pauses of 20, and the read after the last one is the last.
+  const still = [running('in_progress'), running('in_progress'), running('in_progress'), running('in_progress')].map((run) => [run]);
+  outcome('a run in progress until the deadline', check(still), 1, [unfinished], [read, pause, read, pause, read, pause, read]);
+  outcome('no run until the deadline', check([[], [], [], []]), 1, [unfinished], [read, pause, read, pause, read, pause, read]);
+  outcome('a run in progress with no time to wait', check([[running('in_progress')]], { DEADLINE_SECONDS: '0' }), 1, [unfinished], [read]);
+  // A completed run that did not succeed fails at once.
   for (const conclusion of ['failure', 'cancelled']) {
-    refuses(`a run that ended ${conclusion}`, check({ run_number: 4, status: 'completed', conclusion }), ended(conclusion));
+    outcome(`a run that ended ${conclusion}`, check([[{ ...succeeded, conclusion }]]), 1, [ended(conclusion)], [read]);
   }
+  outcome('a run in progress, then failed', check([[running('in_progress')], [{ ...succeeded, conclusion: 'failure' }]]), 1, [ended('failure')], [read, pause, read]);
   // An older run that failed, listed after the newer run that succeeded, is not the one that counts, and
   // an older run that succeeded does not stand in for a newer one still running.
-  passes(
-    'a newer run that succeeded',
-    check({ run_number: 5, status: 'completed', conclusion: 'success' }, { run_number: 3, status: 'completed', conclusion: 'failure' }),
-  );
-  refuses(
+  outcome('a newer run that succeeded', check([[{ ...succeeded, run_number: 5 }, { ...succeeded, run_number: 3, conclusion: 'failure' }]]), 0, [], [read]);
+  outcome(
     'a newer run still in progress',
-    check({ run_number: 3, status: 'completed', conclusion: 'success' }, { run_number: 5, status: 'in_progress', conclusion: null }),
-    unfinished,
+    check([[{ ...succeeded, run_number: 3 }, { ...running('in_progress'), run_number: 5 }]], { DEADLINE_SECONDS: '0' }),
+    1,
+    [unfinished],
+    [read],
   );
 });
 
 test("the queue check refuses a release PR whose base's release run it cannot read", () => {
-  // Each of these fails closed with one ::error::, after the one gh call.
+  // Each of these fails closed at once with one ::error::, after one gh call, without waiting.
   const repo = queueFixture();
   const cannotRead = `::error::Could not read main's release run for ${repo.base}, so this check cannot tell whether release-please has rebuilt the release PR since that commit.`;
   const succeeded = { run_number: 4, status: 'completed', conclusion: 'success' };
   const answers: Array<[string, RunsAnswer]> = [
     ['an error from gh', { response: '{"message":"Resource not accessible by integration","status":"403"}', exit: 1 }],
     ['an error from gh after a list of runs', { ...releaseRuns(repo.base, succeeded), exit: 1 }],
-    ['no run', releaseRuns(repo.base)],
-    ['only a run for another commit', releaseRuns(repo.old, succeeded)],
-    ['only a run of another event', releaseRuns(repo.base, { ...succeeded, event: 'workflow_dispatch' })],
     ['no list of runs', { response: '{"total_count":0,"workflow_runs":null}' }],
     ['a list of runs that is no array', { response: '{"total_count":1,"workflow_runs":{}}' }],
     ['text that is not JSON', { response: 'completed success' }],
@@ -2726,10 +2775,33 @@ test("the queue check refuses a release PR whose base's release run it cannot re
     ['a conclusion that runs onto a second line', releaseRuns(repo.base, { ...succeeded, conclusion: 'success\n::notice::merged' })],
   ];
   for (const [what, runs] of answers) {
-    const run = runQueueCheck(repo.base, repo.entry.fresh, queueRef(repo.fresh.number, repo.base), runs);
+    const run = runQueueCheck(repo.base, repo.entry.fresh, queueRef(repo.fresh.number, repo.base), [runs, releaseRuns(repo.base, succeeded)]);
     assert.equal(run.status, 1, `${what} passes: ${run.output}`);
     assert.deepEqual(run.errors, [cannotRead], `${what}: ${run.output}`);
     assert.deepEqual(run.events, [runsQuery(repo.base)], `${what}: ${run.output}`);
+  }
+});
+
+test('the queue check reads no release run when its poll interval or deadline is not a whole number of seconds', () => {
+  // The step takes both from the environment, so the tests can shorten them, and an empty or unset one
+  // takes its default. A poll interval of 0 would read without pause, and a leading 0 would make bash
+  // read the number as octal.
+  const repo = queueFixture();
+  const invalid = '::error::POLL_SECONDS has to be a whole number of seconds above 0, and DEADLINE_SECONDS a whole number of seconds.';
+  const succeeded = releaseRuns(repo.base, { run_number: 4, status: 'completed', conclusion: 'success' });
+  const cases: Array<[string, Record<string, string>]> = [
+    ['a poll interval of 0', { POLL_SECONDS: '0' }],
+    ['a poll interval with a leading 0', { POLL_SECONDS: '08' }],
+    ['a fractional poll interval', { POLL_SECONDS: '1.5' }],
+    ['a negative deadline', { DEADLINE_SECONDS: '-1' }],
+    ['a deadline with a leading 0', { DEADLINE_SECONDS: '060' }],
+    ['a deadline that is a command', { DEADLINE_SECONDS: '60; echo' }],
+  ];
+  for (const [what, env] of cases) {
+    const run = runQueueCheck(repo.base, repo.entry.fresh, queueRef(repo.fresh.number, repo.base), [succeeded], env);
+    assert.equal(run.status, 1, `${what} passes: ${run.output}`);
+    assert.deepEqual(run.errors, [invalid], `${what}: ${run.output}`);
+    assert.deepEqual(run.events, [], `${what} reads the release runs`);
   }
 });
 

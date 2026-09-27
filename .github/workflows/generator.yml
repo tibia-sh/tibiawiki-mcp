@@ -151,8 +151,9 @@ jobs:
   # release.yml. The job installs nothing, restores no cache and runs no dependency code: only git,
   # gh, curl, jq and node on src/indexer/generator-release.ts and scripts/set-generator.ts from its
   # own checkout, which import nothing but node: modules and each other. Everything prepare handed
-  # on is data. Before the token exists, this job decides again against main, and binds the
-  # requested version, the attested wheel and the committed hash itself.
+  # on is data. Before the token exists, this job decides again against main, binds the requested
+  # version, the attested wheel and the committed hash itself, and builds its commit on main as it
+  # fetched it, so a pin that landed since the event is the pull request's base.
   propose:
     needs: prepare
     if: ${{ needs.prepare.outputs.decision == 'propose' || needs.prepare.outputs.decision == 'rearm' }}
@@ -309,6 +310,39 @@ jobs:
               throw new Error("The prepared build-index.ts is not the checked-out one with " + version + " and sha256:" + sha256 + ".");
             }
           ' "$VERSION" "$SHA256" "$RUNNER_TEMP/checked-out-build-index.ts"
+      # The pull request's commit sits on main as the re-decision fetched it, not on this run's
+      # checkout, so a pin that landed since the event is its base, and the queue's rebase does not
+      # conflict on the constant lines. build-index.ts is main's with the version and the attested
+      # wheel's sha256, recomputed here with this job's checkout of set-generator.ts before the
+      # switch to main. The lock is the one checked above, which depends on the version and the
+      # cutoff, not on the base. Against main, the change is the two files, and in build-index.ts
+      # the two constant lines alone.
+      - name: Build the commit on main
+        if: ${{ steps.decide.outputs.action == 'propose' }}
+        env:
+          SHA256: ${{ steps.attest.outputs.sha256 }}
+        run: |
+          git show refs/remotes/origin/main:src/indexer/build-index.ts > "$RUNNER_TEMP/main-build-index.ts"
+          node --input-type=module -e '
+            import { readFileSync, writeFileSync } from "node:fs";
+            import { setGenerator } from "./scripts/set-generator.ts";
+            const [version, sha256, main, out] = process.argv.slice(1);
+            writeFileSync(out, setGenerator(readFileSync(main, "utf8"), version, sha256));
+          ' "$VERSION" "$SHA256" "$RUNNER_TEMP/main-build-index.ts" "$RUNNER_TEMP/build-index.ts"
+          cp data/tibiawikisql-requirements.txt "$RUNNER_TEMP/tibiawikisql-requirements.txt"
+          git checkout --quiet --force --detach refs/remotes/origin/main
+          cp "$RUNNER_TEMP/build-index.ts" src/indexer/build-index.ts
+          cp "$RUNNER_TEMP/tibiawikisql-requirements.txt" data/tibiawikisql-requirements.txt
+          if [[ "$(git diff --name-only)" != $'data/tibiawikisql-requirements.txt\nsrc/indexer/build-index.ts' ]]; then
+            echo "::error::Against main, the commit changes other files than build-index.ts and the lock, or leaves one of them as it was."
+            exit 1
+          fi
+          numstat="$(git diff --numstat -- src/indexer/build-index.ts)"
+          constants="$(git diff --unified=0 --no-color -- src/indexer/build-index.ts | grep -cE "^[-+]export const GENERATOR_(VERSION|SHA256) = '[^']*';$" || true)"
+          if [[ $numstat != $'2\t2\tsrc/indexer/build-index.ts' || $constants != 4 ]]; then
+            echo "::error::Against main, build-index.ts changes more than GENERATOR_VERSION and GENERATOR_SHA256."
+            exit 1
+          fi
       # A token of the tibia-sh App for this repository alone, which expires within the hour:
       # contents to push generator/<version>, and pull requests to open, close and comment on pull
       # requests and turn on auto-merge. Minted after every check, so none of them runs with it.
@@ -350,8 +384,9 @@ jobs:
             exit 1
           fi
           timeout --kill-after=10 120 gh pr merge "$PR" --auto --rebase
-      # Force-pushes generator/<version>, which replaces a branch an interrupted run left, then opens
-      # the pull request, or reuses this repository's open one, and turns on its auto-merge. The token
+      # Commits on main, force-pushes generator/<version>, which replaces a branch an interrupted run
+      # left or a stale pull request's head, then opens the pull request, or reuses this repository's
+      # open one, and turns on its auto-merge unless it is on already. The token
       # reaches git through a credential helper that reads it from the environment, so it is never
       # written to .git/config and never appears on a command line.
       - name: Push generator/<version>, open its pull request, and turn on auto-merge
@@ -373,8 +408,18 @@ jobs:
           timeout --kill-after=10 120 git -c credential.helper= \
             -c 'credential.helper=!f() { echo username=x-access-token; echo "password=$GH_TOKEN"; }; f' \
             push --force origin "HEAD:refs/heads/$branch"
-          number="$(timeout --kill-after=10 120 gh pr list --head "$branch" --base main --state open --json number,isCrossRepository \
-            --jq 'map(select(.isCrossRepository | not)) | .[0].number // empty')"
+          found="$(timeout --kill-after=10 120 gh pr list --head "$branch" --base main --state open --json number,isCrossRepository,autoMergeRequest \
+            --jq 'map(select(.isCrossRepository | not)) | .[0] // empty | "\(.number) \(.autoMergeRequest != null)"')"
+          number=
+          armed=false
+          if [[ -n $found ]]; then
+            if [[ ! $found =~ ^([0-9]+)\ (true|false)$ ]]; then
+              echo "::error::The lookup of the open pull request for $branch printed something else than its number and auto-merge."
+              exit 1
+            fi
+            number="${BASH_REMATCH[1]}"
+            armed="${BASH_REMATCH[2]}"
+          fi
           # shellcheck disable=SC2016 # the backticks are Markdown, not command substitution
           if [[ -z $number ]]; then
             body="$(printf 'Moves the generator pin to `%s`, the wheel with sha256 `%s`, whose attestation this run verified for `refs/tags/v%s`, and regenerates `data/tibiawikisql-requirements.txt`.\n\nRun: %s/%s/actions/runs/%s\n' \
@@ -386,4 +431,8 @@ jobs:
             echo "::error::The pull request for $branch has no plain number."
             exit 1
           fi
-          timeout --kill-after=10 120 gh pr merge "$number" --auto --rebase
+          if [[ $armed == true ]]; then
+            echo "Auto-merge is already on for pull request $number."
+          else
+            timeout --kill-after=10 120 gh pr merge "$number" --auto --rebase
+          fi

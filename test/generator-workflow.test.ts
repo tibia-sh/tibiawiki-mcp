@@ -189,8 +189,18 @@ git commit --quiet -m "$title"
 timeout --kill-after=10 120 git -c credential.helper= \
   -c 'credential.helper=!f() { echo username=x-access-token; echo "password=$GH_TOKEN"; }; f' \
   push --force origin "HEAD:refs/heads/$branch"
-number="$(timeout --kill-after=10 120 gh pr list --head "$branch" --base main --state open --json number,isCrossRepository \
-  --jq 'map(select(.isCrossRepository | not)) | .[0].number // empty')"
+found="$(timeout --kill-after=10 120 gh pr list --head "$branch" --base main --state open --json number,isCrossRepository,autoMergeRequest \
+  --jq 'map(select(.isCrossRepository | not)) | .[0] // empty | "\(.number) \(.autoMergeRequest != null)"')"
+number=
+armed=false
+if [[ -n $found ]]; then
+  if [[ ! $found =~ ^([0-9]+)\ (true|false)$ ]]; then
+    echo "::error::The lookup of the open pull request for $branch printed something else than its number and auto-merge."
+    exit 1
+  fi
+  number="${'${'}BASH_REMATCH[1]}"
+  armed="${'${'}BASH_REMATCH[2]}"
+fi
 if [[ -z $number ]]; then
   body="$(printf 'Moves the generator pin to ${'`'}%s${'`'}, the wheel with sha256 ${'`'}%s${'`'}, whose attestation this run verified for ${'`'}refs/tags/v%s${'`'}, and regenerates ${'`'}data/tibiawikisql-requirements.txt${'`'}.\n\nRun: %s/%s/actions/runs/%s\n' \
     "$VERSION" "$SHA256" "$VERSION" "$GITHUB_SERVER_URL" "$GITHUB_REPOSITORY" "$GITHUB_RUN_ID")"
@@ -201,7 +211,33 @@ if [[ ! $number =~ ^[0-9]+$ ]]; then
   echo "::error::The pull request for $branch has no plain number."
   exit 1
 fi
-timeout --kill-after=10 120 gh pr merge "$number" --auto --rebase`;
+if [[ $armed == true ]]; then
+  echo "Auto-merge is already on for pull request $number."
+else
+  timeout --kill-after=10 120 gh pr merge "$number" --auto --rebase
+fi`;
+
+const BUILD_SCRIPT = String.raw`git show refs/remotes/origin/main:src/indexer/build-index.ts > "$RUNNER_TEMP/main-build-index.ts"
+node --input-type=module -e '
+  import { readFileSync, writeFileSync } from "node:fs";
+  import { setGenerator } from "./scripts/set-generator.ts";
+  const [version, sha256, main, out] = process.argv.slice(1);
+  writeFileSync(out, setGenerator(readFileSync(main, "utf8"), version, sha256));
+' "$VERSION" "$SHA256" "$RUNNER_TEMP/main-build-index.ts" "$RUNNER_TEMP/build-index.ts"
+cp data/tibiawikisql-requirements.txt "$RUNNER_TEMP/tibiawikisql-requirements.txt"
+git checkout --quiet --force --detach refs/remotes/origin/main
+cp "$RUNNER_TEMP/build-index.ts" src/indexer/build-index.ts
+cp "$RUNNER_TEMP/tibiawikisql-requirements.txt" data/tibiawikisql-requirements.txt
+if [[ "$(git diff --name-only)" != $'data/tibiawikisql-requirements.txt\nsrc/indexer/build-index.ts' ]]; then
+  echo "::error::Against main, the commit changes other files than build-index.ts and the lock, or leaves one of them as it was."
+  exit 1
+fi
+numstat="$(git diff --numstat -- src/indexer/build-index.ts)"
+constants="$(git diff --unified=0 --no-color -- src/indexer/build-index.ts | grep -cE "^[-+]export const GENERATOR_(VERSION|SHA256) = '[^']*';$" || true)"
+if [[ $numstat != $'2\t2\tsrc/indexer/build-index.ts' || $constants != 4 ]]; then
+  echo "::error::Against main, build-index.ts changes more than GENERATOR_VERSION and GENERATOR_SHA256."
+  exit 1
+fi`;
 
 test('generator.yml is named generator, starts on generator-release or a manual run with a version, and runs one at a time', () => {
   // alert.yml matches it by this name. Runs wait for each other and a pending one is never
@@ -312,6 +348,7 @@ test('propose installs nothing and checks the diff before it gets a token', () =
     ["Verify the requested wheel's attestation", IF_PROPOSE],
     ['Require the attested wheel in the prepared lock', IF_PROPOSE],
     ['Require the prepared build-index.ts to be the pin recomputed here', IF_PROPOSE],
+    ['Build the commit on main', IF_PROPOSE],
     ['token', IF_WRITE],
     ['Close the pull requests the request supersedes', IF_SUPERSEDE],
     ['Turn on auto-merge for the open pull request', IF_REARM],
@@ -380,6 +417,9 @@ test("propose's checks are pinned word for word, and every value reaches them th
   const recompute = stepNamed(propose, 'Require the prepared build-index.ts to be the pin recomputed here');
   assert.deepEqual(envOf(recompute), { SHA256: '${{ steps.attest.outputs.sha256 }}' });
   assert.equal(stepScript(recompute), RECOMPUTE_SCRIPT);
+  const build = stepNamed(propose, 'Build the commit on main');
+  assert.deepEqual(envOf(build), { SHA256: '${{ steps.attest.outputs.sha256 }}' });
+  assert.equal(stepScript(build), BUILD_SCRIPT);
 });
 
 test('only the steps that write get the App token, which is limited to this repository', () => {
@@ -774,11 +814,11 @@ const runPush = (pullRequests: unknown[]) => {
   };
 };
 
-const LIST = `gh pr list --head generator/${REQUESTED} --base main --state open --json number,isCrossRepository --jq map(select(.isCrossRepository | not)) | .[0].number // empty`;
+const LIST = `gh pr list --head generator/${REQUESTED} --base main --state open --json number,isCrossRepository,autoMergeRequest --jq map(select(.isCrossRepository | not)) | .[0] // empty | "\\(.number) \\(.autoMergeRequest != null)"`;
 
 test('propose force-pushes over a branch an interrupted run left, and opens its pull request when it has none', () => {
   // A fork's pull request from a branch of the same name is not this run's.
-  const pushed = runPush([{ number: 5, isCrossRepository: true }]);
+  const pushed = runPush([{ number: 5, isCrossRepository: true, autoMergeRequest: null }]);
   assert.equal(pushed.pushed, pushed.head, 'generator/<version> is not the commit this run made');
   assert.equal(pushed.message, `fix: move the generator to ${REQUESTED}`);
   assert.deepEqual(pushed.files, ['data/tibiawikisql-requirements.txt', 'src/indexer/build-index.ts']);
@@ -787,7 +827,73 @@ test('propose force-pushes over a branch an interrupted run left, and opens its 
   assert.match(pushed.events[1]!, new RegExp(`^gh pr create --head generator/9\\.0\\.0\\+tibiash\\.3 --base main --title fix: move the generator to 9\\.0\\.0\\+tibiash\\.3 --body Moves the generator pin to \`9\\.0\\.0\\+tibiash\\.3\``));
   assert.equal(pushed.events[2], 'gh pr merge 77 --auto --rebase');
   // This repository's open pull request is reused.
-  const reused = runPush([{ number: 5, isCrossRepository: true }, { number: 55, isCrossRepository: false }]);
+  const reused = runPush([{ number: 5, isCrossRepository: true, autoMergeRequest: null }, { number: 55, isCrossRepository: false, autoMergeRequest: null }]);
   assert.equal(reused.pushed, reused.head);
   assert.deepEqual(reused.events, [LIST, 'gh pr merge 55 --auto --rebase']);
+  // A stale pull request rebuilt with its auto-merge still on keeps it, and is not armed a second time.
+  const armed = runPush([{ number: 55, isCrossRepository: false, autoMergeRequest: { mergeMethod: 'REBASE' } }]);
+  assert.equal(armed.pushed, armed.head);
+  assert.deepEqual(armed.events, [LIST]);
+});
+
+test('propose builds its commit on main as it fetched it, so a pin that landed since the event does not conflict', () => {
+  // Requests for tibiash.3 and tibiash.4 both started from main pinning tibiash.2. tibiash.3 merged
+  // while tibiash.4 was prepared, on that older checkout. The commit this run pushes moves main's
+  // tibiash.3 to tibiash.4, on main's tip, with the lock prepare wrote and this job checked.
+  const version = '9.0.0+tibiash.4';
+  const { dir, origin, run } = checkout();
+  const checkedOut = git(dir, ['rev-parse', 'HEAD']);
+  const landed = sha256Of('the tibiash.3 wheel');
+  writeFileSync(join(dir, 'src/indexer/build-index.ts'), setGenerator(BUILD_INDEX, '9.0.0+tibiash.3', landed));
+  writeFileSync(join(dir, 'data/tibiawikisql-requirements.txt'), lockFor('9.0.0+tibiash.3', landed));
+  git(dir, ['commit', '--quiet', '--all', '--message', 'fix: move the generator to 9.0.0+tibiash.3']);
+  git(dir, ['push', '--quiet', 'origin', 'HEAD:refs/heads/main']);
+  const main = git(dir, ['rev-parse', 'HEAD']);
+  git(dir, ['reset', '--quiet', '--hard', checkedOut]);
+  // What Decide again fetched.
+  git(dir, ['fetch', '--quiet', '--no-tags', 'origin', '+refs/heads/main:refs/remotes/origin/main']);
+  const sha = sha256Of(WHEEL);
+  const prepared = { build: setGenerator(BUILD_INDEX, version, sha), lock: lockFor(version, sha) };
+  mkdirSync(join(run, 'prepared/src/indexer'), { recursive: true });
+  mkdirSync(join(run, 'prepared/data'), { recursive: true });
+  writeFileSync(join(run, 'prepared/src/indexer/build-index.ts'), prepared.build);
+  writeFileSync(join(run, 'prepared/data/tibiawikisql-requirements.txt'), prepared.lock);
+  writeFileSync(join(run, 'wheel'), WHEEL);
+  writeFileSync(join(run, 'pull-requests.json'), '[]');
+  const steps: Array<[string, Record<string, string>]> = [
+    ['Take the prepared files, and check what they change', { BUILD_INDEX_SHA256: sha256Of(prepared.build), REQUIREMENTS_SHA256: sha256Of(prepared.lock) }],
+    ["Verify the requested wheel's attestation", { GH_TOKEN: 'fake-github-token' }],
+    ['Require the attested wheel in the prepared lock', { SHA256: sha }],
+    ['Require the prepared build-index.ts to be the pin recomputed here', { SHA256: sha }],
+    ['Build the commit on main', { SHA256: sha }],
+    ['Push generator/<version>, open its pull request, and turn on auto-merge', {
+      GH_TOKEN: 'fake-app-token',
+      GH_REPO: 'tibia-sh/tibiawiki-mcp',
+      SHA256: sha,
+      GITHUB_SERVER_URL: 'https://github.com',
+      GITHUB_REPOSITORY: 'tibia-sh/tibiawiki-mcp',
+      GITHUB_RUN_ID: '42',
+    }],
+  ];
+  for (const [name, env] of steps) {
+    const result = runStep(dir, run, proposeScript(name), { VERSION: version, ...env });
+    assert.equal(result.status, 0, `${name}: ${result.output}`);
+  }
+  const pushed = git(origin, ['rev-parse', `refs/heads/generator/${version}`]);
+  assert.equal(git(origin, ['rev-parse', `${pushed}^`]), main, 'the commit does not sit on main as it was fetched');
+  assert.deepEqual(git(origin, ['diff', '--name-only', main, pushed]).split('\n'), ['data/tibiawikisql-requirements.txt', 'src/indexer/build-index.ts']);
+  const mainSource = git(origin, ['show', `${main}:src/indexer/build-index.ts`]);
+  assert.equal(`${git(origin, ['show', `${pushed}:src/indexer/build-index.ts`])}\n`, `${setGenerator(mainSource, version, sha)}\n`);
+  assert.equal(`${git(origin, ['show', `${pushed}:data/tibiawikisql-requirements.txt`])}\n`, prepared.lock);
+  assert.deepEqual(
+    git(origin, ['diff', '--unified=0', main, pushed, '--', 'src/indexer/build-index.ts']).split('\n').filter((line) => /^[-+]export /.test(line)),
+    [
+      "-export const GENERATOR_VERSION = '9.0.0+tibiash.3';",
+      `+export const GENERATOR_VERSION = '${version}';`,
+      `-export const GENERATOR_SHA256 = '${landed}';`,
+      `+export const GENERATOR_SHA256 = '${sha}';`,
+    ],
+  );
+  // A rebase of the pushed commit onto main is a no-op, so the queue's rebase cannot conflict.
+  assert.equal(git(origin, ['merge-base', main, pushed]), main);
 });

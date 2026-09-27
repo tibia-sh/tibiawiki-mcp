@@ -1,16 +1,16 @@
-# tibiawikisql 9.0.0+tibiash.2 and every dependency, pinned and hashed. `tibiawiki-mcp build-index`
+# tibiawikisql 9.0.0+tibiash.3 and every dependency, pinned and hashed. `tibiawiki-mcp build-index`
 # installs its generator from this file with `uv pip install --require-hashes`.
 # Written by `pnpm lock-generator` after `gh attestation verify` passed for the generator
 # wheel and tag under attested, and a dry-run install without a build passed on every
 # CPython and platform under checked. Do not edit it by hand. To reproduce it, run
 # `pnpm lock-generator --cutoff <cutoff>` with the uv version below, and with no uv.toml
 # or UV_* variable of your own that changes how uv resolves, such as UV_INDEX_URL.
-# cutoff: 2026-09-06T15:36:25Z
-# uv: uv 0.12.18 (Homebrew 2026-09-22 aarch64-apple-darwin)
+# cutoff: 2026-09-20T15:27:21Z
+# uv: uv 0.12.12 (x86_64-unknown-linux-gnu)
 # python: cpython>=3.10,<3.14
 # checked: CPython 3.10, 3.11, 3.12, 3.13 on x86_64-unknown-linux-gnu, aarch64-unknown-linux-gnu, x86_64-apple-darwin, aarch64-apple-darwin, x86_64-pc-windows-msvc
-# attested: sha256:b5d3e7021c7b7feb05916a9daa26bdedc704cbfdb09f2363d4df42fdb546ce06 refs/tags/v9.0.0+tibiash.2
-# command: echo 'tibiawikisql @ https://github.com/tibia-sh/tibiawiki-sql/releases/download/v9.0.0%2Btibiash.2/tibiawikisql-9.0.0+tibiash.2-py3-none-any.whl' | uv pip compile - --universal --generate-hashes --no-build --python-version 3.10 --exclude-newer 2026-09-06T15:36:25Z --no-header
+# attested: sha256:83bd9acbe859eb2909c2fb261809cbda281ddfa1f8ea2600c665a49e3c6267eb refs/tags/v9.0.0+tibiash.3
+# command: echo 'tibiawikisql @ https://github.com/tibia-sh/tibiawiki-sql/releases/download/v9.0.0%2Btibiash.3/tibiawikisql-9.0.0+tibiash.3-py3-none-any.whl' | uv pip compile - --universal --generate-hashes --no-build --python-version 3.10 --exclude-newer 2026-09-20T15:27:21Z --no-header
 annotated-types==0.8.0 \
     --hash=sha256:13b2beaad985e05e2d6407ee4c4f35590b11f8d693a258a561055cac8f64cab7 \
     --hash=sha256:f072f4d804ea359e4eaf198b1af7a8b0943881a87f31bb764f8bf219bb9419e0
@@ -201,9 +201,9 @@ colorama==0.4.6 \
     --hash=sha256:08695f5cb7ed6e0531a20572697297273c47b8cae5a63ffc6d6ed5c201be6e44 \
     --hash=sha256:4f1d9991f5acc0ca119f9d443620b77f9d6b33703e51011c16baf57afb285fc6
     # via tibiawikisql
-idna==3.19 \
-    --hash=sha256:5e0811a4383b21dc5838069f801c4fb62113b7447663d2530d2bd6e77b49bf15 \
-    --hash=sha256:815e7be7a7806d54abb586dc943addc79e8b2ee16915059658cbeff4b1b43bf4
+idna==3.20 \
+    --hash=sha256:a7db850025b95ded1eae8a46181a1a6c56c92c96f0e2b005d9ff8dc0210cab44 \
+    --hash=sha256:ab7ae7122974553370f0bdb919e1a960b2cd1bc1ef0276416d896db81c14582c
     # via requests
 lupa==2.8 \
     --hash=sha256:097e7d0f1719a88020b67c82e05d53d7973c166952393afcecfd8434c7e19a15 \
@@ -451,8 +451,8 @@ requests==2.34.2 \
     --hash=sha256:2a0d60c172f83ac6ab31e4554906c0f3b3588d37b5cb939b1c061f4907e278e0 \
     --hash=sha256:f288924cae4e29463698d6d60bc6a4da69c89185ad1e0bcc4104f584e960b9ed
     # via tibiawikisql
-tibiawikisql @ https://github.com/tibia-sh/tibiawiki-sql/releases/download/v9.0.0%2Btibiash.2/tibiawikisql-9.0.0+tibiash.2-py3-none-any.whl \
-    --hash=sha256:b5d3e7021c7b7feb05916a9daa26bdedc704cbfdb09f2363d4df42fdb546ce06
+tibiawikisql @ https://github.com/tibia-sh/tibiawiki-sql/releases/download/v9.0.0%2Btibiash.3/tibiawikisql-9.0.0+tibiash.3-py3-none-any.whl \
+    --hash=sha256:83bd9acbe859eb2909c2fb261809cbda281ddfa1f8ea2600c665a49e3c6267eb
 typing-extensions==4.16.0 \
     --hash=sha256:481caa481374e813c1b176ada14e97f1f67a4539ce9cfeb3f350d78d6370c2e8 \
     --hash=sha256:dc983d19a509c94dba722ee6abd33940f7c05a89e243c47e907eb4db6f1a43e5
@@ -465,7 +465,7 @@ typing-inspection==0.4.4 \
     --hash=sha256:547274fa6b0a561ccf549cc9524b999a578e737d015d8709d021f9d0d13bea47 \
     --hash=sha256:65b8397ba37ccbce054456aaccddfc91e6e3083c92824df348d96ca832f3f147
     # via pydantic
-urllib3==2.7.0 \
-    --hash=sha256:231e0ec3b63ceb14667c67be60f2f2c40a518cb38b03af60abc813da26505f4c \
-    --hash=sha256:9fb4c81ebbb1ce9531cce37674bbc6f1360472bc18ca9a553ede278ef7276897
+urllib3==2.8.0 \
+    --hash=sha256:0cf3cae568d36aa9576b28dfb35f11328f1cb974ca7647d9475ebb86c75ac6e3 \
+    --hash=sha256:63bf2ead4c879426ebf22ef2a781eeb4aa3b4ae798a0435506f8687fd5bb9b63
     # via requests

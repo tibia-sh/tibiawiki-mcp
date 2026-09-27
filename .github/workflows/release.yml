@@ -22,37 +22,98 @@ concurrency:
   queue: max  # the release PR merge's own run must not be replaced while it waits
 
 jobs:
-  release:
+  # release-please runs as the tibia-sh App, so the release PR it opens runs CI, which one opened with
+  # GITHUB_TOKEN would not, and can merge itself. A job of its own, because every job that mints the
+  # App's token runs in the release-trigger environment, which admits runs on main alone, and naming that
+  # environment in the release job would put an environment claim in its OIDC token, which npm's trusted
+  # publisher rejects. The job runs nothing from the repository or a dependency: no checkout, no setup
+  # and no cache, only the token action, release-please and gh, and its own GITHUB_TOKEN can do nothing.
+  # It has no job-level if, because a skipped job skips every job after it, and a dispatch has to reach
+  # the registry job.
+  please:
     runs-on: ubuntu-latest
+    environment: release-trigger
+    permissions: {}
     outputs:
-      released: ${{ steps.publish.outputs.released }}  # 'true' once npm accepted the publish, else empty
+      release_created: ${{ steps.release.outputs.release_created }}  # 'true' once release-please created the release, else empty
       tag: ${{ steps.release.outputs.tag_name }}
-    permissions:
-      contents: write       # create tags and releases
-      pull-requests: write  # open and groom the release PR
-      issues: write         # create and apply the release PR labels
-      id-token: write       # OIDC for trusted publishing
+      sha: ${{ steps.release.outputs.sha }}
+      pr_number: ${{ steps.merge.outputs.pr_number }}  # the release PR whose auto-merge is on, else empty
     steps:
-      # A dispatch only retries the MCP registry publish, so it must not release. release-please
-      # does not check which event started the run. From a dispatch it would release a merged
-      # release PR to npm, while the registry job published the dispatched tag instead.
+      # A dispatch only retries the MCP registry publish, so it must not release. release-please does
+      # not check which event started the run. From a dispatch it would release a merged release PR to
+      # npm, while the registry job published the dispatched tag instead. So every step runs on a push
+      # alone, and a dispatch mints no token.
+      #
+      # A token of the App for this repository alone, which expires within the hour: contents to commit
+      # the release PR's changes and create the release and its tag, pull requests to open and update the
+      # release PR and turn on its auto-merge, and issues to label it.
+      - id: token
+        if: ${{ github.event_name == 'push' }}
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1  # v3.2.0
+        with:
+          client-id: ${{ vars.TIBIA_SH_APP_CLIENT_ID }}
+          private-key: ${{ secrets.TIBIA_SH_APP_PRIVATE_KEY }}
+          owner: tibia-sh
+          repositories: tibiawiki-mcp
+          permission-contents: write
+          permission-pull-requests: write
+          permission-issues: write
       - uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7  # v5.0.0
         id: release
         if: ${{ github.event_name == 'push' }}
         with:
+          token: ${{ steps.token.outputs.token }}
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
+      # The release PR merges itself once its checks pass, and the merge is the push that publishes.
+      # release-please hands the PR on as the JSON of an object whose number is a JSON number. A job
+      # output is data, so only a number whose text is digits alone reaches gh. Auto-merge is turned on
+      # only when it is off, and a rebase merge lands release-please's one commit with its message
+      # unchanged. A run that created a release has no PR to merge.
+      - name: Turn on auto-merge for the release PR
+        id: merge
+        if: ${{ github.event_name == 'push' && steps.release.outputs.pr && steps.release.outputs.release_created != 'true' }}
+        env:
+          GH_TOKEN: ${{ steps.token.outputs.token }}
+          GH_REPO: ${{ github.repository }}
+          PR: ${{ steps.release.outputs.pr }}
+        run: |
+          if ! number="$(jq -r '.number | numbers' <<< "$PR")" || [[ ! $number =~ ^[0-9]+$ ]]; then
+            echo "::error::release-please reported a release PR without a plain number, so its auto-merge was not turned on."
+            exit 1
+          fi
+          echo "pr_number=$number" >> "$GITHUB_OUTPUT"
+          auto_merge="$(gh api "repos/{owner}/{repo}/pulls/$number" --jq .auto_merge)"
+          if [[ -z $auto_merge ]]; then
+            gh pr merge "$number" --auto --rebase
+          else
+            echo "Auto-merge is already on for pull request $number."
+          fi
 
-      # Everything below runs only on the merge of the release PR, and only in a run triggered
+  # Publishes the release the please job created. It names no environment, because npm's trusted publisher is
+  # registered for this workflow file with no environment, so it holds no App token either.
+  release:
+    needs: please
+    runs-on: ubuntu-latest
+    outputs:
+      released: ${{ steps.publish.outputs.released }}  # 'true' once npm accepted the publish, else empty
+      tag: ${{ needs.please.outputs.tag }}
+    permissions:
+      contents: read        # check out the tagged commit
+      pull-requests: read   # read the merged release PRs that still carry autorelease: pending
+      id-token: write       # OIDC for trusted publishing
+    steps:
+      # Every step here runs only on the merge of the release PR, and only in a run triggered
       # at the tagged commit, because npm provenance names the commit that triggered the run.
       # The two exceptions are the first two steps, which never build or publish and only fail
       # a run. The first fails a run triggered anywhere else, so a release that could not be
       # published shows up as a red run.
       - name: Release tagged at another commit, not published
-        if: ${{ steps.release.outputs.release_created && steps.release.outputs.sha != github.sha }}
+        if: ${{ needs.please.outputs.release_created == 'true' && needs.please.outputs.sha != github.sha }}
         env:
-          TAG: ${{ steps.release.outputs.tag_name }}
-          TAGGED_SHA: ${{ steps.release.outputs.sha }}
+          TAG: ${{ needs.please.outputs.tag }}
+          TAGGED_SHA: ${{ needs.please.outputs.sha }}
         run: |
           echo "::error::$TAG was tagged at $TAGGED_SHA but this run was triggered at $GITHUB_SHA, so nothing was published and npm has nothing for $TAG."
           exit 1
@@ -63,7 +124,7 @@ jobs:
       # pr list --label goes through search, and search lags behind a relabel. An answer the
       # step cannot read fails the run too.
       - name: Check that every merged release PR was released
-        if: ${{ github.event_name == 'push' && !steps.release.outputs.release_created }}
+        if: ${{ github.event_name == 'push' && needs.please.outputs.release_created != 'true' }}
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -78,12 +139,12 @@ jobs:
             exit 1
           fi
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8  # v5.0.0
-        if: ${{ steps.release.outputs.release_created && steps.release.outputs.sha == github.sha }}
+        if: ${{ needs.please.outputs.release_created == 'true' && needs.please.outputs.sha == github.sha }}
         with:
-          ref: ${{ steps.release.outputs.sha }}  # the tagged commit, not the run's trigger
+          ref: ${{ needs.please.outputs.sha }}  # the tagged commit, not the run's trigger
           persist-credentials: false
       - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444  # v5.0.0
-        if: ${{ steps.release.outputs.release_created && steps.release.outputs.sha == github.sha }}
+        if: ${{ needs.please.outputs.release_created == 'true' && needs.please.outputs.sha == github.sha }}
         with:
           node-version: '26'
           # No dependency cache in the job that publishes. This setup-node restores one by
@@ -94,20 +155,20 @@ jobs:
       # floating install is the one unpinned thing in a workflow whose constraints
       # demand pins everywhere.
       - run: npm install -g npm@12.0.2
-        if: ${{ steps.release.outputs.release_created && steps.release.outputs.sha == github.sha }}
+        if: ${{ needs.please.outputs.release_created == 'true' && needs.please.outputs.sha == github.sha }}
       # Installs the pnpm that `packageManager` names, then runs `pnpm install --frozen-lockfile`.
       # It leaves the pnpm store uncached. It caches its lockfile-verification record whatever the
       # inputs say, and saves the record right after the install. When that save does not go
       # through, its post step tries again at the end of the job.
       - uses: pnpm/setup@703c52620218391530e48b9e8870d5c0082e1b9b  # v2.1.0
-        if: ${{ steps.release.outputs.release_created && steps.release.outputs.sha == github.sha }}
+        if: ${{ needs.please.outputs.release_created == 'true' && needs.please.outputs.sha == github.sha }}
         with:
           install: true
           require-lockfile: true
       - run: pnpm test
-        if: ${{ steps.release.outputs.release_created && steps.release.outputs.sha == github.sha }}
+        if: ${{ needs.please.outputs.release_created == 'true' && needs.please.outputs.sha == github.sha }}
       - id: publish
-        if: ${{ steps.release.outputs.release_created && steps.release.outputs.sha == github.sha }}
+        if: ${{ needs.please.outputs.release_created == 'true' && needs.please.outputs.sha == github.sha }}
         run: |
           npm publish
           echo "released=true" >> "$GITHUB_OUTPUT"
@@ -225,7 +286,7 @@ jobs:
           exit 1
 
   # Tells tibia-sh/mcp.tibia.sh about the release, so its bump.yml pins the version and deploys it.
-  # A job of its own, because the token is a secret of the release-trigger environment, and naming
+  # A job of its own, because it mints the App's token in the release-trigger environment, and naming
   # that environment in the release job would put an environment claim in its OIDC token, which
   # npm's trusted publisher rejects. It needs only the release job, so it runs beside the registry
   # job, not after it, and a red registry job does not stop it.
@@ -240,6 +301,16 @@ jobs:
     env:
       TAG: ${{ needs.release.outputs.tag }}
     steps:
+      # A token of the App for the hosting repository alone, which expires within the hour. A
+      # repository_dispatch needs contents write, and the token can do nothing else.
+      - id: token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1  # v3.2.0
+        with:
+          client-id: ${{ vars.TIBIA_SH_APP_CLIENT_ID }}
+          private-key: ${{ secrets.TIBIA_SH_APP_PRIVATE_KEY }}
+          owner: tibia-sh
+          repositories: mcp.tibia.sh
+          permission-contents: write
       # gh api exits non-zero on an HTTP error and prints it, and timeout stops a request that hangs
       # after 120 seconds, or kills it 10 seconds later if it ignores that. A dispatch that got through
       # twice is harmless, because bump.yml finds the version pinned or its pull request open, so a
@@ -248,7 +319,7 @@ jobs:
       # script never names it.
       - name: Tell mcp.tibia.sh about the release
         env:
-          GH_TOKEN: ${{ secrets.HOSTING_DISPATCH_TOKEN }}
+          GH_TOKEN: ${{ steps.token.outputs.token }}
         run: |
           if [[ ! "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
             echo "::error::The released tag must look like v1.2.3, and this run has \"$TAG\"."

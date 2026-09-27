@@ -76,24 +76,50 @@ const scalar = (yaml: string, key: string): string | undefined => {
   return [entry.value, ...continuation].join(' ').replace(/^(['"])(.*)\1$/, '$2');
 };
 
+/**
+ * The direct children of `yaml`, each key with its value as `scalar` reads it: a mapping such as a job's
+ * `outputs:` or `permissions:`, or a step's `env:` or `with:`. A child written in a form the pattern does
+ * not read, or a key written twice, fails the calling test, so a comparison of the whole mapping cannot
+ * pass on an entry it missed.
+ */
+const mappingOf = (yaml: string): Record<string, string> => {
+  const depth = depthOf(yaml);
+  if (depth === undefined) return {};
+  const keys = yaml
+    .split('\n')
+    .filter((line) => line.trim() !== '' && line.search(/\S/) === depth)
+    .map((line) => {
+      const key = /^([\w-]+):(?: |$)/.exec(line.trim())?.[1];
+      assert.ok(key, `an entry is written in a form this test cannot read: ${line.trim()}`);
+      return key;
+    });
+  assert.equal(new Set(keys).size, keys.length, `a key is written more than once: ${keys.join(', ')}`);
+  return Object.fromEntries(keys.map((key) => [key, scalar(yaml, key)!]));
+};
+
+const pleaseJob = (): string => under(under(workflowCode(), 'jobs'), 'please');
+
 const releaseJob = (): string => under(under(workflowCode(), 'jobs'), 'release');
 
 const registryJob = (): string => under(under(workflowCode(), 'jobs'), 'registry');
 
 const hostingJob = (): string => under(under(workflowCode(), 'jobs'), 'hosting');
 
-/**
- * Every job in a workflow, release.yml unless `file` names another, as its name and the lines
- * nested under its key.
- */
-const workflowJobs = (file = 'release.yml'): Array<[string, string]> => {
-  const jobs = under(workflowCode(file), 'jobs');
+/** Every job in a workflow's code, as its name and the lines nested under its key. */
+const jobsIn = (code: string): Array<[string, string]> => {
+  const jobs = under(code, 'jobs');
   const depth = depthOf(jobs);
   if (depth === undefined) return [];
   return [...jobs.matchAll(new RegExp(`^ {${depth}}(['"]?)([\\w-]+)\\1:`, 'gm'))].map(
     (match): [string, string] => [match[2]!, under(jobs, match[2]!)],
   );
 };
+
+/**
+ * Every job in a workflow, release.yml unless `file` names another, as its name and the lines
+ * nested under its key.
+ */
+const workflowJobs = (file = 'release.yml'): Array<[string, string]> => jobsIn(workflowCode(file));
 
 /**
  * The release job's own permissions block. It replaces the workflow-level block instead
@@ -107,6 +133,9 @@ const jobSteps = (job: string): string[] => {
   const marker = /^ *- /.exec(steps)?.[0];
   return marker ? steps.split(new RegExp(`^(?=${marker})`, 'm')) : [];
 };
+
+/** The please job's steps, one string per list item. */
+const pleaseJobSteps = (): string[] => jobSteps(pleaseJob());
 
 /** The release job's steps, one string per list item. */
 const releaseJobSteps = (): string[] => jobSteps(releaseJob());
@@ -160,15 +189,9 @@ const bash = (script: string, env: Record<string, string>, cwd: string) => {
 
 const scratch = tempDirs('twmcp-release-workflow-');
 
-/** The steps that follow the release-please step in the release job. */
-const stepsAfterReleasePlease = (): string[] => {
-  const steps = releaseJobSteps();
-  const releasePlease = steps.findIndex((step) =>
-    /^ *(?:- +)?uses: *googleapis\/release-please-action@/m.test(step),
-  );
-  assert.notEqual(releasePlease, -1, 'the release job has no release-please step');
-  return steps.slice(releasePlease + 1);
-};
+const isReleasePlease = (step: string): boolean => /^ *(?:- +)?uses: *googleapis\/release-please-action@/m.test(step);
+
+const isAppToken = (step: string): boolean => /^ *(?:- +)?uses: *actions\/create-github-app-token@/m.test(step);
 
 /**
  * A step's own condition, read as `scalar` reads a key at the depth of the step's keys. An `if:`
@@ -212,18 +235,21 @@ const assertDefaultShell = (job: string, step: string): void => {
   assert.equal(scalar(workflowCode(), 'defaults'), undefined, 'the workflow sets defaults for its steps');
 };
 
-/** The condition every building and publishing step carries. */
-const PUBLISH_GATE = '${{ steps.release.outputs.release_created && steps.release.outputs.sha == github.sha }}';
+/**
+ * The condition every building and publishing step carries. A job output is a string, and
+ * release-please sets release_created to 'true' or not at all, so it is compared with 'true'.
+ */
+const PUBLISH_GATE = "${{ needs.please.outputs.release_created == 'true' && needs.please.outputs.sha == github.sha }}";
 
 /** Its opposite: a release was created, but this run was triggered at another commit. */
-const DIVERGED = '${{ steps.release.outputs.release_created && steps.release.outputs.sha != github.sha }}';
+const DIVERGED = "${{ needs.please.outputs.release_created == 'true' && needs.please.outputs.sha != github.sha }}";
 
 /** The step that fails a diverged run: on the diverged condition, with no publish and no action. */
 const isAlarm = (step: string): boolean =>
   stepIf(step) === DIVERGED && !/\bnpm publish\b/.test(step) && !/^ *(?:- +)?uses:/m.test(step);
 
 /** A push run that created no release, the only run that can leave a merged release PR unreleased. */
-const UNRELEASED = "${{ github.event_name == 'push' && !steps.release.outputs.release_created }}";
+const UNRELEASED = "${{ github.event_name == 'push' && needs.please.outputs.release_created != 'true' }}";
 
 /**
  * The step that fails a run while a merged release PR is left unreleased: on the unreleased
@@ -299,23 +325,60 @@ test('the release job can mint the OIDC token npm publish authenticates with', (
   assert.match(releaseJobPermissions(), /^ *id-token: *write$/m, 'the release job has no id-token: write');
 });
 
-test('the release job can create the release', () => {
+/** The action that mints a token of the tibia-sh App, pinned to the commit of its v3.2.0 tag. */
+const APP_TOKEN_ACTION = 'actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1';
+
+/** The inputs that name the App to every token step: its client ID and key, and the organization. */
+const APP = {
+  'client-id': '${{ vars.TIBIA_SH_APP_CLIENT_ID }}',
+  'private-key': '${{ secrets.TIBIA_SH_APP_PRIVATE_KEY }}',
+  owner: 'tibia-sh',
+};
+
+/** What release-please's token may do: this repository alone, and the three grants it writes with. */
+const PLEASE_TOKEN_INPUTS = {
+  ...APP,
+  repositories: 'tibiawiki-mcp',
+  'permission-contents': 'write',
+  'permission-pull-requests': 'write',
+  'permission-issues': 'write',
+};
+
+/** What the hosting dispatch's token may do: the hosting repository alone, and a repository_dispatch. */
+const HOSTING_TOKEN_INPUTS = { ...APP, repositories: 'mcp.tibia.sh', 'permission-contents': 'write' };
+
+/** A job's one step that mints the App token. `name` names the job in a failure. */
+const appTokenStep = (job: string, name: string): string => {
+  const steps = jobSteps(job).filter(isAppToken);
+  assert.equal(steps.length, 1, `expected exactly one step of the ${name} job that mints the App token`);
+  assert.equal(
+    job.split('create-github-app-token@').length - 1,
+    1,
+    `a token step of the ${name} job is written in a form this test cannot read, such as a flow mapping`,
+  );
+  return steps[0]!;
+};
+
+/** The token step's inputs. */
+const pleaseTokenInputs = (): Record<string, string> => mappingOf(stepInputs(appTokenStep(pleaseJob(), 'please')));
+
+test("release-please's token can create the release", () => {
   // release-please commits the release PR's changes to its branch, and creates the GitHub release
   // and with it the tag. Both write the repository's contents, so without this grant nothing is
   // released.
-  assert.match(releaseJobPermissions(), /^ *contents: *write$/m, 'the release job has no contents: write');
+  assert.equal(pleaseTokenInputs()['permission-contents'], 'write', 'the token has no contents: write');
 });
 
-test('the release job can open the release PR', () => {
-  // release-please opens the release PR and updates it as commits land. Without this grant no
-  // release PR opens, and nothing is released.
-  assert.match(releaseJobPermissions(), /^ *pull-requests: *write$/m, 'the release job has no pull-requests: write');
+test("release-please's token can open the release PR", () => {
+  // release-please opens the release PR and updates it as commits land, and the please job turns on
+  // its auto-merge. Without this grant no release PR opens, and nothing is released.
+  assert.equal(pleaseTokenInputs()['permission-pull-requests'], 'write', 'the token has no pull-requests: write');
 });
 
-test('the release job can label the release PR', () => {
+test("release-please's token can label the release PR", () => {
   // release-please labels its PR autorelease: pending through the Issues API and finds the
   // merged PR by that label. A merged PR without it is skipped, and nothing is released.
-  assert.match(releaseJobPermissions(), /^ *issues: *write$/m, 'the release job has no issues: write');
+  assert.equal(pleaseTokenInputs()['permission-issues'], 'write', 'the token has no issues: write');
 });
 
 test('no npm token appears anywhere in the workflow', () => {
@@ -331,11 +394,12 @@ test('provenance is left to trusted publishing', () => {
 });
 
 test('every action is pinned to a full commit SHA', () => {
-  // A step written as a flow mapping, `- { uses: ... }`, counts as much as a block one.
-  const refs = [...workflowCode().matchAll(/(?:^|[{,]) *(?:- +)?uses: *([^\s,}]+)/gm)].map(
-    (match) => match[1]!,
+  // A step written as a flow mapping, `- { uses: ... }`, counts as much as a block one. Every
+  // workflow counts, and release.yml has to use some, so the check cannot pass on nothing.
+  const refs = workflowFiles().flatMap((file) =>
+    [...workflowCode(file).matchAll(/(?:^|[{,]) *(?:- +)?uses: *([^\s,}]+)/gm)].map((match) => `${file} ${match[1]!}`),
   );
-  assert.ok(refs.length > 0, 'the workflow uses no actions, so this check proves nothing');
+  assert.ok(refs.some((ref) => ref.startsWith('release.yml ')), 'release.yml uses no actions, so this check proves nothing');
   for (const ref of refs) {
     assert.match(ref, /@[0-9a-f]{40}$/, `${ref} is not pinned to a full commit SHA`);
   }
@@ -344,11 +408,14 @@ test('every action is pinned to a full commit SHA', () => {
 test('no run script interpolates an expression', () => {
   // GitHub pastes an expression's value into the script before the shell parses it, so a
   // value carrying quotes or $(...) runs as code. Values reach a script through env: instead.
-  const scripts = runScripts(workflow());
-  assert.ok(scripts.length > 0, 'the workflow has no run: scripts, so this check proves nothing');
-  for (const script of scripts) {
-    const line = script.split('\n').find((text) => text.includes('${{'));
-    assert.equal(line, undefined, `a run: script interpolates an expression: ${line?.trim()}`);
+  // That holds for a job output such as release-please's pr, and for alert.yml's event fields.
+  for (const file of workflowFiles()) {
+    const scripts = runScripts(workflow(file));
+    assert.ok(scripts.length > 0, `${file} has no run: scripts, so this check proves nothing`);
+    for (const script of scripts) {
+      const line = script.split('\n').find((text) => text.includes('${{'));
+      assert.equal(line, undefined, `a run: script of ${file} interpolates an expression: ${line?.trim()}`);
+    }
   }
 });
 
@@ -482,18 +549,18 @@ test('the release job checks out the commit release-please tagged', () => {
     'a checkout step is written in a form this test cannot read, such as a flow mapping',
   );
   for (const step of checkouts) {
-    assert.equal(/^ *ref: *(.*)$/m.exec(step)?.[1], '${{ steps.release.outputs.sha }}');
+    assert.equal(/^ *ref: *(.*)$/m.exec(step)?.[1], '${{ needs.please.outputs.sha }}');
   }
 });
 
 test('only a run triggered at the tagged commit builds and publishes', () => {
   // npm provenance names the commit that triggered the run, whatever is checked out. A run
   // triggered at any other commit would publish under an attestation naming the wrong one,
-  // on a version npm never lets be reused, so every step after release-please needs both
+  // on a version npm never lets be reused, so every step of the release job needs both
   // conditions. The alarm and the merged release PR check below are the only steps exempt.
-  const after = stepsAfterReleasePlease();
-  assert.ok(after.some((step) => /\bnpm publish\b/.test(step)), 'no step after release-please runs npm publish');
-  for (const step of after.filter((step) => !isAlarm(step) && !isReleaseCheck(step))) {
+  const steps = releaseJobSteps();
+  assert.ok(steps.some((step) => /\bnpm publish\b/.test(step)), 'no step of the release job runs npm publish');
+  for (const step of steps.filter((step) => !isAlarm(step) && !isReleaseCheck(step))) {
     assert.equal(stepIf(step), PUBLISH_GATE, `${stepName(step)} is not gated on both conditions`);
   }
 });
@@ -501,7 +568,7 @@ test('only a run triggered at the tagged commit builds and publishes', () => {
 test('a run that cannot publish the release it created fails loudly', () => {
   // Gated out of publishing, such a run would otherwise stay green while the tag exists and
   // npm has nothing for it.
-  const alarms = stepsAfterReleasePlease().filter((step) => stepIf(step) === DIVERGED);
+  const alarms = releaseJobSteps().filter((step) => stepIf(step) === DIVERGED);
   assert.equal(alarms.length, 1, 'expected exactly one step on the diverged condition');
   const alarm = alarms[0]!;
   assert.match(alarm, /::error(?: [^\n]*?)?::/, 'the alarm emits no ::error:: annotation');
@@ -514,8 +581,9 @@ test('a push run that creates no release checks for a merged release PR left unr
   // release-please moves a release PR from autorelease: pending to autorelease: tagged right after
   // it creates the release. A merged PR still pending was never released, and without this check
   // that run and every run after it end green with nothing tagged or published.
+  // The release job waits for the please job, so the check reads the labels release-please left.
   const check = releaseCheckStep();
-  assert.ok(stepsAfterReleasePlease().includes(check), 'the check runs before release-please');
+  assert.equal(scalar(releaseJob(), 'needs'), 'please', 'the check does not wait for release-please');
   // The checks below run the script under `bash -e`, as a runner does only while no shell is chosen.
   assertDefaultShell(releaseJob(), check);
   assert.doesNotMatch(check, /^ *(?:- +)?uses:/m, 'the check runs an action');
@@ -631,15 +699,301 @@ test('a release bumps the tag the marketplace installs the plugin from', () => {
   );
 });
 
+/** The condition every step of the please job carries, alone or first: a push, never a dispatch. */
+const ON_PUSH = "${{ github.event_name == 'push' }}";
+
 test('a dispatched run releases nothing', () => {
   // A dispatch retries the MCP registry publish for a tag npm already has. release-please does
   // not look at the event, so a dispatch that found a merged release PR would release it and
-  // publish it to npm, while its registry job published the dispatched tag instead.
-  const steps = releaseJobSteps().filter((step) =>
-    /^ *(?:- +)?uses: *googleapis\/release-please-action@/m.test(step),
-  );
+  // publish it to npm, while its registry job published the dispatched tag instead. The gate sits
+  // on the steps, not on the job, because a skipped please job would skip the jobs after it, the
+  // registry job among them. A dispatch mints no App token either.
+  const steps = pleaseJobSteps().filter(isReleasePlease);
   assert.equal(steps.length, 1, 'expected exactly one release-please step');
-  assert.equal(stepIf(steps[0]!), "${{ github.event_name == 'push' }}", 'release-please runs on a dispatch');
+  assert.equal(stepIf(steps[0]!), ON_PUSH, 'release-please runs on a dispatch');
+  assert.equal(stepIf(appTokenStep(pleaseJob(), 'please')), ON_PUSH, 'the App token is minted on a dispatch');
+  assert.equal(workflowCode().split('release-please-action@').length - 1, 1, 'a release-please step sits outside the please job');
+});
+
+/** What the please job hands on: release-please's release, and the release PR whose auto-merge it turned on. */
+const PLEASE_OUTPUTS = {
+  release_created: '${{ steps.release.outputs.release_created }}',
+  tag: '${{ steps.release.outputs.tag_name }}',
+  sha: '${{ steps.release.outputs.sha }}',
+  pr_number: '${{ steps.merge.outputs.pr_number }}',
+};
+
+/** release-please as the please job runs it: with the App token, and its settings from the config files. */
+const RELEASE_PLEASE_INPUTS = {
+  token: '${{ steps.token.outputs.token }}',
+  'config-file': 'release-please-config.json',
+  'manifest-file': '.release-please-manifest.json',
+};
+
+/** The please job's step that turns on the release PR's auto-merge, found by its name. */
+const autoMergeStep = (): string => {
+  const steps = pleaseJobSteps().filter((step) => scalar(stepBody(step), 'name') === 'Turn on auto-merge for the release PR');
+  assert.equal(steps.length, 1, 'expected exactly one please job step named Turn on auto-merge for the release PR');
+  return steps[0]!;
+};
+
+test('release-please runs as the App in its own job, which checks nothing out that runs', () => {
+  // A release PR opened with GITHUB_TOKEN starts no CI, and one opened as the App does, so it can
+  // merge itself. Every job that mints the App's token runs in the release-trigger environment, and
+  // naming that environment in the publishing job would put an environment claim in its OIDC token,
+  // which npm's trusted publisher rejects, so release-please runs in a job of its own. That job runs nothing from
+  // the repository or a dependency: no checkout, no setup, no cache, only the token action,
+  // release-please and gh. Its GITHUB_TOKEN can do nothing, and it has no job-level if, so a
+  // dispatch runs it and the jobs after it.
+  const please = pleaseJob();
+  assert.notEqual(please, '', 'the workflow has no please job');
+  assert.equal(scalar(please, 'runs-on'), 'ubuntu-latest');
+  assert.equal(scalar(please, 'environment'), 'release-trigger');
+  assert.equal(scalar(please, 'permissions'), '{}', 'the please job grants its GITHUB_TOKEN something');
+  assert.equal(scalar(please, 'if'), undefined, 'the please job has a job-level if');
+  assert.equal(scalar(please, 'needs'), undefined, 'the please job waits for another job');
+  assert.deepEqual(mappingOf(under(please, 'outputs')), PLEASE_OUTPUTS);
+  const steps = pleaseJobSteps();
+  assert.equal(steps.length, 3, 'expected the token step, release-please and the auto-merge step');
+  const [token, release, merge] = steps as [string, string, string];
+  assert.equal(please.split('uses:').length - 1, 2, 'the please job runs an action besides the token action and release-please');
+  assert.equal(token, appTokenStep(please, 'please'), 'the token is not minted first');
+  assert.equal(scalar(stepBody(token), 'uses'), APP_TOKEN_ACTION);
+  assert.equal(scalar(stepBody(token), 'id'), 'token');
+  assert.deepEqual(mappingOf(stepInputs(token)), PLEASE_TOKEN_INPUTS);
+  assert.equal(under(stepBody(token), 'env'), '', 'the token step has an env');
+  assert.equal(scalar(stepBody(release), 'uses'), 'googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7');
+  assert.equal(scalar(stepBody(release), 'id'), 'release');
+  assert.deepEqual(mappingOf(stepInputs(release)), RELEASE_PLEASE_INPUTS);
+  assert.equal(under(stepBody(release), 'env'), '', 'the release-please step has an env');
+  assert.equal(merge, autoMergeStep(), 'the auto-merge step is not the last');
+  // The token reaches release-please and the auto-merge step, the two that write, and nothing else.
+  const readers = workflowCode()
+    .split('\n')
+    .filter((line) => /\bsteps\.token\b/.test(line))
+    .map((line) => line.trim());
+  assert.deepEqual(readers, [
+    'token: ${{ steps.token.outputs.token }}',
+    'GH_TOKEN: ${{ steps.token.outputs.token }}',
+    'GH_TOKEN: ${{ steps.token.outputs.token }}',
+  ]);
+  assert.ok(release.includes(readers[0]!) && merge.includes(readers[1]!), 'the token reaches another step of the please job');
+});
+
+/** How a job ends in the walk: every job that runs succeeds, unless the scenario fails it. */
+type JobResult = 'success' | 'skipped' | 'failure';
+
+/** A value of an expression the walk reads. */
+type ExpressionValue = string | boolean | null;
+
+/**
+ * A run for the walk: the event that started it, the outputs of the jobs that set any, by job and
+ * output name, and the jobs that fail once they run. An output left out is empty, as GitHub hands on
+ * the output of a step that was skipped.
+ */
+type Scenario = { event: string; outputs?: Record<string, Record<string, string>>; failing?: string[] };
+
+/**
+ * Evaluates a GitHub expression with `lookup` for a context path and `status` for a status function.
+ * It reads what the job conditions here are written with: ||, &&, ==, !=, !, parentheses, quoted
+ * strings, context paths and status functions. Anything else fails the calling test, so the walk never
+ * passes on a condition it misread. == compares strings without case, as GitHub does.
+ */
+const evaluate = (
+  expression: string,
+  lookup: (path: string) => ExpressionValue,
+  status: (name: string) => boolean,
+): ExpressionValue => {
+  const tokens: string[] = [];
+  const pattern = /\s*(\|\||&&|==|!=|!|\(|\)|'(?:[^']|'')*'|[A-Za-z_][\w-]*(?:\.[A-Za-z_][\w-]*)*(?:\(\))?)\s*/y;
+  while (pattern.lastIndex < expression.length) {
+    const at = pattern.lastIndex;
+    const match = pattern.exec(expression);
+    assert.ok(match, `the walk cannot read ${expression.slice(at)}`);
+    tokens.push(match[1]!);
+  }
+  const truthy = (value: ExpressionValue): boolean => value !== null && value !== false && value !== '';
+  let at = 0;
+  const primary = (): ExpressionValue => {
+    const token = tokens[at++];
+    assert.ok(token !== undefined, `${expression} ends early`);
+    if (token === '(') {
+      const value = or();
+      assert.equal(tokens[at++], ')', `${expression} leaves a parenthesis open`);
+      return value;
+    }
+    if (token === '!') return !truthy(primary());
+    if (token.startsWith("'")) return token.slice(1, -1).replaceAll("''", "'");
+    if (token.endsWith('()')) return status(token.slice(0, -2));
+    if (token === 'true' || token === 'false') return token === 'true';
+    if (token === 'null') return null;
+    return lookup(token);
+  };
+  const comparison = (): ExpressionValue => {
+    const left = primary();
+    const operator = tokens[at];
+    if (operator !== '==' && operator !== '!=') return left;
+    at += 1;
+    const right = primary();
+    assert.ok(typeof left === 'string' && typeof right === 'string', `the walk compares only strings: ${expression}`);
+    return (left.toLowerCase() === right.toLowerCase()) === (operator === '==');
+  };
+  const and = (): ExpressionValue => {
+    let value = comparison();
+    while (tokens[at] === '&&') {
+      at += 1;
+      const right = comparison();
+      value = truthy(value) ? right : value;
+    }
+    return value;
+  };
+  const or = (): ExpressionValue => {
+    let value = and();
+    while (tokens[at] === '||') {
+      at += 1;
+      const right = and();
+      value = truthy(value) ? value : right;
+    }
+    return value;
+  };
+  const value = or();
+  assert.equal(at, tokens.length, `the walk cannot read ${expression}`);
+  return value;
+};
+
+/**
+ * Which jobs of a workflow's code run in `scenario`, as GitHub decides it: a job waits for what it
+ * needs, and its job-level if decides whether it runs. An if with no status function counts as
+ * `success() && (if)`, and a job without one as `success()`. success() holds only while every job
+ * the job needs, directly or through another, succeeded, so a skipped job skips every job after it,
+ * however each of them is gated. A condition may read only the event and the declared outputs of the
+ * jobs it needs.
+ */
+const walk = (code: string, scenario: Scenario): Record<string, JobResult> => {
+  const jobs = new Map(
+    jobsIn(code).map(([name, body]) => {
+      const needs = scalar(body, 'needs');
+      const list = needs === undefined ? [] : /^\[(.*)\]$/.exec(needs)?.[1]?.split(',').map((need) => need.trim()) ?? [needs];
+      for (const need of list) assert.match(need, /^[\w-]+$/, `the ${name} job's needs is written in a form the walk cannot read`);
+      return [name, { needs: list, if: scalar(body, 'if'), outputs: Object.keys(mappingOf(under(body, 'outputs'))) }];
+    }),
+  );
+  for (const [job, outputs] of Object.entries(scenario.outputs ?? {})) {
+    for (const output of Object.keys(outputs)) {
+      assert.ok(jobs.get(job)?.outputs.includes(output), `the scenario sets ${job}.${output}, which no job declares`);
+    }
+  }
+  const results = new Map<string, JobResult>();
+  const upstream = (name: string, seen = new Set<string>()): string[] => {
+    for (const need of jobs.get(name)!.needs) {
+      if (!seen.has(need)) {
+        seen.add(need);
+        upstream(need, seen);
+      }
+    }
+    return [...seen];
+  };
+  const resolve = (name: string, path: string[] = []): JobResult => {
+    const known = results.get(name);
+    if (known) return known;
+    const job = jobs.get(name);
+    assert.ok(job, `a job needs ${name}, which does not exist`);
+    assert.ok(!path.includes(name), `the jobs need each other in a cycle: ${[...path, name].join(' -> ')}`);
+    for (const need of job.needs) resolve(need, [...path, name]);
+    const before = upstream(name).map((need) => results.get(need)!);
+    const status = (fn: string): boolean => {
+      if (fn === 'success') return before.every((result) => result === 'success');
+      if (fn === 'failure') return before.some((result) => result === 'failure');
+      if (fn === 'always') return true;
+      if (fn === 'cancelled') return false;
+      return assert.fail(`the ${name} job's if calls ${fn}(), which the walk does not know`);
+    };
+    const lookup = (context: string): ExpressionValue => {
+      if (context === 'github.event_name') return scenario.event;
+      const read = /^needs\.([\w-]+)\.outputs\.([\w-]+)$/.exec(context);
+      assert.ok(read, `the ${name} job's if reads ${context}, which the walk does not know`);
+      const need = read[1]!;
+      const output = read[2]!;
+      assert.ok(job.needs.includes(need), `the ${name} job's if reads ${context}, but it does not need ${need}`);
+      assert.ok(jobs.get(need)!.outputs.includes(output), `the ${name} job's if reads ${context}, which ${need} does not declare`);
+      return results.get(need) === 'success' ? (scenario.outputs?.[need]?.[output] ?? '') : '';
+    };
+    const condition = /^\$\{\{(.*)\}\}$/s.exec(job.if ?? '')?.[1] ?? job.if ?? 'success()';
+    const explicit = /\b(?:success|failure|always|cancelled)\(\)/.test(condition);
+    const value = evaluate(explicit ? condition : `success() && (${condition})`, lookup, status);
+    const runs = value !== null && value !== false && value !== '';
+    const result: JobResult = !runs ? 'skipped' : scenario.failing?.includes(name) ? 'failure' : 'success';
+    results.set(name, result);
+    return result;
+  };
+  return Object.fromEntries([...jobs.keys()].map((name) => [name, resolve(name)]));
+};
+
+test('a workflow_dispatch still reaches registry', () => {
+  // The dispatch that retries a registry publish runs the whole graph. Every step of please and
+  // release is gated so that it does nothing, but the jobs themselves have to run: a skipped job
+  // skips every job after it, and the registry job with it.
+  const code = workflowCode();
+  assert.deepEqual(walk(code, { event: 'workflow_dispatch' }), {
+    please: 'success',
+    release: 'success',
+    registry: 'success',
+    hosting: 'skipped',
+  });
+  // A push that published reaches both jobs after the publish, and one that released nothing neither.
+  const released = {
+    please: { release_created: 'true', tag: 'v1.2.3', sha: '0123456789abcdef0123456789abcdef01234567' },
+    release: { released: 'true', tag: 'v1.2.3' },
+  };
+  assert.deepEqual(walk(code, { event: 'push', outputs: released }), {
+    please: 'success',
+    release: 'success',
+    registry: 'success',
+    hosting: 'success',
+  });
+  assert.deepEqual(walk(code, { event: 'push', outputs: { please: { pr_number: '42' } } }), {
+    please: 'success',
+    release: 'success',
+    registry: 'skipped',
+    hosting: 'skipped',
+  });
+  // A failed please job publishes nothing.
+  assert.deepEqual(walk(code, { event: 'push', outputs: released, failing: ['please'] }), {
+    please: 'failure',
+    release: 'skipped',
+    registry: 'skipped',
+    hosting: 'skipped',
+  });
+  // The walk follows the graph, not one gate: the push gate moved from the steps to the please job
+  // skips the registry job two jobs later, although that job's own if lets a dispatch through.
+  const gated = code.replace(/^ {2}please:\n/m, "  please:\n    if: github.event_name == 'push'\n");
+  assert.notEqual(gated, code, 'the please job could not be gated for the check');
+  assert.deepEqual(walk(gated, { event: 'workflow_dispatch' }), {
+    please: 'skipped',
+    release: 'skipped',
+    registry: 'skipped',
+    hosting: 'skipped',
+  });
+});
+
+test('the publishing job holds no App token and no environment', () => {
+  // npm's trusted publisher is keyed to this workflow file with no environment, so the job that runs
+  // npm publish names none, and so it gets no environment secret, the App's key among them. Its
+  // GITHUB_TOKEN reads the tagged commit and the pending label, and writes nothing. It hands on the
+  // tag release-please created, for the registry and hosting jobs.
+  const release = releaseJob();
+  assert.equal(scalar(release, 'needs'), 'please');
+  assert.equal(scalar(release, 'environment'), undefined, 'the release job names an environment');
+  assert.equal(scalar(release, 'if'), undefined, 'the release job has a job-level if');
+  assert.deepEqual(mappingOf(releaseJobPermissions()), { contents: 'read', 'pull-requests': 'read', 'id-token': 'write' });
+  assert.deepEqual(mappingOf(under(release, 'outputs')), {
+    released: '${{ steps.publish.outputs.released }}',
+    tag: '${{ needs.please.outputs.tag }}',
+  });
+  assert.doesNotMatch(release, /create-github-app-token|\bsteps\.token\b|\bsecrets\b|\bvars\b/, 'the release job reaches the App');
+  // Only the release PR check calls gh, with GITHUB_TOKEN.
+  const tokens = release.split('\n').filter((line) => /\bGH_TOKEN\b/.test(line)).map((line) => line.trim());
+  assert.deepEqual(tokens, ['GH_TOKEN: ${{ github.token }}']);
 });
 
 /** The condition the registry job runs on. */
@@ -948,6 +1302,11 @@ exit "$code"
  * each value to `field-KEY`. A typed field or a second call fails. It prints `response` and exits with
  * `exit`, as gh prints the body even when it exits 1 for a GraphQL error.
  *
+ * `api repos/{owner}/{repo}/pulls/N --jq .auto_merge` prints `auto-merge`, what gh prints for the pull
+ * request's auto_merge, and exits with `pull-exit`. `pr merge N --auto --rebase` exits 0. Both need
+ * GH_REPO, from which gh fills in {owner}/{repo} and finds the pull request outside a checkout, and
+ * GH_TOKEN, or they fail.
+ *
  * `api repos/tibia-sh/mcp.tibia.sh/dispatches --input -` runs only under the fake timeout, so a call
  * without its bound fails. It writes its stdin, the body gh would send, to `body-N` for call N, counting
  * every gh call in `events`. Call N answers with line N of `answers`, and a call with no line fails. `0`
@@ -957,6 +1316,24 @@ exit "$code"
 const FAKE_GH = `#!/usr/bin/env bash
 here="$GH_RUN"
 printf 'gh %s\\n' "$*" >> "$here/events"
+pull_request() {
+  if [ -z "$GH_REPO" ] || [ -z "$GH_TOKEN" ]; then
+    echo "fake gh: $1 without GH_REPO or GH_TOKEN" >&2
+    exit 2
+  fi
+  case "$2" in
+    '' | *[!0-9]*) echo "fake gh: unsupported pull request $2" >&2; exit 2 ;;
+  esac
+}
+if [ "$#" -eq 4 ] && [ "$1" = api ] && [ "\${2%/*}" = 'repos/{owner}/{repo}/pulls' ] && [ "$3" = --jq ] && [ "$4" = .auto_merge ]; then
+  pull_request api "\${2##*/}"
+  cat "$here/auto-merge"
+  exit "$(cat "$here/pull-exit")"
+fi
+if [ "$#" -eq 5 ] && [ "$1" = pr ] && [ "$2" = merge ] && [ "$4" = --auto ] && [ "$5" = --rebase ]; then
+  pull_request merge "$3"
+  exit 0
+fi
 if [ "$#" -ge 2 ] && [ "$1" = api ] && [ "$2" = graphql ]; then
   shift 2
   while [ "$#" -gt 0 ]; do
@@ -1158,35 +1535,39 @@ test('the npm wait passes nothing the registry would reject', () => {
 });
 
 /**
- * The one secret each environment job holds: the variable the env of one of its steps sets from it,
- * and that step.
+ * The one secret each environment job holds: the step of the job it reaches, and the entry of that
+ * step's `env:` or `with:` that takes it. The token action takes the App's key only as an input.
  */
-const JOB_SECRETS: Array<{ job: string; secret: string; variable: string; step: () => string }> = [
-  { job: 'registry', secret: 'MCP_PRIVATE_KEY', variable: 'MCP_PRIVATE_KEY', step: registryPublishStep },
-  { job: 'hosting', secret: 'HOSTING_DISPATCH_TOKEN', variable: 'GH_TOKEN', step: hostingDispatchStep },
+const JOB_SECRETS: Array<{ job: string; secret: string; block: 'env' | 'with'; key: string; step: () => string }> = [
+  { job: 'please', secret: 'TIBIA_SH_APP_PRIVATE_KEY', block: 'with', key: 'private-key', step: () => appTokenStep(pleaseJob(), 'please') },
+  { job: 'registry', secret: 'MCP_PRIVATE_KEY', block: 'env', key: 'MCP_PRIVATE_KEY', step: registryPublishStep },
+  { job: 'hosting', secret: 'TIBIA_SH_APP_PRIVATE_KEY', block: 'with', key: 'private-key', step: () => appTokenStep(hostingJob(), 'hosting') },
 ];
 
-test("each environment job's secret reaches one of its steps through that step's env, and the registry key only the login command", () => {
+test("each environment job's secret reaches one of its steps, and the registry key only the login command", () => {
   // Written into a run script, a secret would be pasted into the shell as code. In a step's env it is
-  // a variable only the processes of that step see. The registry job holds the registry key and the
-  // hosting job the token that dispatches to the hosting repo, each in one step, and no other line of
-  // the workflow references a secret.
+  // a variable only the processes of that step see, and in a step's with: an input only that action
+  // reads. The please and hosting jobs each hand the App's key to their token step, the registry job
+  // holds the registry key in one step, and no other line of the workflow references a secret.
   const references = workflowCode().split('\n').filter((line) => /\bsecrets\b/.test(line));
   assert.equal(references.length, JOB_SECRETS.length, `expected ${JOB_SECRETS.length} references to a secret: ${references.join(' |')}`);
   const jobs = Object.fromEntries(workflowJobs());
-  for (const { job, secret, variable, step } of JOB_SECRETS) {
+  for (const { job, secret, block, key, step } of JOB_SECRETS) {
     const steps = jobSteps(jobs[job] ?? '').filter((text) => /\bsecrets\b/.test(text));
     assert.equal(steps.length, 1, `expected exactly one ${job} job step that references a secret`);
     assert.equal(steps[0], step(), `the ${job} job's secret reaches another step`);
     assert.equal(
-      scalar(under(stepBody(steps[0]!), 'env'), variable),
+      scalar(under(stepBody(steps[0]!), block), key),
       `\${{ secrets.${secret} }}`,
-      `${secret} does not reach the ${job} job's step through its env as ${variable}`,
+      `${secret} does not reach the ${job} job's step through its ${block} as ${key}`,
     );
+  }
+  for (const secret of new Set(JOB_SECRETS.map(({ secret }) => secret))) {
+    const holders = JOB_SECRETS.filter((entry) => entry.secret === secret).flatMap(({ step }) => step().split('\n'));
     const elsewhere = workflowCode()
       .split('\n')
-      .filter((line) => line.includes(secret) && !steps[0]!.split('\n').includes(line));
-    assert.deepEqual(elsewhere, [], `a line outside the ${job} job's step names ${secret}`);
+      .filter((line) => line.includes(secret) && !holders.includes(line));
+    assert.deepEqual(elsewhere, [], `a line outside the steps that hold ${secret} names it`);
   }
   // The registry publish's script names the key only in the login. gh reads GH_TOKEN by itself, so the
   // hosting dispatch's script never names its token.
@@ -1196,7 +1577,7 @@ test("each environment job's secret reaches one of its steps through that step's
     uses[0]!.includes('./mcp-publisher login dns --domain tibia.sh --private-key "$MCP_PRIVATE_KEY"'),
     'the script passes the key to something besides the login',
   );
-  assert.doesNotMatch(stepScript(hostingDispatchStep()) ?? '', /GH_TOKEN|HOSTING_DISPATCH_TOKEN/, 'the hosting dispatch script names its token');
+  assert.doesNotMatch(stepScript(hostingDispatchStep()) ?? '', /GH_TOKEN|\btoken\b/, 'the hosting dispatch script names its token');
 });
 
 test('the registry job publishes after it logs in', () => {
@@ -1569,11 +1950,11 @@ test('the merged release PR check fails closed on an answer it cannot read', () 
 const HOSTING_GATE = "${{ needs.release.outputs.released == 'true' }}";
 
 test('the hosting dispatch is a job of its own, run beside the registry job once npm accepted the release', () => {
-  // The token is a secret of the release-trigger environment. A job gets an environment's secrets only
-  // by naming it, and naming one in the release job would put an environment claim in its OIDC token,
-  // which npm's trusted publisher rejects. The job needs only the release job, so a red registry job
-  // does not stop it, and a dispatched run, which releases nothing, skips it. It runs no action and
-  // checks nothing out beside the token. Its one step runs under the default shell with -e, as the
+  // Every job that mints the App's token runs in the release-trigger environment, and naming that
+  // environment in the release job would put an environment claim in its OIDC token, which npm's
+  // trusted publisher rejects. The job needs only the release job, so a red registry
+  // job does not stop it, and a dispatched run, which releases nothing, skips it. It runs no action but
+  // the token action, and checks nothing out. Its dispatch runs under the default shell with -e, as the
   // checks below run its script.
   const hosting = hostingJob();
   assert.notEqual(hosting, '', 'the workflow has no hosting job');
@@ -1588,13 +1969,15 @@ test('the hosting dispatch is a job of its own, run beside the registry job once
     .filter((line) => line !== '');
   assert.deepEqual(permissions, ['contents: read']);
   assert.equal(scalar(under(hosting, 'env'), 'TAG'), '${{ needs.release.outputs.tag }}');
-  assert.doesNotMatch(hosting, /^ *(?:- +)?uses:/m, 'the hosting job runs an action');
+  assert.equal(hosting.split('uses:').length - 1, 1, 'the hosting job runs an action besides the token action');
   const steps = hostingJobSteps();
-  assert.equal(steps.length, 1, 'expected exactly one hosting job step');
-  const step = steps[0]!;
+  assert.equal(steps.length, 2, 'expected the token step, then the dispatch');
+  const [token, step] = steps as [string, string];
+  assert.equal(token, appTokenStep(hosting, 'hosting'), 'the hosting job does not mint its token first');
   assert.equal(step, hostingDispatchStep(), 'the hosting job step does not send the dispatch');
   // docs/RELEASING.md names the step.
   assert.equal(scalar(stepBody(step), 'name'), 'Tell mcp.tibia.sh about the release');
+  assert.equal(stepIf(token), undefined, `${stepName(token)} sets if`);
   assert.equal(stepIf(step), undefined, `${stepName(step)} sets if`);
   assertDefaultShell(hosting, step);
   assert.doesNotMatch(stepScript(step) ?? '', /\bset +\+[a-z]*e|\bset +\+o +errexit\b/, `${stepName(step)} turns off -e`);
@@ -1727,4 +2110,208 @@ test('the hosting dispatch fails after 3 attempts, 30 seconds apart, and names t
     lines.slice(start, end === -1 ? undefined : end).includes('gh workflow run bump.yml -R tibia-sh/mcp.tibia.sh --ref main -f package=@tibia.sh/tibiawiki-mcp -f version=X.Y.Z'),
     `"${section}" in docs/RELEASING.md does not give the manual command`,
   );
+});
+
+test('the hosting dispatch uses an App token limited to mcp.tibia.sh', () => {
+  // The token dispatches to the hosting repository and nowhere else: one repository, contents write,
+  // which a repository_dispatch needs, and nothing more. It expires within the hour, and only the
+  // dispatch step reads it, through its env, where gh finds it by itself.
+  const hosting = hostingJob();
+  const token = appTokenStep(hosting, 'hosting');
+  assert.equal(scalar(stepBody(token), 'uses'), APP_TOKEN_ACTION);
+  assert.equal(scalar(stepBody(token), 'id'), 'token');
+  assert.deepEqual(mappingOf(stepInputs(token)), HOSTING_TOKEN_INPUTS);
+  assert.equal(under(stepBody(token), 'env'), '', 'the token step has an env');
+  assert.deepEqual(mappingOf(under(stepBody(hostingDispatchStep()), 'env')), { GH_TOKEN: '${{ steps.token.outputs.token }}' });
+  const readers = hosting.split('\n').filter((line) => /\bsteps\.token\b/.test(line));
+  assert.equal(readers.length, 1, 'the token reaches another step of the hosting job');
+  assert.ok(hostingDispatchStep().split('\n').includes(readers[0]!), 'the token reaches another step of the hosting job');
+});
+
+/** The auto-merge step's condition: a push run where release-please reported a PR and created no release. */
+const AUTO_MERGE_IF =
+  "${{ github.event_name == 'push' && steps.release.outputs.pr && steps.release.outputs.release_created != 'true' }}";
+
+/** What the auto-merge step's env holds: the App token, the repository for gh, and release-please's PR. */
+const AUTO_MERGE_ENV = {
+  GH_TOKEN: '${{ steps.token.outputs.token }}',
+  GH_REPO: '${{ github.repository }}',
+  PR: '${{ steps.release.outputs.pr }}',
+};
+
+/**
+ * The auto-merge step's script, word for word. It holds the App token, and a job output is data, so the
+ * number is taken from release-please's JSON only when it is a JSON number whose text is digits alone,
+ * and nothing else reaches gh. gh api runs in an assignment of its own, so a failed read stops the
+ * script instead of reading as auto-merge off. A change here has to change this test on purpose.
+ */
+const AUTO_MERGE_SCRIPT = String.raw`if ! number="$(jq -r '.number | numbers' <<< "$PR")" || [[ ! $number =~ ^[0-9]+$ ]]; then
+  echo "::error::release-please reported a release PR without a plain number, so its auto-merge was not turned on."
+  exit 1
+fi
+echo "pr_number=$number" >> "$GITHUB_OUTPUT"
+auto_merge="$(gh api "repos/{owner}/{repo}/pulls/$number" --jq .auto_merge)"
+if [[ -z $auto_merge ]]; then
+  gh pr merge "$number" --auto --rebase
+else
+  echo "Auto-merge is already on for pull request $number."
+fi`;
+
+/**
+ * Runs the auto-merge step with `pr` as release-please's output, as the checks above run their scripts,
+ * with the fake gh first on PATH. `autoMerge` is what gh prints for the pull request's auto_merge: an
+ * empty line for null, or the object. jq and everything else is real.
+ */
+const runAutoMerge = (pr: string, autoMerge = '\n', pullExit = 0) => {
+  const dir = scratch();
+  writeFileSync(join(dir, 'auto-merge'), autoMerge);
+  writeFileSync(join(dir, 'pull-exit'), `${pullExit}\n`);
+  writeFileSync(join(dir, 'github-output'), '');
+  const env = {
+    PR: pr,
+    GH_TOKEN: 'fake-app-token',
+    GH_REPO: 'octo-org/octo-repo',
+    GITHUB_OUTPUT: join(dir, 'github-output'),
+    PATH: `${fakeBin()}:${process.env['PATH'] ?? ''}`,
+    GH_RUN: dir,
+  };
+  const run = bash(stepScript(autoMergeStep())!, env, dir);
+  return {
+    status: run.status,
+    output: `${run.stdout}${run.stderr}`,
+    errors: run.stdout.split('\n').filter((line) => line.startsWith('::error::')),
+    events: recorded(dir, 'events'),
+    outputs: recorded(dir, 'github-output'),
+  };
+};
+
+/** release-please's pr output for pull request `number`, as @actions/core writes the object: its JSON. */
+const releasePullRequest = (number: unknown): string =>
+  JSON.stringify({
+    headBranchName: 'release-please--branches--main--components--tibiawiki-mcp',
+    baseBranchName: 'main',
+    number,
+    title: 'chore(main): release 1.2.3',
+    body: ':robot: I have created a release *beep* *boop*',
+    labels: ['autorelease: pending'],
+    files: [],
+  });
+
+test('a release PR gets auto-merge, and only a validated number reaches gh', () => {
+  // The release PR merges itself once its checks pass, and the merge is the push that publishes.
+  // release-please names the PR in its pr output, and auto-merge is turned on only when it is off, as
+  // bump.ts does, since a second request would be refused. A run that created a release has no PR to
+  // merge. The step's condition, env and script are pinned whole.
+  const step = autoMergeStep();
+  assert.equal(stepIf(step), AUTO_MERGE_IF);
+  assert.deepEqual(mappingOf(under(stepBody(step), 'env')), AUTO_MERGE_ENV);
+  assert.equal(scalar(stepBody(step), 'id'), 'merge');
+  assert.equal(stepScript(step), AUTO_MERGE_SCRIPT);
+  assertDefaultShell(pleaseJob(), step);
+  const read = 'gh api repos/{owner}/{repo}/pulls/42 --jq .auto_merge';
+  const off = runAutoMerge(releasePullRequest(42));
+  assert.equal(off.status, 0, off.output);
+  assert.deepEqual(off.events, [read, 'gh pr merge 42 --auto --rebase']);
+  assert.deepEqual(off.outputs, ['pr_number=42']);
+  const on = runAutoMerge(releasePullRequest(42), '{"enabled_by":{"login":"tibia-sh-bot[bot]"},"merge_method":"rebase"}\n');
+  assert.equal(on.status, 0, on.output);
+  assert.deepEqual(on.events, [read], 'auto-merge is turned on a second time');
+  // A read that fails is not auto-merge off.
+  const failed = runAutoMerge(releasePullRequest(42), 'gh: Server Error (HTTP 502)\n', 1);
+  assert.notEqual(failed.status, 0, 'a failed read passes');
+  assert.deepEqual(failed.events, [read], 'a failed read turns on auto-merge');
+  // Only a JSON number whose text is digits alone passes, and nothing else reaches gh.
+  const invalid: Array<[string, string]> = [
+    ['a number as a string', releasePullRequest('42')],
+    ['a string with a trailing newline', releasePullRequest('42\n')],
+    ['a string that runs a command', releasePullRequest('42; true')],
+    ['a negative number', releasePullRequest(-42)],
+    ['a fraction', releasePullRequest(4.2)],
+    ['no number', releasePullRequest(null)],
+    ['a list', JSON.stringify([JSON.parse(releasePullRequest(42))])],
+    ['two documents', `${releasePullRequest(42)}\n${releasePullRequest(43)}`],
+    ['no output', ''],
+    ['text that is not JSON', 'pull request 42'],
+  ];
+  for (const [what, pr] of invalid) {
+    const run = runAutoMerge(pr);
+    assert.equal(run.status, 1, `${what} does not fail the step with exit 1: ${run.output}`);
+    assert.equal(run.errors.length, 1, `${what} fails without exactly one ::error::: ${run.output}`);
+    assert.deepEqual(run.events, [], `${what} reaches gh`);
+    assert.deepEqual(run.outputs, [], `${what} is handed on`);
+  }
+});
+
+test('no workflow reads a PAT secret', () => {
+  // The secrets any workflow references are the App's key, once in each job that mints a token, and
+  // the registry key. The App's client ID is the one variable. Everything that writes to GitHub runs
+  // as the App or with GITHUB_TOKEN, and ci.yml and alert.yml reference no secret at all.
+  const context = (name: string): string[] =>
+    workflowFiles().flatMap((file) =>
+      workflowCode(file)
+        .split('\n')
+        .filter((line) => new RegExp(`(?<![\\w.-])${name}(?![\\w-])`).test(line))
+        .map((line) => `${file} ${line.trim()}`),
+    );
+  assert.deepEqual(context('secrets'), [
+    'release.yml private-key: ${{ secrets.TIBIA_SH_APP_PRIVATE_KEY }}',
+    'release.yml MCP_PRIVATE_KEY: ${{ secrets.MCP_PRIVATE_KEY }}',
+    'release.yml private-key: ${{ secrets.TIBIA_SH_APP_PRIVATE_KEY }}',
+  ]);
+  assert.deepEqual(context('vars'), [
+    'release.yml client-id: ${{ vars.TIBIA_SH_APP_CLIENT_ID }}',
+    'release.yml client-id: ${{ vars.TIBIA_SH_APP_CLIENT_ID }}',
+  ]);
+});
+
+/** The condition of alert.yml's job: a run that did not pass, of an event other than a pull request. */
+const ALERT_IF =
+  "github.event.workflow_run.conclusion != 'success' && github.event.workflow_run.conclusion != 'skipped' && " +
+  "github.event.workflow_run.conclusion != 'neutral' && github.event.workflow_run.event != 'pull_request'";
+
+/**
+ * alert.yml's script, word for word: it comments on the open issue titled `Automation needs a look`,
+ * found by its exact title rather than a search, or opens that issue assigned to drptbl.
+ */
+const ALERT_SCRIPT = String.raw`title='Automation needs a look'
+body="$WORKFLOW $CONCLUSION: $RUN_URL"
+number=$(TITLE=$title gh issue list --state open --limit 1000 --json number,title \
+  --jq 'map(select(.title == env.TITLE) | .number) | min // empty')
+if [[ -n $number ]]; then
+  gh issue comment "$number" --body "$body"
+else
+  gh issue create --title "$title" --assignee drptbl --body "$body"
+fi`;
+
+test('alert comments on failed release runs', () => {
+  // workflow_run matches a workflow by its name:, so the name is read from release.yml. alert.yml reads
+  // no code and grants nothing at the top, and its one job writes the issue with GITHUB_TOKEN. Every
+  // workflow that writes the issue waits its turn in one group, and none replaces another's waiting run.
+  const code = workflowCode('alert.yml');
+  assert.equal(scalar(code, 'name'), 'alert');
+  const on = under(code, 'on');
+  assert.deepEqual(Object.keys(mappingOf(on)), ['workflow_run'], 'alert.yml has another trigger');
+  assert.deepEqual(mappingOf(under(on, 'workflow_run')), { workflows: `[${scalar(workflowCode(), 'name')}]`, types: '[completed]' });
+  assert.equal(scalar(workflowCode(), 'name'), 'release');
+  assert.equal(scalar(code, 'permissions'), '{}', 'alert.yml grants something at the top');
+  const jobs = workflowJobs('alert.yml');
+  assert.deepEqual(jobs.map(([name]) => name), ['alert']);
+  const alert = jobs[0]![1];
+  assert.equal(scalar(alert, 'if'), ALERT_IF);
+  assert.equal(scalar(alert, 'runs-on'), 'ubuntu-latest');
+  assert.equal(scalar(alert, 'timeout-minutes'), '5');
+  assert.deepEqual(mappingOf(under(alert, 'permissions')), { issues: 'write' });
+  assert.deepEqual(mappingOf(under(alert, 'concurrency')), { group: 'automation-alert', 'cancel-in-progress': 'false', queue: 'max' });
+  // No checkout and no action: gh alone, on this repository.
+  assert.doesNotMatch(alert, /\buses:/, 'the alert job runs an action');
+  const steps = jobSteps(alert);
+  assert.equal(steps.length, 1, 'expected exactly one alert step');
+  assert.deepEqual(mappingOf(under(stepBody(steps[0]!), 'env')), {
+    GH_TOKEN: '${{ github.token }}',
+    GH_REPO: '${{ github.repository }}',
+    WORKFLOW: '${{ github.event.workflow_run.name }}',
+    CONCLUSION: '${{ github.event.workflow_run.conclusion }}',
+    RUN_URL: '${{ github.event.workflow_run.html_url }}',
+  });
+  assert.equal(stepScript(steps[0]!), ALERT_SCRIPT);
 });

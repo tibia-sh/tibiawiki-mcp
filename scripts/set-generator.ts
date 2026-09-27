@@ -2,6 +2,7 @@ import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
+import { setTimeout as sleep } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
 import { assertGeneratorVersion, GENERATOR_VERSION_PATTERN, generatorWheelUrl } from '../src/indexer/generator-release.ts';
 
@@ -20,6 +21,9 @@ import { assertGeneratorVersion, GENERATOR_VERSION_PATTERN, generatorWheelUrl } 
  * `decide` fetches main and reads the pin there, not in the checkout, since main can have
  * moved since the run started. It reads the open generator/* pull requests with gh, which
  * takes its token from GH_TOKEN, and fetches each one to tell whether it was built on an older pin.
+ * For the requested version's open pull request, when it was not, it asks GitHub whether the PR
+ * conflicts with main. GitHub may still be computing that, so it asks up to 3 times,
+ * MERGEABLE_RETRY_SECONDS apart (5 unless set), and fails when the answer is still unknown.
  */
 
 const BUILD_INDEX_PATH = fileURLToPath(new URL('../src/indexer/build-index.ts', import.meta.url));
@@ -63,12 +67,15 @@ export function setGenerator(source: string, version: string, sha256: string): s
  * An open pull request from a generator/<version> branch of this repository. `stale` says it
  * was built on a main whose pin is not main's now, as `isStale` reads its base: the queue's
  * rebase would then conflict on the two constant lines, and the PR could never merge.
+ * `conflicting` says GitHub reports that it conflicts with main for any other reason, such as
+ * a manual re-lock. Only the requested version's PR, when not stale, is asked; the others carry false.
  */
 export interface GeneratorPr {
   version: string;
   number: number;
   autoMerge: boolean;
   stale: boolean;
+  conflicting: boolean;
 }
 
 /** The GENERATOR_VERSION and GENERATOR_SHA256 lines of a build-index.ts, or undefined without exactly one of each. */
@@ -120,8 +127,8 @@ const compareVersions = (a: string, b: string): number => {
  * - `refuse` for a version below the pin;
  * - `rearm` for a version with a current open PR whose auto-merge is off, as a run
  *   interrupted after it opened the PR leaves it;
- * - `propose` otherwise, a version whose open PR is stale included: its branch is rebuilt on
- *   main and force-pushed, so a repeated request repairs a PR that can no longer merge.
+ * - `propose` otherwise, a version whose open PR is stale or conflicting included: its branch
+ *   is rebuilt on main and force-pushed, so a repeated request repairs a PR that can no longer merge.
  *
  * `rearm` and `propose` supersede the open PRs for versions below the request.
  */
@@ -130,8 +137,8 @@ export function decideGenerator(pinned: string, requested: string, prs: readonly
   for (const pr of prs) {
     assertGeneratorVersion(pr.version);
     if (!Number.isSafeInteger(pr.number) || pr.number < 1) throw new Error(`${pr.number} is not a pull request number.`);
-    if (typeof pr.autoMerge !== 'boolean' || typeof pr.stale !== 'boolean') {
-      throw new Error(`Pull request ${pr.number} has no plain autoMerge and stale.`);
+    if (typeof pr.autoMerge !== 'boolean' || typeof pr.stale !== 'boolean' || typeof pr.conflicting !== 'boolean') {
+      throw new Error(`Pull request ${pr.number} has no plain autoMerge, stale and conflicting.`);
     }
     if (prs.some((other) => other !== pr && other.version === pr.version)) {
       throw new Error(`There are two open pull requests for ${pr.version}, so which one to merge is not clear.`);
@@ -142,7 +149,7 @@ export function decideGenerator(pinned: string, requested: string, prs: readonly
   if (prs.some((pr) => compareVersions(pr.version, requested) > 0)) return { action: 'noop', supersede: [] };
   const supersede = prs.filter((pr) => compareVersions(pr.version, requested) < 0).map((pr) => pr.number);
   const open = prs.find((pr) => pr.version === requested);
-  if (open === undefined || open.stale) return { action: 'propose', supersede };
+  if (open === undefined || open.stale || open.conflicting) return { action: 'propose', supersede };
   if (open.autoMerge) return { action: 'noop', supersede: [] };
   return { action: 'rearm', supersede, pr: open.number };
 }
@@ -160,21 +167,59 @@ interface PrLine {
 const git = (args: string[]): string =>
   execFileSync('git', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'inherit'], timeout: 120_000 });
 
+/** Runs gh with `args` and returns its stdout. Its errors go to stderr. */
+const gh = (args: string[]): string =>
+  execFileSync('gh', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'inherit'], timeout: 120_000 });
+
+/** How many times `conflictsWithMain` asks GitHub before it gives up. */
+const MERGEABLE_READS = 3;
+
+/** The seconds between two reads of `mergeable`: MERGEABLE_RETRY_SECONDS, 5 unless set. Throws unless it is a whole number. */
+function mergeableRetrySeconds(): number {
+  const value = process.env['MERGEABLE_RETRY_SECONDS'] ?? '5';
+  if (!/^(0|[1-9][0-9]{0,5})$/.test(value)) {
+    throw new Error(`MERGEABLE_RETRY_SECONDS is ${JSON.stringify(value)}, not a whole number of seconds below 1000000.`);
+  }
+  return Number(value);
+}
+
+/**
+ * Whether GitHub reports open pull request `number`, for `version`, as conflicting with main.
+ * GitHub computes `mergeable` in the background and answers null until it has, so this asks up
+ * to MERGEABLE_READS times, `retrySeconds` apart. It throws when the answer is still null, since
+ * an unknown answer must neither rebuild the PR nor leave it, and on anything but a boolean or null.
+ */
+async function conflictsWithMain(number: number, version: string, retrySeconds: number): Promise<boolean> {
+  for (let read = 1; read <= MERGEABLE_READS; read += 1) {
+    const body = gh(['api', `repos/{owner}/{repo}/pulls/${number}`]);
+    const pr = JSON.parse(body) as unknown;
+    const mergeable = typeof pr === 'object' && pr !== null && !Array.isArray(pr) ? (pr as { mergeable?: unknown }).mergeable : undefined;
+    if (typeof mergeable === 'boolean') return !mergeable;
+    if (mergeable !== null) {
+      throw new Error(`gh printed pull request #${number} with a mergeable that is not true, false or null: ${body}`);
+    }
+    if (read < MERGEABLE_READS) await sleep(retrySeconds * 1000);
+  }
+  throw new Error(`GitHub has not computed whether pull request #${number} conflicts with main. Dispatch generator.yml again for ${version}.`);
+}
+
 /**
  * The open PRs into main from this repository's generator/<version> branches, each fetched
  * from refs/pull/<number>/head to tell whether its base is stale against `mainSource`, main's
- * build-index.ts. A PR from a fork counts for nothing, whatever its branch is called:
+ * build-index.ts. The one for `requested`, when not stale, is asked whether it conflicts with
+ * main, `retrySeconds` apart. A PR from a fork counts for nothing, whatever its branch is called:
  * its branch name is anyone's to choose, and a rearm would turn on its auto-merge.
  */
-function openGeneratorPrs(mainSource: string): GeneratorPr[] {
-  const output = execFileSync('gh', [
+async function openGeneratorPrs(mainSource: string, requested: string, retrySeconds: number): Promise<GeneratorPr[]> {
+  const output = gh([
     'api', '--paginate', 'repos/{owner}/{repo}/pulls?state=open&base=main&per_page=100',
     '--jq', '.[] | {number, ref: .head.ref, headRepo: .head.repo.full_name, baseRepo: .base.repo.full_name, autoMerge: (.auto_merge != null)}',
-  ], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'inherit'], timeout: 120_000 });
-  return output.split('\n').filter((line) => line !== '').flatMap((line) => {
+  ]);
+  const prs: GeneratorPr[] = [];
+  for (const line of output.split('\n').filter((entry) => entry !== '')) {
     const pr = JSON.parse(line) as PrLine;
     const version = /^generator\/(.*)$/.exec(pr.ref)?.[1];
-    if (pr.headRepo !== pr.baseRepo || version === undefined || !GENERATOR_VERSION_PATTERN.test(version)) return [];
+    if (pr.headRepo !== pr.baseRepo || version === undefined || !GENERATOR_VERSION_PATTERN.test(version)) continue;
     if (typeof pr.autoMerge !== 'boolean' || !Number.isSafeInteger(pr.number) || pr.number < 1) {
       throw new Error(`gh printed a pull request it could not read: ${line}`);
     }
@@ -187,8 +232,11 @@ function openGeneratorPrs(mainSource: string): GeneratorPr[] {
       // A head without a parent, or a parent without build-index.ts, is rebuilt like a stale one.
     }
     const stale = baseSource === undefined || isStale(mainSource, baseSource);
-    return [{ version, number: pr.number, autoMerge: pr.autoMerge, stale }];
-  });
+    // A stale PR is rebuilt anyway, so only a current one for the requested version is asked.
+    const conflicting = version === requested && !stale && (await conflictsWithMain(pr.number, version, retrySeconds));
+    prs.push({ version, number: pr.number, autoMerge: pr.autoMerge, stale, conflicting });
+  }
+  return prs;
 }
 
 /** Pins `version` and the sha256 of its wheel in build-index.ts, and returns that sha256. */
@@ -214,11 +262,12 @@ async function set(version: string): Promise<string> {
 }
 
 /** What generator.yml does for `version`, from main's pin after a fetch and the open generator PRs. */
-function decide(version: string): GeneratorDecision {
+async function decide(version: string): Promise<GeneratorDecision> {
   assertGeneratorVersion(version);
+  const retrySeconds = mergeableRetrySeconds();
   git(['fetch', '--quiet', '--no-tags', 'origin', '+refs/heads/main:refs/remotes/origin/main']);
   const mainSource = git(['show', 'refs/remotes/origin/main:src/indexer/build-index.ts']);
-  return decideGenerator(pinnedGenerator(mainSource), version, openGeneratorPrs(mainSource));
+  return decideGenerator(pinnedGenerator(mainSource), version, await openGeneratorPrs(mainSource, version, retrySeconds));
 }
 
 if (import.meta.main) {
@@ -229,6 +278,6 @@ if (import.meta.main) {
   if (command === 'set') {
     process.stdout.write(`${await set(version)}\n`);
   } else {
-    process.stdout.write(`${JSON.stringify(decide(version))}\n`);
+    process.stdout.write(`${JSON.stringify(await decide(version))}\n`);
   }
 }

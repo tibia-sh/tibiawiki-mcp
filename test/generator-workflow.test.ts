@@ -5,8 +5,8 @@ import { createHash } from 'node:crypto';
 import { copyFileSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { setGenerator } from '../scripts/set-generator.ts';
-import { GENERATOR, GENERATOR_SHA256 } from '../src/indexer/build-index.ts';
 import { attestationFlags, generatorWheelUrl } from '../src/indexer/generator-release.ts';
+import { FIXTURE_BUILD_INDEX as BUILD_INDEX, FIXTURE_LOCK as LOCK, lockFor } from './generator-fixture.ts';
 import { tempDirs } from './harness.ts';
 import {
   APP, APP_TOKEN_ACTION, appTokenStep, assertDefaultShell, bash, entryOf, isAppToken, isCheckout, isPnpmSetup, jobSteps,
@@ -572,16 +572,7 @@ const fakeBin = (): string => {
   return fakes;
 };
 
-const BUILD_INDEX = read('src/indexer/build-index.ts');
-const LOCK = read('data/tibiawikisql-requirements.txt');
 const REQUESTED = '9.0.0+tibiash.3';
-
-/** The committed lock with its generator entry moved to `version`'s wheel, hashed `sha256`. */
-const lockFor = (version: string, sha256: string): string => {
-  const entry = `${GENERATOR} \\\n    --hash=sha256:${GENERATOR_SHA256}\n`;
-  assert.equal(LOCK.split(entry).length, 2, 'the committed lock has no generator entry to move');
-  return LOCK.replace(entry, `tibiawikisql @ ${generatorWheelUrl(version)} \\\n    --hash=sha256:${sha256}\n`);
-};
 
 const sha256Of = (text: string): string => createHash('sha256').update(text).digest('hex');
 
@@ -599,9 +590,9 @@ const gitEnv = (dir: string): Record<string, string> => ({
 });
 
 /**
- * A checkout as the propose job has it: this repository's two dependency-free files, build-index.ts
- * and the lock, committed, with origin a bare repository beside it. `run` is the directory the
- * stand-ins answer and record from.
+ * A checkout as the propose job has it: this repository's two dependency-free files, and the fixture
+ * build-index.ts and lock, committed, with origin a bare repository beside it. `run` is the directory
+ * the stand-ins answer and record from.
  */
 const checkout = (): { dir: string; origin: string; run: string } => {
   const dir = scratch();
@@ -609,9 +600,11 @@ const checkout = (): { dir: string; origin: string; run: string } => {
   mkdirSync(join(dir, 'scripts'));
   mkdirSync(join(dir, 'data'));
   writeFileSync(join(dir, 'package.json'), '{ "type": "module" }\n');
-  for (const file of ['src/indexer/generator-release.ts', 'src/indexer/build-index.ts', 'scripts/set-generator.ts', 'data/tibiawikisql-requirements.txt']) {
+  for (const file of ['src/indexer/generator-release.ts', 'scripts/set-generator.ts']) {
     copyFileSync(join(root, file), join(dir, file));
   }
+  writeFileSync(join(dir, 'src/indexer/build-index.ts'), BUILD_INDEX);
+  writeFileSync(join(dir, 'data/tibiawikisql-requirements.txt'), LOCK);
   git(dir, ['init', '--quiet', '--initial-branch=main']);
   git(dir, ['add', '--all']);
   git(dir, ['commit', '--quiet', '--message', 'checkout']);

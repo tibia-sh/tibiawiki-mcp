@@ -1,7 +1,8 @@
 import { createHash } from 'node:crypto';
 import {
-  GENERATOR, GENERATOR_PYTHON, GENERATOR_REPO, GENERATOR_SHA256, GENERATOR_VERSION, GENERATOR_WHEEL_URL,
+  GENERATOR, GENERATOR_PYTHON, GENERATOR_SHA256, GENERATOR_VERSION, GENERATOR_WHEEL_URL,
 } from './build-index.ts';
+import { GENERATOR_REPO } from './generator-release.ts';
 
 /**
  * The generator lock, the requirements file `uv pip compile --generate-hashes` writes: how

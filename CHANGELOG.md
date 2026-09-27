@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.16.0](https://github.com/tibia-sh/tibiawiki-mcp/compare/v0.15.4...v0.16.0) (2026-09-27)
+
+
+### Features
+
+* expose the mount price currency ([7d8c963](https://github.com/tibia-sh/tibiawiki-mcp/commit/7d8c9636ddc2fc69495326a53b8a5fed7e5818fa))
+* require the mount price currency ([9bdc515](https://github.com/tibia-sh/tibiawiki-mcp/commit/9bdc5157284c3a1a11a7996c3d19e1bd62821f27))
+
 ## [0.15.4](https://github.com/tibia-sh/tibiawiki-mcp/compare/v0.15.3...v0.15.4) (2026-09-27)
 
 

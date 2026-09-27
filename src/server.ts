@@ -63,7 +63,7 @@ const FIELD_MEANINGS =
   `What result fields mean. runsAt: ${RUNS_AT_MEANING} summonCost: ${SUMMON_COST_MEANING} ` +
   `convinceCost: ${CONVINCE_COST_MEANING} goldPerKill: ${GOLD_PER_KILL_MEANING} ` +
   `image: ${IMAGE_MEANING} ${RASHID_PLACE_MEANING} ${FARE_MEANING} origin: ${ORIGIN_MEANING} ` +
-  `raceId: ${RACE_ID_MEANING} priceCurrency: ${PRICE_CURRENCY_MEANING} `;
+  `raceId: ${RACE_ID_MEANING} priceCurrency and valueBuyCurrency: ${PRICE_CURRENCY_MEANING} `;
 
 export const TOOL_NAMES = [
   GET, SEARCH, FIND_CREATURES, FIND_ITEMS, FIND_SPELLS, FIND_QUESTS, FIND_HOUSES, HOW_TO_OBTAIN,

@@ -4,7 +4,7 @@ import { str, num, bool, type TibiaDb } from '../db.ts';
 import {
   ITEM_SORTS, itemSort, eavOperator, statusClause, coerceAttribute, REPORTED_ATTRS,
   ITEM_RESISTANCES, resistanceAttribute, ITEM_SKILLS, ITEM_HANDS, type EavOperator,
-  inGameNameSchema, SPELL_ELEMENTS, ITEM_LEECHES, leechAttribute,
+  inGameNameSchema, SPELL_ELEMENTS, ITEM_LEECHES, leechAttribute, PRICE_CURRENCY_MEANING,
 } from '../domain.ts';
 import { encodeCursor, decodeCursor } from '../cursor.ts';
 
@@ -17,6 +17,7 @@ const outputSchema = z.object({
     itemType: z.string().nullable(),
     weight: z.number().nullable(),
     valueBuy: z.number().nullable(),
+    valueBuyCurrency: z.string().nullable().describe(PRICE_CURRENCY_MEANING),
     clientId: z.number().nullable(),
     isStackable: z.boolean().nullable(),
     isPickupable: z.boolean().nullable(),
@@ -67,7 +68,8 @@ export function registerFindItems(server: McpServer, handle: TibiaDb): void {
           .describe('The item\'s client ID, any listed. Item variants can share one.'),
         include_inactive: z.boolean().default(false),
         sort: z.enum(ITEM_SORTS).default('title')
-          .describe('weight ascends, value, armor, attack and defense descend, title is alphabetical.'),
+          .describe('weight ascends, armor, attack and defense descend, title is alphabetical. ' +
+            'value descends by NPC gold price, and prices in other currencies come last.'),
         limit: z.number().int().min(1).max(100).default(25),
         cursor: z.string().optional(),
       }),
@@ -167,6 +169,7 @@ export function registerFindItems(server: McpServer, handle: TibiaDb): void {
             itemType: str(row.item_type),
             weight: num(row.weight),
             valueBuy: num(row.value_buy),
+            valueBuyCurrency: str(row.value_buy_currency),
             clientId: num(row.client_id),
             isStackable: bool(row.is_stackable),
             isPickupable: bool(row.is_pickupable),

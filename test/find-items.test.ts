@@ -12,6 +12,7 @@ const scratch = tempDirs('twmcp-find-items-');
 type ItemsOut = {
   results: Array<{
     title: string; itemClass: string | null; weight: number | null; clientId: number | null;
+    valueBuy: number | null; valueBuyCurrency: string | null;
     actualName: string | null; isStackable: boolean | null; isPickupable: boolean | null;
     attributes: Record<string, string | number>;
   }>;
@@ -415,6 +416,44 @@ test('a result row carries the in-game name and the stack and pickup flags', () 
   assert.equal(gold.isStackable, true);
   assert.equal(gold.isPickupable, true);
   assert.equal(byTitle(data.results, 'Dragon Shield')?.isStackable, false);
+}));
+
+test('a result row carries the currency of its buy price', () => onFixture(async (client) => {
+  const items = await findAll(client, { include_inactive: true });
+  for (const r of items) assert.ok('valueBuyCurrency' in r, `${r.title} reports valueBuyCurrency`);
+  // Blade of Mayhem is unavailable, so it needs include_inactive. Magic Longsword is not sold.
+  for (const [title, valueBuy, currency] of [
+    ['25 Years Backpack', 7197, 'Theons'], ['Blade of Mayhem', 50, 'Gold Token'],
+    ['Steel Helmet', 580, 'Gold Coin'], ['Magic Longsword', 0, null],
+  ] as const) {
+    const r = byTitle(items, title);
+    assert.deepEqual([r?.valueBuy, r?.valueBuyCurrency], [valueBuy, currency], title);
+  }
+}));
+
+// A price in Theons or Gold Tokens is no gold amount, so ranking 7197 Theons above a
+// 580 gold Steel Helmet would put the wrong item first.
+test('sort value ranks gold buy prices first, then other currencies and no price by title', () => onFixture(async (client) => {
+  const items = await findAll(client, { sort: 'value', include_inactive: true });
+  const gold = (r: Item) => r.valueBuyCurrency === 'Gold Coin';
+  assert.ok(items.some(gold), 'guard: an item is priced in gold');
+  assert.ok(items.some((r) => r.valueBuyCurrency !== null && !gold(r)),
+    'guard: an item is priced in another currency');
+  assert.ok(items.some((r) => r.valueBuyCurrency === null), 'guard: an item has no buy price');
+  const split = items.findIndex((r) => !gold(r));
+  const [priced, rest] = [items.slice(0, split), items.slice(split)];
+  assert.ok(rest.every((r) => !gold(r)), 'no gold price after the first other one');
+  priced.slice(1).forEach((b, k) => {
+    const a = priced[k] as Item;
+    assert.ok(a.valueBuy! >= b.valueBuy!, `${a.title} (${a.valueBuy}) before ${b.title} (${b.valueBuy})`);
+    if (a.valueBuy === b.valueBuy) {
+      assert.ok(asciiLower(a.title) < asciiLower(b.title), `${a.title} before ${b.title}`);
+    }
+  });
+  rest.slice(1).forEach((b, k) => {
+    const a = rest[k] as Item;
+    assert.ok(asciiLower(a.title) < asciiLower(b.title), `${a.title} before ${b.title}`);
+  });
 }));
 
 test('is_stackable keeps stackable items when true and the rest when false', () => onFixture(async (client) => {

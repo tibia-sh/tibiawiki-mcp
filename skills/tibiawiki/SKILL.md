@@ -131,8 +131,11 @@ NPC, and without a type the call returns an error asking you to choose.
   and `article` the game prints, and `raceId`, the client race ID, which some creatures
   share, such as boss phases, so it does not identify one creature
 - **item**: EAV `attributes` (attack, defense, required level), `keys`, `storeOffers`,
-  `proficiencyPerks`, `boughtBy`, the `actualName` and `plural` the game prints, and
-  `isStackable`, `isPickupable` and `isImmobile`
+  `proficiencyPerks`, `boughtBy`, the `actualName` and `plural` the game prints,
+  `isStackable`, `isPickupable` and `isImmobile`, and `valueBuyCurrency`, the unit of
+  `valueBuy` as the wiki names it, such as Gold Coin or Theons, and null when there is no
+  price. `tibia_find_items` results carry it too, and its `value` sort ranks gold prices
+  only, with prices in other currencies last
 - **npc**: `jobs`, `races`, `destinations` (travel with fares and each leg's `origin`),
   `positions` (every recorded spot), `buys`, `sells`. Rashid also carries
   `rashidSchedule`, his seven-day rotation

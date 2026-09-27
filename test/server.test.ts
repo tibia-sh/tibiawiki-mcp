@@ -85,7 +85,7 @@ test('the instructions tell a model what the zeros and nulls in results mean', a
     FARE_MEANING,
     `origin: ${ORIGIN_MEANING}`,
     `raceId: ${RACE_ID_MEANING}`,
-    `priceCurrency: ${PRICE_CURRENCY_MEANING}`,
+    `priceCurrency and valueBuyCurrency: ${PRICE_CURRENCY_MEANING}`,
   ]) {
     assert.ok(instructions.includes(meaning), `the instructions lack: ${meaning}`);
   }
@@ -101,7 +101,8 @@ test('the instructions tell a model what the zeros and nulls in results mean', a
   assert.equal(ORIGIN_MEANING,
     "Where the leg starts. null: not recorded, it starts at one of the NPC's positions.");
   assert.equal(PRICE_CURRENCY_MEANING,
-    'Currency of price as the wiki names it, e.g. Tibia Coins or Event Points. null when there is no price.');
+    'Currency of the price beside it, as the wiki names it, e.g. Gold Coin, Tibia Coins or Event Points. ' +
+    'null when there is no price.');
 });
 
 test('each meaning in the instructions is the description of its output fields', async () => {
@@ -113,6 +114,7 @@ test('each meaning in the instructions is the description of its output fields',
   const boughtBy = branch('item').boughtBy.items.properties;
   const city = output('tibia_where_to_sell').properties.cities.items.properties;
   const route = output('tibia_find_travel').properties.results.items.properties;
+  const item = output('tibia_find_items').properties.results.items.properties;
   for (const [where, description, meaning] of [
     ['tibia_find_creatures runsAt', creature.runsAt.description, RUNS_AT_MEANING],
     ['tibia_find_creatures summonCost', creature.summonCost.description, SUMMON_COST_MEANING],
@@ -137,6 +139,8 @@ test('each meaning in the instructions is the description of its output fields',
     ['tibia_find_creatures raceId', creature.raceId.description, RACE_ID_MEANING],
     ['tibia_get raceId', branch('creature').raceId.description, RACE_ID_MEANING],
     ['tibia_get priceCurrency', branch('mount').priceCurrency.description, PRICE_CURRENCY_MEANING],
+    ['tibia_get valueBuyCurrency', branch('item').valueBuyCurrency.description, PRICE_CURRENCY_MEANING],
+    ['tibia_find_items valueBuyCurrency', item.valueBuyCurrency.description, PRICE_CURRENCY_MEANING],
   ] as const) {
     assert.equal(description, meaning, where);
   }

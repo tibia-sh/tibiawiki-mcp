@@ -494,6 +494,24 @@ test('a mount reports the currency of its price', async () => {
   }
 });
 
+// 25 Years Backpack costs Theons, so a bare valueBuy names no unit. Steel Helmet is priced
+// in gold, and Magic Longsword is not sold, so it has no currency.
+test('an item reports the currency of its buy price', async () => {
+  const h = await connect();
+  try {
+    for (const [item, valueBuy, currency] of [
+      ['25 Years Backpack', 7197, 'Theons'], ['Steel Helmet', 580, 'Gold Coin'],
+      ['Magic Longsword', 0, null],
+    ] as const) {
+      const i = await get(h, item, 'item');
+      assert.ok('valueBuyCurrency' in i, `${item} reports valueBuyCurrency`);
+      assert.deepEqual([i.valueBuy, i.valueBuyCurrency], [valueBuy, currency], item);
+    }
+  } finally {
+    await h.close();
+  }
+});
+
 test('a client ID the wiki does not record is null', async () => {
   // Donkey and Assassin Outfits have their client IDs in the fixture, so this copy clears two.
   const path = join(scratch(), 'client-ids.db');

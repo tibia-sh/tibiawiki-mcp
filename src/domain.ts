@@ -172,8 +172,8 @@ export const RACE_ID_MEANING =
   'Tibia client race ID, not unique: some creatures share one, such as boss phases. ' +
   'null: the wiki records none.';
 export const PRICE_CURRENCY_MEANING =
-  'Currency of price as the wiki names it, e.g. Tibia Coins or Event Points. ' +
-  'null when there is no price.';
+  'Currency of the price beside it, as the wiki names it, e.g. Gold Coin, Tibia Coins or ' +
+  'Event Points. null when there is no price.';
 
 /**
  * Creature numbers the wiki gives a meaning at 0, described once for every tool that
@@ -331,10 +331,12 @@ export type ItemSort = (typeof ITEM_SORTS)[number];
 const itemStat = (name: 'armor' | 'attack' | 'defense'): string =>
   `(select max(cast(a.value as integer)) from item_attribute a
      where a.item_id = i.article_id and a.name = '${name}')`;
+// value ranks gold prices only: a price in Theons or Gold Tokens is no gold amount, so it
+// sorts as null, after every gold price.
 const ITEM_ORDER: Record<ItemSort, string> = {
   title: 'title asc',
   weight: nullsLast('weight', 'asc'),
-  value: nullsLast('value_buy', 'desc'),
+  value: nullsLast("(case when value_buy_currency = 'Gold Coin' then value_buy end)", 'desc'),
   armor: nullsLast(itemStat('armor'), 'desc'),
   attack: nullsLast(itemStat('attack'), 'desc'),
   defense: nullsLast(itemStat('defense'), 'desc'),

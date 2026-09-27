@@ -15,7 +15,7 @@ import { generatorWheelUrl } from './generator-release.ts';
  * output. Its release workflow attests the wheel, and `pnpm lock-generator` verifies that
  * attestation for the tag `v${GENERATOR_VERSION}` before it writes the lock.
  */
-export const GENERATOR_VERSION = '9.0.0+tibiash.4';
+export const GENERATOR_VERSION = '9.0.0+tibiash.5';
 
 /** The release asset of the pinned version. */
 export const GENERATOR_WHEEL_URL = generatorWheelUrl(GENERATOR_VERSION);
@@ -32,7 +32,7 @@ export const GENERATOR = `tibiawikisql @ ${GENERATOR_WHEEL_URL}`;
  * records any other, so a replaced release asset cannot reach a build. A new release
  * means a new constant, reviewed in a pull request.
  */
-export const GENERATOR_SHA256 = '393bf9db3dc131e708789d41b3ac063e42c68f8d11ed6253d05508e8cdae888d';
+export const GENERATOR_SHA256 = '7c41398e769f4613f37ee3e296270a57946c97aa41a580b8a80250e42c03a7e1';
 
 /**
  * The Pythons the generator environment may be created with. The lock is compiled for

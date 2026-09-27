@@ -24,9 +24,12 @@ jobs:
       # release-please bumps, which only a release PR does, has to come from a PR head built on the merge
       # group's base: release-please builds its PR as one commit on main's tip. The merge group's ref,
       # gh-readonly-queue/<branch>/pr-<number>-<base sha>, names the PR and the group's base, which has to
-      # be the base the event names. The PR's head is read from refs/pull/<number>/head. Every value is
-      # checked whole before git reads it, and the fetches need no credentials, since the repository is
-      # public. It runs before anything installs.
+      # be the base the event names. The PR's head is read from refs/pull/<number>/head, which is its
+      # current head, so the entry's tree has to be that head's: the queue's rebase of a one-commit PR onto
+      # its own parent keeps the tree, and an entry built from an older head fails. The checkout and the
+      # diff hold the entry commit, $GITHUB_SHA, from the runner. Every value is checked whole before git
+      # reads it, and the fetches need no credentials, since the repository is public. It runs before
+      # anything installs.
       - name: Keep a release PR older than main out of the queue
         if: ${{ github.event_name == 'merge_group' }}
         env:
@@ -55,6 +58,12 @@ jobs:
           parent="$(git rev-parse --verify FETCH_HEAD^)"
           if [[ $parent != "$BASE_SHA" ]]; then
             echo "::error::The release PR was built on $parent, not on $BASE_SHA, the commit this queue entry merges onto, so its version and changelog miss what lands on main before it. release-please rebuilds it on main's tip on the next push to main, and its auto-merge adds it to the queue again."
+            exit 1
+          fi
+          entry_tree="$(git rev-parse --verify "$GITHUB_SHA^{tree}")"
+          head_tree="$(git rev-parse --verify "FETCH_HEAD^{tree}")"
+          if [[ $entry_tree != "$head_tree" ]]; then
+            echo "::error::This queue entry does not match the release PR's current head, so it was built from an older head. The PR joins the queue again once release-please's update of it lands."
             exit 1
           fi
           echo "The release PR was built on $BASE_SHA, the commit this queue entry merges onto."

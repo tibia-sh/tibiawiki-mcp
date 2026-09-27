@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { existsSync, readdirSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -2335,4 +2335,207 @@ test('ci.yml runs the required test job on pull requests and in the merge queue'
     assert.equal(scalar(job, key), undefined, `the test job sets ${key}, which renames, skips or delays the required check`);
   }
   assert.doesNotMatch(code, /\bgithub\.(?:event\.pull_request|head_ref|base_ref)\b|\bGITHUB_(?:HEAD|BASE)_REF\b/, 'ci.yml reads pull request context');
+});
+
+/** The name of ci.yml's step that keeps a release PR older than main out of the merge queue. */
+const QUEUE_CHECK = 'Keep a release PR older than main out of the queue';
+
+/** What the queue check reads: the merge group's base commit and ref, from the event, through env. */
+const QUEUE_CHECK_ENV = {
+  BASE_SHA: '${{ github.event.merge_group.base_sha }}',
+  HEAD_REF: '${{ github.event.merge_group.head_ref }}',
+};
+
+/**
+ * The queue check's script, word for word. A queue entry that changes the manifest release-please
+ * bumps is a release PR. release-please builds that PR as one commit on main's tip, so its head's parent
+ * has to be the merge group's base, or its version and changelog miss what main took since. The head
+ * commit comes from the merge group's ref, gh-readonly-queue/<base>/pr-<number>-<head sha>, and both
+ * commits are checked whole before git reads them. A change here has to change this test on purpose.
+ */
+const QUEUE_CHECK_SCRIPT = String.raw`[[ $BASE_SHA =~ ^[0-9a-f]{40}$ ]] || { echo "::error::The merge group names no base commit, so this check cannot tell whether a release PR is older than main."; exit 1; }
+git fetch --quiet --no-tags --depth=1 origin "$BASE_SHA"
+status=0
+git diff --quiet "$BASE_SHA" "$GITHUB_SHA" -- .release-please-manifest.json || status=$?
+case $status in
+  0) echo "This entry leaves .release-please-manifest.json as main has it, so it is no release PR."; exit 0 ;;
+  1) ;;
+  *) exit "$status" ;;
+esac
+if [[ ! $HEAD_REF =~ ^refs/heads/gh-readonly-queue/.+/pr-[0-9]+-([0-9a-f]{40})$ ]]; then
+  echo "::error::The merge group's ref names no pull request head commit, so this check cannot tell whether the release PR is older than main."
+  exit 1
+fi
+head="${'${'}BASH_REMATCH[1]}"
+git fetch --quiet --no-tags --depth=2 origin "$head"
+parent="$(git rev-parse --verify "$head^")"
+if [[ $parent != "$BASE_SHA" ]]; then
+  echo "::error::The release PR was built on $parent, which is older than main at $BASE_SHA, so its version and changelog miss what main took since. release-please refreshes it on the next push to main, and its auto-merge adds it to the queue again."
+  exit 1
+fi
+echo "The release PR was built on main at $BASE_SHA."`;
+
+/** ci.yml's queue check step. */
+const queueCheckStep = (): string => {
+  const steps = jobSteps(under(under(workflowCode('ci.yml'), 'jobs'), 'test')).filter(
+    (step) => scalar(stepBody(step), 'name') === QUEUE_CHECK,
+  );
+  assert.equal(steps.length, 1, `expected exactly one ci.yml step named ${QUEUE_CHECK}`);
+  return steps[0]!;
+};
+
+test('the merge queue refuses a release PR older than main', () => {
+  // A release PR and another PR can wait in the queue together. The queue merges the other one, then
+  // tests the release PR on top of it, and test passes, so the release PR would merge with a version and
+  // changelog that miss what just merged, and publish that under the wrong version, or leave a release
+  // tagged at another commit with nothing on npm. So the required test job refuses such an entry itself,
+  // in a step that runs on merge_group alone, right after the checkout and before anything installs.
+  const job = under(under(workflowCode('ci.yml'), 'jobs'), 'test');
+  const steps = jobSteps(job);
+  const step = queueCheckStep();
+  assert.ok(isCheckout(steps[0]!) && steps[1] === step, 'the queue check does not follow the checkout directly');
+  assert.equal(stepIf(step), "${{ github.event_name == 'merge_group' }}");
+  assert.deepEqual(mappingOf(under(stepBody(step), 'env')), QUEUE_CHECK_ENV);
+  assert.equal(stepScript(step), QUEUE_CHECK_SCRIPT);
+  assertDefaultShell(job, step);
+});
+
+/** Runs git in `dir` with a fixed identity and none of the user's or the system's config. */
+const gitIn = (dir: string, ...args: string[]): string =>
+  execFileSync('git', args, {
+    cwd: dir,
+    encoding: 'utf8',
+    env: {
+      PATH: process.env['PATH'] ?? '',
+      HOME: dir,
+      GIT_CONFIG_NOSYSTEM: '1',
+      GIT_AUTHOR_NAME: 'Release Test',
+      GIT_AUTHOR_EMAIL: 'release-test@example.com',
+      GIT_COMMITTER_NAME: 'Release Test',
+      GIT_COMMITTER_EMAIL: 'release-test@example.com',
+    },
+  }).trim();
+
+/**
+ * A repository served as origin, with main at `base` and one feature merged since `old`, the main a
+ * stale release PR was built on. For each kind of queue entry it holds the PR's head commit and the
+ * merge group's commit, the PR rebased onto `base`, as a queue of one entry builds it.
+ */
+type QueueRepo = {
+  origin: string;
+  old: string;
+  base: string;
+  fresh: { head: string; entry: string };
+  stale: { head: string; entry: string };
+  other: { head: string; entry: string };
+};
+
+let queueRepo: QueueRepo | undefined;
+const queueFixture = (): QueueRepo => {
+  if (queueRepo !== undefined) return queueRepo;
+  const origin = scratch();
+  gitIn(origin, 'init', '--quiet', '--bare', '--initial-branch=main');
+  gitIn(origin, 'config', 'uploadpack.allowAnySHA1InWant', 'true');
+  const src = scratch();
+  gitIn(src, 'init', '--quiet', '--initial-branch=main');
+  const commit = (message: string, files: Record<string, string>): string => {
+    for (const [path, text] of Object.entries(files)) writeFileSync(join(src, path), text);
+    gitIn(src, 'add', '--all');
+    gitIn(src, 'commit', '--quiet', '--message', message);
+    return gitIn(src, 'rev-parse', 'HEAD');
+  };
+  const release = { '.release-please-manifest.json': '{\n  ".": "1.1.0"\n}\n', 'CHANGELOG.md': '## 1.1.0\n' };
+  const old = commit('chore: start', { '.release-please-manifest.json': '{\n  ".": "1.0.0"\n}\n', 'README.md': 'start\n' });
+  const base = commit('feat: merged while the release PR waited', { 'feature.txt': 'x\n' });
+  /** A PR's head built on `on`, and the merge group commit that rebases it onto base. */
+  const entry = (branch: string, on: string, message: string, files: Record<string, string>) => {
+    gitIn(src, 'switch', '--quiet', '--create', branch, on);
+    const head = commit(message, files);
+    gitIn(src, 'switch', '--quiet', '--create', `queue-${branch}`, base);
+    gitIn(src, 'cherry-pick', head);
+    return { head, entry: gitIn(src, 'rev-parse', 'HEAD') };
+  };
+  const fresh = entry('fresh', base, 'chore(main): release 1.1.0', release);
+  const stale = entry('stale', old, 'chore(main): release 1.1.0', release);
+  const other = entry('other', old, 'docs: reword the README', { 'README.md': 'reworded\n' });
+  gitIn(src, 'push', '--quiet', origin, '--all');
+  queueRepo = { origin, old, base, fresh, stale, other };
+  return queueRepo;
+};
+
+/**
+ * Runs the queue check as the test job runs it on merge_group: in a checkout of the merge group's
+ * commit alone, as actions/checkout leaves it, with origin serving every commit. git is real.
+ */
+const runQueueCheck = (base: string, entry: string, headRef: string) => {
+  const { origin } = queueFixture();
+  const work = scratch();
+  gitIn(work, 'init', '--quiet');
+  gitIn(work, 'remote', 'add', 'origin', origin);
+  gitIn(work, 'fetch', '--quiet', '--no-tags', '--depth=1', 'origin', entry);
+  gitIn(work, 'switch', '--quiet', '--detach', entry);
+  const run = bash(stepScript(queueCheckStep())!, { BASE_SHA: base, HEAD_REF: headRef, GITHUB_SHA: entry, HOME: work, GIT_CONFIG_NOSYSTEM: '1' }, work);
+  const has = (sha: string): boolean => spawnSync('git', ['cat-file', '-e', `${sha}^{commit}`], { cwd: work }).status === 0;
+  return {
+    status: run.status,
+    stdout: run.stdout,
+    output: `${run.stdout}${run.stderr}`,
+    errors: run.stdout.split('\n').filter((line) => line.startsWith('::error::')),
+    has,
+  };
+};
+
+/** The merge group ref the queue gives pull request `number` whose head is `head`. */
+const queueRef = (number: number, head: string): string => `refs/heads/gh-readonly-queue/main/pr-${number}-${head}`;
+
+test('the queue check passes a release PR built on main, refuses one built on an older main, and skips any other PR', () => {
+  const repo = queueFixture();
+  const fresh = runQueueCheck(repo.base, repo.fresh.entry, queueRef(7, repo.fresh.head));
+  assert.equal(fresh.status, 0, fresh.output);
+  assert.ok(fresh.stdout.split('\n').includes(`The release PR was built on main at ${repo.base}.`), fresh.output);
+  const stale = runQueueCheck(repo.base, repo.stale.entry, queueRef(8, repo.stale.head));
+  assert.equal(stale.status, 1, stale.output);
+  assert.deepEqual(stale.errors, [
+    `::error::The release PR was built on ${repo.old}, which is older than main at ${repo.base}, so its version and changelog miss what main took since. release-please refreshes it on the next push to main, and its auto-merge adds it to the queue again.`,
+  ]);
+  // A PR that leaves the manifest alone is no release PR, whatever it was built on, and its head is
+  // never fetched.
+  const other = runQueueCheck(repo.base, repo.other.entry, queueRef(9, repo.other.head));
+  assert.equal(other.status, 0, other.output);
+  assert.deepEqual(other.errors, [], other.output);
+  assert.ok(!other.has(repo.other.head), 'the check fetched the head of a PR that is no release PR');
+});
+
+test('the queue check refuses a release PR whose base or head it cannot read', () => {
+  // Each of these fails closed with one ::error::, before git reads the value.
+  const repo = queueFixture();
+  const refs: Array<[string, string]> = [
+    ['a ref without the head commit', 'refs/heads/gh-readonly-queue/main/pr-8'],
+    ['a short head commit', queueRef(8, repo.fresh.head.slice(0, 12))],
+    ['an uppercase head commit', queueRef(8, repo.fresh.head.toUpperCase())],
+    ['a head commit with a trailing newline', `${queueRef(8, repo.fresh.head)}\n`],
+    ['a ref outside the queue', `refs/heads/main/pr-8-${repo.fresh.head}`],
+    ['no ref', ''],
+  ];
+  for (const [what, ref] of refs) {
+    const run = runQueueCheck(repo.base, repo.fresh.entry, ref);
+    assert.equal(run.status, 1, `${what} passes: ${run.output}`);
+    assert.equal(run.errors.length, 1, `${what} fails without exactly one ::error::: ${run.output}`);
+  }
+  for (const [what, base] of [['no base', ''], ['a base with a trailing newline', `${repo.base}\n`], ['a short base', repo.base.slice(0, 12)]] as const) {
+    const run = runQueueCheck(base, repo.fresh.entry, queueRef(7, repo.fresh.head));
+    assert.equal(run.status, 1, `${what} passes: ${run.output}`);
+    assert.equal(run.errors.length, 1, `${what} fails without exactly one ::error::: ${run.output}`);
+  }
+});
+
+test('the queue check keys on the manifest release-please bumps in every release PR', () => {
+  // release-please writes the version into .release-please-manifest.json in every release PR it
+  // opens, so every release PR changes the file the check reads. Another PR that changed it would be
+  // taken for a release PR and refused unless it were one commit on main's tip, which fails closed.
+  const manifest = RELEASE_PLEASE_INPUTS['manifest-file'];
+  assert.equal(mappingOf(stepInputs(pleaseJobSteps().find(isReleasePlease)!))['manifest-file'], manifest);
+  assert.ok(stepScript(queueCheckStep())!.includes(`"$GITHUB_SHA" -- ${manifest} `), `the queue check does not read ${manifest}`);
+  // The root package's version sits there, so a release changes it.
+  assert.deepEqual(JSON.parse(read(manifest)), { '.': PACKAGE_VERSION });
 });

@@ -23,7 +23,9 @@ Only the run triggered at the merge commit publishes, because npm provenance nam
 
 ## The merge queue
 
-`main` takes changes only through its merge queue. Every merge, a bot's or a person's, is added to the queue, which tests it on top of the latest `main`, one PR per group, and merges it with a rebase only once the required `test` check passes there too. `ci.yml` runs on `merge_group` for that. So a release PR can never merge stale: whatever landed on `main` before it, the queue tests and merges it on top of that, and the merge's push run is the one that releases it.
+`main` takes changes only through its merge queue. The maintainer adds the queue rule to the `main` ruleset, with the rebase merge method and one PR per group, right after the change that made `ci.yml` run on `merge_group` merges. Every merge, a bot's or a person's, is added to the queue, which tests it on top of the latest `main`, one PR per group, and merges it with a rebase only once the required `test` check passes there too. `ci.yml` runs on `merge_group` for that.
+
+Passing tests on top of `main` does not make a release PR current, though. When a release PR waits in the queue behind another PR, the queue merges the other one first and tests the release PR on top of it, and its version and changelog miss the PR that just merged. So on `merge_group` the `test` job's step `Keep a release PR older than main out of the queue` fails an entry that changes `.release-please-manifest.json` unless the PR's head commit sits directly on the queue's base, as release-please builds it. Only release PRs change that file. The PR leaves the queue, release-please refreshes it on the next push to `main`, and its auto-merge adds it to the queue again. So a release PR can never merge stale, and the merge's push run is the one that releases it.
 
 A PR joins the queue once its own `test` check passes and someone, or its auto-merge, adds it. `gh pr merge <pr>` adds it, or turns on its auto-merge while its checks are still running. The queue sets the merge method, so a method flag such as `--rebase` only makes `gh` warn.
 
@@ -169,7 +171,7 @@ The tag and the GitHub release exist, and `npm view @tibia.sh/tibiawiki-mcp vers
 | How it happened | What you see |
 |---|---|
 | The run for the merge commit failed or was cancelled after release-please created the release. npm was down, the trusted publisher did not match, or a test failed on the runner. | That run is red at the step that failed. A trusted publisher that does not match fails `npm publish` with `ENEEDAUTH`. |
-| A run triggered at another commit reached the merged release PR first. Release runs wait their turn, and GitHub does not guarantee their order. The merge queue closes the stale-release-PR case: a release PR merges only after `test` passed on top of the latest `main`. | That run is red at `Release tagged at another commit, not published`, and its error names the tag and both commits. The merge commit's own run is green and published nothing. |
+| A run triggered at another commit reached the merged release PR first. Release runs wait their turn, and GitHub does not guarantee their order. The merge queue closes the stale-release-PR case: a release PR merges only when it was built on the latest `main`, and after `test` passed on top of it. | That run is red at `Release tagged at another commit, not published`, and its error names the tag and both commits. The merge commit's own run is green and published nothing. |
 | Someone re-ran one of those runs. | The latest attempt is green, and the red one is behind the **Latest** menu. |
 
 This is urgent. The release commit pinned `.mcp.json` to the new version, so the plugin on `main` cannot start until npm has it. Once [the re-run](#re-run-the-merge-commits-run) deletes the release tag, installs and updates of the plugin from the marketplace fail until release-please creates it again. While you follow either recovery below, merge nothing to `main`.
@@ -244,20 +246,22 @@ Any other release run that starts between steps 3 and 5 undoes this. After step 
 
 #### A stray release PR
 
-Any release PR opened or updated between steps 3 and 5 merges itself. The run that opens or updates it turns on its auto-merge, it is added to the merge queue as soon as its CI passes, and the queue merges it once `test` passes on top of `main`, all within minutes. A stray PR that shows a version past `$VERSION` then publishes that wrong version, and npm never lets a version be taken back. So check for one right after step 3, and again before the re-run in step 5. The command lists the open release PRs, and prints `[]` when there is none:
+Any release PR opened or updated between steps 3 and 5 merges itself. The run that opens or updates it turns on its auto-merge, it is added to the merge queue as soon as its CI passes, and the queue merges it once `test` passes on top of `main`, all within minutes. A stray PR that shows a version past `$VERSION` then publishes that wrong version, and npm never lets a version be taken back. So check for one right after step 3, and again before the re-run in step 5. Its auto-merge tells you nothing: a PR in the queue shows `autoMergeRequest` as `null` while it is about to merge. So take every open release PR out of the queue and close it. List them:
 
 ```bash
-gh pr list --label "autorelease: pending" --json number,title,autoMergeRequest
+gh pr list --label "autorelease: pending" --json number,id,title
 ```
 
-For each PR it lists, turn off its auto-merge, or close it, before its CI can pass. Once a PR is in the merge queue, `gh pr merge --disable-auto` leaves it there and only says it is already queued to merge, so close that PR, which takes it out of the queue. Then list them again, and go on only when none that you left open shows `autoMergeRequest` other than `null`:
+For each PR it lists, put its `id` in place of `ID` and its number in place of `N`, take it out of the queue, and close it:
 
 ```bash
-gh pr merge --disable-auto N
+gh api graphql -f query='mutation($id:ID!){dequeuePullRequest(input:{id:$id}){clientMutationId}}' -f id=ID
 gh pr close N
 ```
 
-Once the re-run has finished, close any such PR whose auto-merge you only turned off, if its title still shows a version past `$VERSION`. Do not add `autorelease: snooze` to it, because release-please reopens and reuses a closed PR with that label. Closing loses nothing, since the next release run opens a fresh release PR when there is something to release.
+A PR that is not in the queue makes `gh api` exit 1 with GitHub's error and changes nothing, so go on and close it. While `main` has no queue, the error is `No merge queue found for branch 'main'`. List them again, and go on only when the list prints `[]`.
+
+Do not add `autorelease: snooze` to a PR you closed, because release-please reopens and reuses a closed PR with that label. Closing loses nothing, since the next release run opens a fresh release PR when there is something to release.
 
 If the re-run itself fails after release-please created the release, you are also back at the start of this section.
 

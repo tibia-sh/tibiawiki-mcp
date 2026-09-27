@@ -38,11 +38,14 @@ jobs:
       # again, so a feature merged in between is the head's parent but missing from its notes. So the
       # release workflow's push run for the base has to have succeeded too. Its please job ran
       # release-please on the base, which, with always-update, force-pushed the PR with notes computed
-      # from the base. So either this entry is that commit, or that push has already taken the older
-      # entry out of the queue. The newest run by run number counts, read with the job's actions: read.
-      # A run that is missing, as a push's run can be for a moment, or has not completed is read again
-      # every POLL_SECONDS, 20 by default, until DEADLINE_SECONDS of waiting have passed, 1200 by
-      # default. An answer the step cannot read fails it at once.
+      # from the base. The newest run by run number counts, read with the job's actions: read. A run that
+      # is missing, as a push's run can be for a moment, or has not completed is read again every
+      # POLL_SECONDS, 20 by default, until DEADLINE_SECONDS of waiting have passed, 1200 by default. Each
+      # read is bounded by timeout, and an answer the step cannot read fails it at once. Once the run has
+      # succeeded, the step reads the PR's head again, and it still has to sit on the base with the
+      # entry's tree: a push before the queue built the entry gave the entry the new head's tree or fails
+      # the first check, and a push during the wait fails the second. A later push can only come from a
+      # release run that reads main at the base too, since main moves only through this queue.
       - name: Keep a release PR older than main out of the queue
         if: ${{ github.event_name == 'merge_group' }}
         env:
@@ -90,7 +93,7 @@ jobs:
           fi
           waited=0
           while :; do
-            if ! response="$(gh api "$query")" ||
+            if ! response="$(timeout --kill-after=10 60 gh api "$query")" ||
               ! run="$(jq -ser --arg sha "$BASE_SHA" 'if length == 1 then .[0].workflow_runs | arrays | map(select(.event == "push" and .head_sha == $sha)) | if length == 0 then "none" else max_by(.run_number) | "\(.status) \(.conclusion)" end else error("not one document") end' <<< "$response")" ||
               [[ ! $run =~ ^(none|([a-z_]+)\ ([a-z_]+))$ ]]; then
               echo "::error::Could not read main's release run for $BASE_SHA, so this check cannot tell whether release-please has rebuilt the release PR since that commit."
@@ -111,6 +114,13 @@ jobs:
           done
           if [[ $conclusion != success ]]; then
             echo "::error::main's release run for $BASE_SHA ended $conclusion, not success, so release-please may not have rebuilt this PR on that commit. release-please rebuilds it on main's tip on the next push to main, and its auto-merge adds it to the queue again, which takes it once that push's release run has succeeded."
+            exit 1
+          fi
+          git fetch --quiet --no-tags --depth=2 origin "refs/pull/$number/head"
+          parent="$(git rev-parse --verify FETCH_HEAD^)"
+          head_tree="$(git rev-parse --verify "FETCH_HEAD^{tree}")"
+          if [[ $parent != "$BASE_SHA" || $head_tree != "$entry_tree" ]]; then
+            echo "::error::This queue entry does not match the release PR's current head, so it was built from an older head. The PR joins the queue again once release-please's update of it lands."
             exit 1
           fi
           echo "The release PR was built on $BASE_SHA, the commit this queue entry merges onto."

@@ -2315,3 +2315,24 @@ test('alert comments on failed release runs', () => {
   });
   assert.equal(stepScript(steps[0]!), ALERT_SCRIPT);
 });
+
+test('ci.yml runs the required test job on pull requests and in the merge queue', () => {
+  // main's ruleset requires the check test, and its merge queue tests every entry, bot or human, on top
+  // of the latest main before it merges. A queue entry reports only the checks of workflows that run on
+  // merge_group, so without that trigger every entry waits for a test that never comes. The check takes
+  // its name from the job: a name:, a matrix or an if would rename or skip it. Nothing in the workflow
+  // reads context a merge_group event lacks, such as the pull request or its head and base refs.
+  const code = workflowCode('ci.yml');
+  const on = under(code, 'on');
+  assert.deepEqual(mappingOf(on), { push: '', pull_request: '', merge_group: '' });
+  assert.deepEqual(mappingOf(under(on, 'push')), { branches: '[main]' });
+  assert.equal(under(on, 'pull_request'), '', 'pull_request is filtered');
+  assert.equal(under(on, 'merge_group'), '', 'merge_group is filtered');
+  const jobs = workflowJobs('ci.yml');
+  assert.deepEqual(jobs.map(([name]) => name), ['test'], 'ci.yml runs a job besides test, the check the ruleset requires');
+  const job = jobs[0]![1];
+  for (const key of ['name', 'if', 'strategy', 'needs']) {
+    assert.equal(scalar(job, key), undefined, `the test job sets ${key}, which renames, skips or delays the required check`);
+  }
+  assert.doesNotMatch(code, /\bgithub\.(?:event\.pull_request|head_ref|base_ref)\b|\bGITHUB_(?:HEAD|BASE)_REF\b/, 'ci.yml reads pull request context');
+});

@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.15.2](https://github.com/tibia-sh/tibiawiki-mcp/compare/v0.15.1...v0.15.2) (2026-09-27)
+
+
+### Bug Fixes
+
+* rebuild conflicting generator PRs ([bf603fd](https://github.com/tibia-sh/tibiawiki-mcp/commit/bf603fd5042ab6d632acd2af5038964050492859))
+
 ## [0.15.1](https://github.com/tibia-sh/tibiawiki-mcp/compare/v0.15.0...v0.15.1) (2026-09-27)
 
 

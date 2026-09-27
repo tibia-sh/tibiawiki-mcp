@@ -31,7 +31,7 @@ export const MCP_SCHEMA_VERSION = 3;
  * `^MIN_DATA_VERSION`, so npm never pairs this server with an older index in the same
  * major, which would fail the probe below at startup.
  */
-export const MIN_DATA_VERSION = '3.2.0';
+export const MIN_DATA_VERSION = '3.3.0';
 
 /**
  * The shape the tools require. Probed once at startup so a generator-version drift
@@ -84,7 +84,7 @@ export const REQUIRED_COLUMNS: Readonly<Record<string, readonly string[]>> = {
   house: ['article_id', 'title', 'house_id', 'city', 'street', 'location', 'rent', 'size', 'beds', 'rooms', 'floors', 'x', 'y', 'z', 'is_guildhall', 'status'],
   imbuement: ['article_id', 'title', 'tier', 'category', 'type', 'effect', 'slots', 'status'],
   charm: ['article_id', 'title', 'type', 'effect', 'cost_level_1', 'cost_level_2', 'cost_level_3', 'status'],
-  mount: ['article_id', 'title', 'speed', 'taming_method', 'is_buyable', 'price', 'achievement', 'light_color', 'light_radius', 'client_id', 'status'],
+  mount: ['article_id', 'title', 'speed', 'taming_method', 'is_buyable', 'price', 'price_currency', 'achievement', 'light_color', 'light_radius', 'client_id', 'status'],
   outfit: ['article_id', 'title', 'outfit_type', 'is_premium', 'is_bought', 'is_tournament', 'full_price', 'achievement', 'male_client_id', 'female_client_id', 'status'],
   book: ['article_id', 'title', 'book_type', 'item_id', 'location', 'blurb', 'author', 'prev_book', 'next_book', 'text', 'status'],
   world: ['article_id', 'title', 'location', 'pvp_type', 'is_preview', 'is_experimental', 'online_since', 'offline_since', 'merged_into', 'battleye', 'battleye_type', 'protected_since', 'world_board', 'trade_board'],

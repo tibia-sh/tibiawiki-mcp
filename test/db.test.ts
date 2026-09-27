@@ -267,6 +267,17 @@ test('openDb rejects an index whose creature has no race_id', () => {
   });
 });
 
+test('openDb rejects an index whose mount has no price_currency', () => {
+  const bad = fixtureCopyWith('alter table mount drop column price_currency');
+  assert.throws(() => openDb(bad), (e: unknown) => {
+    assert.ok(e instanceof SchemaError, `expected SchemaError, got ${String(e)}`);
+    // Anchored at both ends of the column list, so price_currency must be the only column named.
+    assert.match((e as Error).message,
+      /^Index table "mount" is missing required column\(s\): price_currency\. /);
+    return true;
+  });
+});
+
 test('openDb rejects an index that has no npc_location table', () => {
   const bad = fixtureCopyWith('drop table npc_location');
   assert.throws(() => openDb(bad), (e: unknown) => {

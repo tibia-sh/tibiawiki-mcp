@@ -52,7 +52,8 @@ test('setGenerator refuses a version or sha256 that is not whole, and a source w
   }
 });
 
-const pr = (version: string, number: number, autoMerge = true, stale = false) => ({ version, number, autoMerge, stale });
+const pr = (version: string, number: number, autoMerge = true, stale = false, conflicting = false) =>
+  ({ version, number, autoMerge, stale, conflicting });
 
 test('decideGenerator does nothing for the pinned version, and refuses one below it', () => {
   assert.deepEqual(decideGenerator('9.0.0+tibiash.2', '9.0.0+tibiash.2', []), { action: 'noop', supersede: [] });
@@ -120,7 +121,30 @@ test('decideGenerator rebuilds an open PR for the version that was built on an o
   assert.equal(isStale(main, setGenerator(BUILD_INDEX, '9.0.0+tibiash.2', SHA)), true);
   assert.equal(isStale(main, setGenerator(BUILD_INDEX, '9.0.0+tibiash.3', 'b'.repeat(64))), true);
   assert.equal(isStale(main, `${main}${versionLine('9.0.0+tibiash.3')}\n`), true);
-  assert.throws(() => decideGenerator('9.0.0+tibiash.2', '9.0.0+tibiash.3', [{ version: '9.0.0+tibiash.3', number: 3, autoMerge: true } as never]), /no plain autoMerge and stale/);
+  assert.throws(
+    () => decideGenerator('9.0.0+tibiash.2', '9.0.0+tibiash.3', [{ version: '9.0.0+tibiash.3', number: 3, autoMerge: true, conflicting: false } as never]),
+    /no plain autoMerge, stale and conflicting/,
+  );
+});
+
+test('decideGenerator rebuilds an open PR for the version that conflicts with main, and leaves one that does not', () => {
+  // Built on main's pin, but main moved in a way the pin lines do not show, such as a manual re-lock.
+  assert.deepEqual(
+    decideGenerator('9.0.0+tibiash.2', '9.0.0+tibiash.3', [pr('9.0.0+tibiash.3', 14, true, false, true)]),
+    { action: 'propose', supersede: [] },
+  );
+  assert.deepEqual(
+    decideGenerator('9.0.0+tibiash.2', '9.0.0+tibiash.3', [pr('9.0.0+tibiash.3', 14, true, false, false)]),
+    { action: 'noop', supersede: [] },
+  );
+  assert.deepEqual(
+    decideGenerator('9.0.0+tibiash.2', '9.0.0+tibiash.3', [pr('9.0.0+tibiash.3', 14, true, true, true)]),
+    { action: 'propose', supersede: [] },
+  );
+  assert.throws(
+    () => decideGenerator('9.0.0+tibiash.2', '9.0.0+tibiash.3', [{ version: '9.0.0+tibiash.3', number: 3, autoMerge: true, stale: false } as never]),
+    /no plain autoMerge, stale and conflicting/,
+  );
 });
 
 test('decideGenerator does nothing when an open PR is for a newer version than the one requested', () => {
@@ -230,12 +254,21 @@ const git = (dir: string, args: string[]): string =>
   }).trim();
 
 /**
- * A stand-in gh that answers the open pull request read with `lines`, and fails on any other
- * command, or without GH_TOKEN and GH_REPO.
+ * A stand-in gh that answers the open pull request read with the lines of `pulls`, and the read of
+ * pull request 21 with the next value of `mergeable-21`, one line per call, as its `mergeable`. It
+ * fails on any other command, once `mergeable-21` runs out, or without GH_TOKEN and GH_REPO.
  */
 const FAKE_GH = `#!/usr/bin/env bash
 printf '%s\\n' "$*" >> "$GH_RUN/gh-calls"
 if [ -z "$GH_TOKEN" ] || [ -z "$GH_REPO" ]; then echo "fake gh: no GH_TOKEN or GH_REPO" >&2; exit 2; fi
+if [ "$#" = 2 ] && [ "$1" = api ] && [ "$2" = "repos/{owner}/{repo}/pulls/21" ]; then
+  sequence="$GH_RUN/mergeable-21"
+  if [ ! -s "$sequence" ]; then echo "fake gh: no answer left for pull request 21" >&2; exit 2; fi
+  printf '{"number":21,"state":"open","mergeable":%s}\\n' "$(head -n 1 "$sequence")"
+  tail -n +2 "$sequence" > "$sequence.next"
+  mv "$sequence.next" "$sequence"
+  exit 0
+fi
 if [ "$1 $2 $3" != "api --paginate repos/{owner}/{repo}/pulls?state=open&base=main&per_page=100" ] || [ "$4" != --jq ]; then
   echo "fake gh: unsupported command: $*" >&2
   exit 2
@@ -250,10 +283,12 @@ const openPr = (ref: string, number: number, autoMerge: boolean, headRepo = 'tib
 /**
  * A checkout pinning tibiash.2, as the run that started from it has it, beside origin, whose main
  * pins tibiash.3 at `main` and had tibiash.2 at `old`. Open PR 21 for tibiash.4 is served from
- * refs/pull/21/head, built as one commit on `base`. `decide` runs the CLI in the checkout with the
- * stand-in gh, which reads the open pull requests from `pulls`.
+ * refs/pull/21/head, built as one commit on `base`, and GitHub answers the reads of its `mergeable`
+ * with `mergeable` in turn. `run` runs the CLI in the checkout with the stand-in gh, which reads the
+ * open pull requests from `pulls`, and `decide` requires it to pass. `mergeableReads` counts the
+ * reads of PR 21 so far.
  */
-const decideFixture = (base: 'main' | 'old', autoMerge = true) => {
+const decideFixture = (base: 'main' | 'old', autoMerge = true, mergeable: readonly string[] = ['true']) => {
   const origin = scratch();
   git(origin, ['init', '--quiet', '--bare', '--initial-branch=main']);
   const { dir, buildIndex } = cliCopy('9.0.0+tibiash.2');
@@ -282,8 +317,10 @@ const decideFixture = (base: 'main' | 'old', autoMerge = true) => {
     openPr('release-please--branches--main', 24, false),
     '',
   ].join('\n'));
-  const decide = (version: string) => {
-    const run = spawnSync(process.execPath, [join(dir, 'scripts/set-generator.ts'), 'decide', version], {
+  writeFileSync(join(dir, 'mergeable-21'), mergeable.map((value) => `${value}\n`).join(''));
+  writeFileSync(join(dir, 'gh-calls'), '');
+  const run = (version: string, retrySeconds = '0') =>
+    spawnSync(process.execPath, [join(dir, 'scripts/set-generator.ts'), 'decide', version], {
       cwd: dir,
       encoding: 'utf8',
       env: {
@@ -293,13 +330,18 @@ const decideFixture = (base: 'main' | 'old', autoMerge = true) => {
         GH_TOKEN: 'fake-token',
         GH_REPO: 'tibia-sh/tibiawiki-mcp',
         GH_RUN: dir,
+        MERGEABLE_RETRY_SECONDS: retrySeconds,
       },
       timeout: 30_000,
     });
-    assert.equal(run.status, 0, run.stderr);
-    return JSON.parse(run.stdout) as unknown;
+  const decide = (version: string) => {
+    const result = run(version);
+    assert.equal(result.status, 0, result.stderr);
+    return JSON.parse(result.stdout) as unknown;
   };
-  return { buildIndex, decide };
+  const mergeableReads = () =>
+    readFileSync(join(dir, 'gh-calls'), 'utf8').split('\n').filter((line) => line === 'api repos/{owner}/{repo}/pulls/21').length;
+  return { buildIndex, run, decide, mergeableReads };
 };
 
 test('the decide CLI reads the pin from origin/main after a fetch, and only this repository\'s generator PRs', () => {
@@ -321,4 +363,51 @@ test('the decide CLI rebuilds an open PR built on an older pin, and re-arms only
   assert.deepEqual(decideFixture('old', false).decide('9.0.0+tibiash.4'), { action: 'propose', supersede: [] });
   // Built on main's pin with auto-merge off, it is re-armed.
   assert.deepEqual(decideFixture('main', false).decide('9.0.0+tibiash.4'), { action: 'rearm', supersede: [], pr: 21 });
+});
+
+test('the decide CLI asks GitHub whether the open PR for the version conflicts with main, until it has computed it', () => {
+  // Built on main's pin with auto-merge on, but GitHub reports it conflicting: it is rebuilt.
+  const conflicting = decideFixture('main', true, ['null', 'false']);
+  assert.deepEqual(conflicting.decide('9.0.0+tibiash.4'), { action: 'propose', supersede: [] });
+  assert.equal(conflicting.mergeableReads(), 2);
+  // Mergeable once computed, it is left to merge.
+  const mergeable = decideFixture('main', true, ['null', 'true']);
+  assert.deepEqual(mergeable.decide('9.0.0+tibiash.4'), { action: 'noop', supersede: [] });
+  assert.equal(mergeable.mergeableReads(), 2);
+});
+
+test('the decide CLI reads mergeable for no PR of another version, and for no stale PR', () => {
+  // PR 21 is for tibiash.4, so a request for tibiash.5 or tibiash.3 never reads it, and it counts as not conflicting.
+  const other = decideFixture('main', true, []);
+  assert.deepEqual(other.decide('9.0.0+tibiash.5'), { action: 'propose', supersede: [21] });
+  assert.deepEqual(other.decide('9.0.0+tibiash.3'), { action: 'noop', supersede: [] });
+  assert.equal(other.mergeableReads(), 0);
+  // PR 21 was built on an older pin, so it is rebuilt without asking.
+  const stale = decideFixture('old', true, []);
+  assert.deepEqual(stale.decide('9.0.0+tibiash.4'), { action: 'propose', supersede: [] });
+  assert.equal(stale.mergeableReads(), 0);
+});
+
+test('the decide CLI fails when GitHub has not computed mergeable after three reads, or answers something else', () => {
+  const unknown = decideFixture('main', true, ['null', 'null', 'null', 'false']);
+  const unresolved = unknown.run('9.0.0+tibiash.4');
+  assert.notEqual(unresolved.status, 0, 'an unresolved mergeable passes');
+  assert.ok(
+    unresolved.stderr.includes('GitHub has not computed whether pull request #21 conflicts with main. Dispatch generator.yml again for 9.0.0+tibiash.4.'),
+    unresolved.stderr,
+  );
+  assert.equal(unresolved.stdout, '');
+  assert.equal(unknown.mergeableReads(), 3);
+  const maybe = decideFixture('main', true, ['"maybe"']);
+  const answered = maybe.run('9.0.0+tibiash.4');
+  assert.notEqual(answered.status, 0, 'a mergeable of "maybe" passes');
+  assert.match(answered.stderr, /pull request #21 with a mergeable that is not true, false or null/);
+  assert.equal(answered.stdout, '');
+  assert.equal(maybe.mergeableReads(), 1);
+  // The wait between reads is a whole number of seconds, checked before anything is read.
+  const invalid = decideFixture('main', true, ['true']);
+  const refused = invalid.run('9.0.0+tibiash.4', '1.5');
+  assert.notEqual(refused.status, 0, 'a MERGEABLE_RETRY_SECONDS that is not whole passes');
+  assert.match(refused.stderr, /MERGEABLE_RETRY_SECONDS is "1\.5", not a whole number of seconds/);
+  assert.equal(invalid.mergeableReads(), 0);
 });

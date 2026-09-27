@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.15.0](https://github.com/tibia-sh/tibiawiki-mcp/compare/v0.14.1...v0.15.0) (2026-09-27)
+
+
+### Features
+
+* follow new generator releases ([2ff49b6](https://github.com/tibia-sh/tibiawiki-mcp/commit/2ff49b68dc592cef88dc3ad3f2319cd87d801f24))
+
+
+### Bug Fixes
+
+* build generator PRs on current main ([df06d63](https://github.com/tibia-sh/tibiawiki-mcp/commit/df06d636831fb7dd8f31bd7b3dd1395c61522cbb))
+
 ## [0.14.1](https://github.com/tibia-sh/tibiawiki-mcp/compare/v0.14.0...v0.14.1) (2026-09-26)
 
 

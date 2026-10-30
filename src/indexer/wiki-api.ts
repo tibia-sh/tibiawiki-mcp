@@ -8,9 +8,10 @@
 
 const API = 'https://tibia.fandom.com/api.php';
 const BATCH = 50; // the anonymous `titles` limit; 500 needs apihighlimits
-const RETRIES = 4;
-const BASE_BACKOFF_MS = 500;
-const RETRYABLE = new Set([429, 502, 503, 504]);
+// The sleep after each failed attempt: five attempts over almost two minutes.
+const BACKOFF_MS = [5_000, 15_000, 30_000, 60_000];
+const RETRYABLE = new Set([429, 500, 502, 503, 504]);
+const EXCERPT_CHARS = 200;
 
 export type Fetcher = (
   url: string,
@@ -61,37 +62,52 @@ export function createWikiApi(opts: WikiApiOptions = {}): WikiApi {
     const url = `${API}?${new URLSearchParams({ ...params, format: 'json' }).toString()}`;
 
     let lastError: Error | undefined;
-    for (let attempt = 0; attempt <= RETRIES; attempt += 1) {
+    for (let attempt = 0; attempt <= BACKOFF_MS.length; attempt += 1) {
       // One sleep per attempt, decided by the previous failure: a server that sent
       // Retry-After has told us how long to wait, so backoff must not be added on top.
-      const backoff = BASE_BACKOFF_MS * 2 ** Math.max(attempt - 1, 0);
+      const backoff = BACKOFF_MS[attempt];
 
+      // The body is read inside the same guard as the fetch: a read that hits the
+      // timeout or a dropped connection is as transient as a fetch that never started.
       let response: Response;
+      let text: string;
       try {
         response = await fetcher(url, {
           headers: { 'User-Agent': userAgent },
           signal: AbortSignal.timeout(timeoutMs),
         });
+        text = await response.text();
       } catch (error) {
         // A rejected fetch carries no status, so the message names the URL instead.
-        lastError = new Error(`Request to ${url} failed: ${(error as Error).message}`);
-        if (attempt < RETRIES) await clock.sleep(backoff);
+        const reason = (error as Error).message;
+        lastError = new Error(`Request to ${url} failed: ${reason}`, { cause: error });
+        if (backoff !== undefined) await clock.sleep(backoff);
         continue;
       }
 
+      const excerpt = JSON.stringify(text.slice(0, EXCERPT_CHARS));
+      const failure = `Request to ${url} failed with HTTP ${response.status}: ${excerpt}`;
       if (!response.ok) {
-        if (!RETRYABLE.has(response.status)) {
-          throw new Error(`Request to ${url} failed with HTTP ${response.status}.`);
-        }
+        if (!RETRYABLE.has(response.status)) throw new Error(failure);
         // Retry-After is expressed in seconds; sleep takes milliseconds.
         const after = Number(response.headers.get('Retry-After'));
-        const wait = Number.isFinite(after) && after > 0 ? after * 1000 : backoff;
-        lastError = new Error(`Request to ${url} failed with HTTP ${response.status}.`);
-        if (attempt < RETRIES) await clock.sleep(wait);
+        lastError = new Error(failure);
+        if (backoff !== undefined) {
+          await clock.sleep(Number.isFinite(after) && after > 0 ? after * 1000 : backoff);
+        }
         continue;
       }
 
-      const body = (await response.json()) as Json;
+      // An empty or non-JSON 200 is a proxy or edge hiccup, not an answer: retry it.
+      let body: Json;
+      try {
+        body = JSON.parse(text) as Json;
+      } catch (error) {
+        const reason = `Request to ${url} returned HTTP ${response.status} that is not JSON`;
+        lastError = new Error(`${reason}: ${excerpt}`, { cause: error });
+        if (backoff !== undefined) await clock.sleep(backoff);
+        continue;
+      }
       // MediaWiki reports API-level failures as HTTP 200 with an `error` object.
       // Those are permanent: retrying a bad title only wastes the budget.
       const error = body['error'] as { code?: string; info?: string } | undefined;

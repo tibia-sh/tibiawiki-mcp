@@ -397,7 +397,7 @@ The registry reads the version from npm once and does not retry, so the `registr
 | How it happened | What you see |
 |---|---|
 | The key is missing from the `mcp-registry` environment, or the TXT record on `tibia.sh` is missing or holds another key. | The release run is red at `Publish to the MCP registry` after three attempts, with `private key (hex) is required`, `no MCP public key found in DNS TXT records` or `signature verification failed`. When the key is set, each login prints the TXT record it expects. |
-| npm did not serve the version with `mcpName` `sh.tibia/tibiawiki-mcp` in 40 tries, 15 seconds apart. | The release run is red at `Wait for npm to serve the tag's version`, and its error names the version. |
+| npm did not serve the version with `mcpName` `sh.tibia/tibiawiki-mcp` within 45 minutes, polled every 15 seconds. | The release run is red at `Wait for npm to serve the tag's version`, and its error names the version. |
 | The registry failed or was down, or its own read of npm failed. | The release run is red at `Publish to the MCP registry` after three attempts, the last with the registry's error, such as `Likely transient, retry later` for a failed read of npm. |
 | The registry was unreachable, or a login or publish failed on the network. | The release run is red at `Publish to the MCP registry` after three failed attempts, the last with an error such as `dial tcp ... i/o timeout`. The log says what failed in each attempt, and exit code 124 or 137 means `timeout` stopped a login or publish after 120 seconds. |
 | The version reached npm through [Publish by hand](#publish-by-hand). | No `registry` job ran for the version. |

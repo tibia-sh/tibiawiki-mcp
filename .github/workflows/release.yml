@@ -182,6 +182,8 @@ jobs:
     # A dispatch releases nothing, so it runs this job on its own condition.
     if: ${{ needs.release.outputs.released == 'true' || github.event_name == 'workflow_dispatch' }}
     runs-on: ubuntu-latest
+    # The 45-minute npm wait, then the publish's 20, with time left for the setup steps.
+    timeout-minutes: 75
     environment: mcp-registry
     permissions:
       contents: read
@@ -214,22 +216,34 @@ jobs:
           echo "a06c9096dcb9727c13555b6be26c7effa707b01f06a4c561ba7a3635443cf2cc  mcp-publisher_linux_amd64.tar.gz" | sha256sum -c -
           tar -xzf mcp-publisher_linux_amd64.tar.gz mcp-publisher
       # The registry reads the version from npm once, with no retry, and npm has taken about
-      # 5 minutes to serve a new one. This polls the URL the registry reads, with the slash
-      # escaped as the registry escapes it. It waits before the login, because the login's
-      # token lasts 5 minutes and the publish never renews it. A version npm already serves,
-      # as on a dispatch, passes on the first try.
+      # 20.5 minutes to serve a new one (@tibia.sh/tibiawiki-data@3.4.8). This polls the URL the
+      # registry reads, with the slash escaped as the registry escapes it, every 15 seconds until 45
+      # minutes have passed on the clock, so a slow try cannot stretch the wait, and it never sleeps
+      # past that deadline. It waits before the login, because the login's token
+      # lasts 5 minutes and the publish never renews it. A version npm already serves, as on a
+      # dispatch, passes on the first try. POLL_SECONDS and DEADLINE_SECONDS come from the
+      # environment only so the tests can shorten them.
       - name: Wait for npm to serve the tag's version
         run: |
+          poll=${POLL_SECONDS:-15}
+          limit=${DEADLINE_SECONDS:-2700}
+          if [[ ! $poll =~ ^[1-9][0-9]*$ || ! $limit =~ ^(0|[1-9][0-9]*)$ ]]; then
+            echo "::error::POLL_SECONDS has to be a whole number of seconds above 0, and DEADLINE_SECONDS a whole number of seconds."
+            exit 1
+          fi
           url="https://registry.npmjs.org/@tibia.sh%2Ftibiawiki-mcp/${TAG#v}"
-          for _ in $(seq 40); do
+          deadline=$((SECONDS + limit))
+          while :; do
             if status="$(curl -fsS --max-time 10 -o npm-version.json -w '%{http_code}' "$url")" && [ "$status" = 200 ] &&
               jq -e --arg version "${TAG#v}" '.version == $version and .mcpName == "sh.tibia/tibiawiki-mcp"' npm-version.json > /dev/null; then
               exit 0
             fi
-            sleep 15
+            if ((SECONDS + poll >= deadline)); then
+              echo "::error::npm did not serve @tibia.sh/tibiawiki-mcp@${TAG#v} with mcpName sh.tibia/tibiawiki-mcp within $limit seconds. Follow \"A version the MCP registry does not have\" in docs/RELEASING.md."
+              exit 1
+            fi
+            sleep "$poll"
           done
-          echo "::error::npm did not serve @tibia.sh/tibiawiki-mcp@${TAG#v} with mcpName sh.tibia/tibiawiki-mcp in 40 tries, 15 seconds apart. Follow \"A version the MCP registry does not have\" in docs/RELEASING.md."
-          exit 1
       # mcp-publisher sends each request once, and nothing limits how long it waits for the answer.
       # One TCP timeout at the login lost the push-path registration of 0.3.1. So this step makes up
       # to 3 attempts, 30 seconds apart, and timeout stops each command after 120 seconds, or kills it

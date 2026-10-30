@@ -78,7 +78,7 @@ test('the instructions keep the snapshot, modifier and spell-area caveats', asyn
 test('the instructions say what an immunity and a loot chance read as', async () => {
   const { instructions } = await realisticHandshake();
   assert.match(instructions, /extra damage from that element; 0: immune\./);
-  assert.match(instructions, /paralysable false: immune\./);
+  assert.match(instructions, /paralysable false: cannot be paralysed\./);
   assert.match(instructions, /Loot chance is a percent\./);
 });
 
@@ -182,7 +182,7 @@ test('each unit and sentinel is the description of its output fields', async () 
   }
   assert.match(RUNS_AT_DESCRIPTION, /null: unknown/);
   assert.match(LOOT_CHANCE_DESCRIPTION, /percent/);
-  assert.match(LOOT_MIN_DESCRIPTION, /0: no range start/);
+  assert.match(LOOT_MIN_DESCRIPTION, /0 when the wiki gives one amount, which max holds, or a range from 0/);
   assert.match(VALUE_BUY_DESCRIPTION, /0: no NPC sells it/);
   assert.match(VALUE_SELL_DESCRIPTION, /0: no NPC buys it/);
 });

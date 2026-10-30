@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.18.1](https://github.com/tibia-sh/tibiawiki-mcp/compare/v0.18.0...v0.18.1) (2026-10-30)
+
+
+### Bug Fixes
+
+* describe loot amounts and zero hitpoints ([6ae5de9](https://github.com/tibia-sh/tibiawiki-mcp/commit/6ae5de98d825cd6ee310d6c46c30b9d9c6691cdd))
+* state what the values mean ([e7a7f5a](https://github.com/tibia-sh/tibiawiki-mcp/commit/e7a7f5a8961a3817101bfcd1b6fc26d0d598ff16))
+
 ## [0.18.0](https://github.com/tibia-sh/tibiawiki-mcp/compare/v0.17.6...v0.18.0) (2026-10-30)
 
 

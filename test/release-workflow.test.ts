@@ -1134,6 +1134,15 @@ exit "$code"
  * every gh call in `events`. Call N answers with line N of `answers`, and a call with no line fails. `0`
  * is a dispatch GitHub accepted, which prints nothing, as gh prints nothing for a 204. `CODE TEXT` prints
  * TEXT on stderr and exits CODE, as gh prints the error of a request that failed.
+ *
+ * `issue list --state open --limit 1000 --json number,title --jq FILTER` runs the real jq with FILTER over
+ * `issues`, a JSON list of the open issues' numbers and titles, as gh does over the fields it fetched.
+ * `issue comment N --body BODY` prints the comment's URL, and `issue create --title TITLE --assignee drptbl
+ * --body BODY` prints issue 40's. Each needs GH_REPO and GH_TOKEN. Call N of a kind exits with line N of
+ * `issue-KIND-exits`, its last line once they run out, or 0 without the file. A failed call prints the
+ * GraphQL error mcp.tibia.sh's alert met on 2026-10-30 on stderr. A failed list still prints what it found, so
+ * a step that went on would act on it. A create lands even when it fails, as one whose answer GitHub lost does, so
+ * every list after it finds issue 40, titled as it was opened.
  */
 const FAKE_GH = `#!/usr/bin/env bash
 here="$GH_RUN"
@@ -1192,6 +1201,53 @@ if [ "$#" -ge 2 ] && [ "$1" = api ] && [ "$2" = graphql ]; then
   done
   cat "$here/response"
   exit "$(cat "$here/exit")"
+fi
+if [ "$#" -ge 2 ] && [ "$1" = issue ]; then
+  if [ -z "$GH_REPO" ] || [ -z "$GH_TOKEN" ]; then
+    echo "fake gh: issue $2 without GH_REPO or GH_TOKEN" >&2
+    exit 2
+  fi
+  kind="$2"
+  if [ "$#" -eq 10 ] && [ "$2" = list ] && [ "$3" = --state ] && [ "$4" = open ] && [ "$5" = --limit ] && [ "$6" = 1000 ] && [ "$7" = --json ] && [ "$8" = number,title ] && [ "$9" = --jq ]; then
+    :
+  elif [ "$#" -eq 5 ] && [ "$2" = comment ] && [ "$4" = --body ]; then
+    case "$3" in
+      '' | *[!0-9]*) echo "fake gh: unsupported issue $3" >&2; exit 2 ;;
+    esac
+  elif [ "$#" -eq 8 ] && [ "$2" = create ] && [ "$3" = --title ] && [ "$5" = --assignee ] && [ "$6" = drptbl ] && [ "$7" = --body ]; then
+    jq -n --arg title "$4" '{number: 40, title: $title}' > "$here/opened"
+  else
+    echo "fake gh: unsupported command: $*" >&2
+    exit 2
+  fi
+  count=0
+  while IFS= read -r line; do
+    case "$line" in "gh issue $kind "*) count=$((count + 1)) ;; esac
+  done < "$here/events"
+  code=0
+  if [ -e "$here/issue-$kind-exits" ]; then
+    n=0
+    while IFS= read -r line; do
+      n=$((n + 1))
+      code="$line"
+      if [ "$n" -eq "$count" ]; then break; fi
+    done < "$here/issue-$kind-exits"
+  fi
+  case "$kind" in
+    list)
+      if [ -e "$here/opened" ]; then
+        jq -c --slurpfile opened "$here/opened" '. + $opened' "$here/issues"
+      else
+        cat "$here/issues"
+      fi | jq -r "\${10}"
+      ;;
+    comment) [ "$code" -ne 0 ] || echo "https://github.com/$GH_REPO/issues/$3#issuecomment-1" ;;
+    create) [ "$code" -ne 0 ] || echo "https://github.com/$GH_REPO/issues/40" ;;
+  esac
+  if [ "$code" -ne 0 ]; then
+    echo 'GraphQL: Something went wrong while executing your query' >&2
+  fi
+  exit "$code"
 fi
 if [ "$#" -ne 4 ] || [ "$1" != api ] || { [ "$2" != repos/tibia-sh/mcp.tibia.sh/dispatches ] && [ "$2" != repos/tibia-sh/tibiawiki-data/dispatches ]; } || [ "$3" != --input ] || [ "$4" != - ]; then
   echo "fake gh: unsupported command: $*" >&2
@@ -2302,17 +2358,29 @@ const ALERT_IF =
 
 /**
  * alert.yml's script, word for word: it comments on the open issue titled `Automation needs a look`,
- * found by its exact title rather than a search, or opens that issue assigned to drptbl.
+ * found by its exact title rather than a search, or opens that issue assigned to drptbl. One GitHub API
+ * error would otherwise drop the alert, so write_alert is tried 5 times, 30, 60, 120 and 240 seconds
+ * apart, by the loop every writer of the issue ends with, word for word. bash ignores set -e in a
+ * function called before &&, so each command in it that can fail returns by itself. A change has to
+ * change this test on purpose.
  */
 const ALERT_SCRIPT = String.raw`title='Automation needs a look'
 body="$WORKFLOW $CONCLUSION: $RUN_URL"
-number=$(TITLE=$title gh issue list --state open --limit 1000 --json number,title \
-  --jq 'map(select(.title == env.TITLE) | .number) | min // empty')
-if [[ -n $number ]]; then
-  gh issue comment "$number" --body "$body"
-else
-  gh issue create --title "$title" --assignee drptbl --body "$body"
-fi`;
+write_alert() {
+  number=$(TITLE=$title gh issue list --state open --limit 1000 --json number,title \
+    --jq 'map(select(.title == env.TITLE) | .number) | min // empty') || return 1
+  if [[ -n $number ]]; then
+    gh issue comment "$number" --body "$body" || return 1
+  else
+    gh issue create --title "$title" --assignee drptbl --body "$body" || return 1
+  fi
+}
+for delay in 30 60 120 240; do
+  write_alert && exit 0
+  echo "::warning::Writing the alert issue failed. Trying again in $delay seconds."
+  sleep "$delay"
+done
+write_alert`;
 
 test('alert comments on failed release and generator runs', () => {
   // workflow_run matches a workflow by its name:, so the names are read from release.yml and generator.yml. alert.yml reads
@@ -2331,7 +2399,7 @@ test('alert comments on failed release and generator runs', () => {
   const alert = jobs[0]![1];
   assert.equal(scalar(alert, 'if'), ALERT_IF);
   assert.equal(scalar(alert, 'runs-on'), 'ubuntu-latest');
-  assert.equal(scalar(alert, 'timeout-minutes'), '5');
+  assert.equal(scalar(alert, 'timeout-minutes'), '15', 'the alert job has no room for its 450 seconds of waits');
   assert.deepEqual(mappingOf(under(alert, 'permissions')), { issues: 'write' });
   assert.deepEqual(mappingOf(under(alert, 'concurrency')), { group: 'automation-alert', 'cancel-in-progress': 'false', queue: 'max' });
   // No checkout and no action: gh alone, on this repository.
@@ -2346,6 +2414,98 @@ test('alert comments on failed release and generator runs', () => {
     RUN_URL: '${{ github.event.workflow_run.html_url }}',
   });
   assert.equal(stepScript(steps[0]!), ALERT_SCRIPT);
+});
+
+/** What the alert step gets through env: the watched run's fields, the repository and github.token. */
+const ALERT_ENV = {
+  GH_TOKEN: 'ghs_alert',
+  GH_REPO: 'tibia-sh/tibiawiki-mcp',
+  WORKFLOW: 'release',
+  CONCLUSION: 'failure',
+  RUN_URL: 'https://github.com/tibia-sh/tibiawiki-mcp/actions/runs/99',
+};
+
+/** The open issue the alert comments on, and two it must pass over: a later one with its title, and another title. */
+const ALERT_ISSUES = [
+  { number: 31, title: 'Automation needs a look' },
+  { number: 30, title: 'Automation needs a look' },
+  { number: 12, title: 'Automation needs a look again' },
+];
+
+/** The gh calls the alert makes to write `release failure: <run url>`, as the fake gh records them. */
+const alertComment = (number: number): string =>
+  `gh issue comment ${number} --body release failure: https://github.com/tibia-sh/tibiawiki-mcp/actions/runs/99`;
+const ALERT_OPEN =
+  'gh issue create --title Automation needs a look --assignee drptbl --body release failure: https://github.com/tibia-sh/tibiawiki-mcp/actions/runs/99';
+
+/**
+ * Runs alert.yml's step, ALERT_SCRIPT word for word by the test above, as the checks above run their scripts,
+ * with the fake gh and sleep first on PATH. `issues` are the open issues the list finds, and `exits` how each
+ * call of a kind exits in turn, as the fake gh describes. jq and everything else is real.
+ */
+const runAlert = (
+  issues: Array<{ number: number; title: string }>,
+  exits: { list?: number[]; comment?: number[]; create?: number[] } = {},
+) => {
+  const steps = jobSteps(workflowJobs('alert.yml')[0]![1]);
+  const dir = scratch();
+  writeFileSync(join(dir, 'issues'), JSON.stringify(issues));
+  for (const [kind, codes] of Object.entries(exits)) writeFileSync(join(dir, `issue-${kind}-exits`), `${codes.join('\n')}\n`);
+  const env = { ...ALERT_ENV, PATH: `${fakeBin()}:${process.env['PATH'] ?? ''}`, GH_RUN: dir, FAKE_RUN: dir };
+  const run = bash(stepScript(steps[0]!)!, env, dir);
+  const events = recorded(dir, 'events');
+  return {
+    status: run.status,
+    output: `${run.stdout}${run.stderr}`,
+    warnings: run.stdout.split('\n').filter((line) => line.startsWith('::warning::')),
+    lists: events.filter((line) => line.startsWith('gh issue list ')),
+    comments: events.filter((line) => line.startsWith('gh issue comment ')),
+    opens: events.filter((line) => line.startsWith('gh issue create ')),
+    sleeps: recorded(dir, 'sleeps'),
+  };
+};
+
+test('the alert lists 5 times, waiting longer each time, and never comments or opens when it cannot list the open issues', () => {
+  // Writing after a failed list would act on a list it could not trust, and could open a second issue beside the
+  // first. The fake's failed list still prints the issue it found, so a step that went on would comment.
+  for (const issues of [[], ALERT_ISSUES]) {
+    const run = runAlert(issues, { list: [1] });
+    assert.equal(run.status, 1, `the step did not fail when every list failed\n${run.output}`);
+    assert.equal(run.lists.length, 5, `the step did not list exactly 5 times\n${run.output}`);
+    assert.deepEqual(run.comments, [], 'the step commented after a failed list');
+    assert.deepEqual(run.opens, [], 'the step opened an issue after a failed list');
+    assert.deepEqual(run.sleeps, ['30', '60', '120', '240']);
+    assert.deepEqual(run.warnings,
+      [30, 60, 120, 240].map((delay) => `::warning::Writing the alert issue failed. Trying again in ${delay} seconds.`));
+  }
+});
+
+test('the alert comments once a list that failed finds the issue on the next try', () => {
+  const run = runAlert(ALERT_ISSUES, { list: [1, 0] });
+  assert.equal(run.status, 0, run.output);
+  assert.equal(run.lists.length, 2);
+  assert.deepEqual(run.comments, [alertComment(30)], 'the step did not comment once, on the lowest open issue with the title');
+  assert.deepEqual(run.opens, []);
+  assert.deepEqual(run.sleeps, ['30']);
+});
+
+test('the alert lists again and comments again after a comment fails', () => {
+  const run = runAlert(ALERT_ISSUES, { comment: [1, 0] });
+  assert.equal(run.status, 0, run.output);
+  assert.equal(run.lists.length, 2, 'the second try did not list again');
+  assert.deepEqual(run.comments, [alertComment(30), alertComment(30)]);
+  assert.deepEqual(run.opens, []);
+  assert.deepEqual(run.sleeps, ['30']);
+});
+
+test('the alert comments on the issue an open that failed still opened, and never opens a second one', () => {
+  // GitHub can open the issue and still answer with an error. The next try lists again and finds it.
+  const run = runAlert([{ number: 12, title: 'Automation needs a look again' }], { create: [1] });
+  assert.equal(run.status, 0, run.output);
+  assert.equal(run.lists.length, 2);
+  assert.deepEqual(run.opens, [ALERT_OPEN], 'the step did not open the issue exactly once');
+  assert.deepEqual(run.comments, [alertComment(40)], 'the step did not comment on the issue its failed open opened');
+  assert.deepEqual(run.sleeps, ['30']);
 });
 
 test('ci.yml runs the required test job on pull requests and in the merge queue', () => {

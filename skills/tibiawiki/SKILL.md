@@ -85,9 +85,10 @@ weakness from a creature's own element. Dragons breathe fire *and* are immune to
 
 ## Data quirks that produce wrong answers
 
-**`hitpoints: null` means unrecorded, not zero.** 433 creatures have no recorded
+**`hitpoints: null` means unrecorded, not zero.** Hundreds of creatures have no recorded
 health upstream, including bosses with millions of experience. A range filter excludes
-them rather than treating them as 0-HP. Never report "0 hitpoints".
+them rather than treating them as 0-HP. `hitpoints: 0` is the wiki's own value, as on
+Destroyed Pillar: report it as 0.
 
 **Drop `chance` is often null.** About 11% of drop rows have no recorded chance. Nulls
 sort last. Absence of a chance is not a low chance.

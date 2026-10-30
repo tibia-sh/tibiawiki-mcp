@@ -68,7 +68,8 @@ judgement to use them well, and it costs one line of context until it fires:
 - resolve approximate names with `tibia_search` before `tibia_get`
 - modifiers are percentages where 100 is neutral, so a Dragon at `modifier_fire: 0`
   is *immune* to fire, not weak to it
-- `hitpoints: null` means unrecorded, not zero: 433 creatures have no recorded health
+- `hitpoints: null` means unrecorded, not zero: hundreds of creatures have no recorded
+  health, and range filters exclude them. `hitpoints: 0` is the wiki's own value
 - `imbuement.slots` is a category list, not a count
 - non-active pages are hidden unless `include_inactive: true`
 

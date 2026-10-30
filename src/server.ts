@@ -60,8 +60,8 @@ export const ATTRIBUTION =
  * these instructions, not the output schemas.
  */
 const FIELD_MEANINGS =
-  `What result fields mean. runsAt: ${RUNS_AT_MEANING} summonCost: ${SUMMON_COST_MEANING} ` +
-  `convinceCost: ${CONVINCE_COST_MEANING} paralysable false: immune. ` +
+  `Field meanings. runsAt: ${RUNS_AT_MEANING} summonCost: ${SUMMON_COST_MEANING} ` +
+  `convinceCost: ${CONVINCE_COST_MEANING} paralysable false: cannot be paralysed. ` +
   `goldPerKill: ${GOLD_PER_KILL_MEANING} Loot chance is a percent. ` +
   `image: ${IMAGE_MEANING} ${RASHID_PLACE_MEANING} ${FARE_MEANING} origin: ${ORIGIN_MEANING} ` +
   `raceId: ${RACE_ID_MEANING} priceCurrency and valueBuyCurrency: ${PRICE_CURRENCY_MEANING} `;

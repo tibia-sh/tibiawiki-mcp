@@ -183,7 +183,9 @@ export const PRICE_CURRENCY_MEANING =
  */
 export const RUNS_AT_DESCRIPTION = `${RUNS_AT_MEANING} null: unknown.`;
 export const LOOT_CHANCE_DESCRIPTION = 'Drop chance in percent.';
-export const LOOT_MIN_DESCRIPTION = 'Least amount dropped. 0: no range start.';
+export const LOOT_MIN_DESCRIPTION =
+  "Start of the wiki's amount range. 0 when the wiki gives one amount, which max holds, or a " +
+  'range from 0.';
 export const VALUE_BUY_DESCRIPTION =
   'Price an NPC sells it for, in valueBuyCurrency. 0: no NPC sells it.';
 export const VALUE_SELL_DESCRIPTION = 'Price an NPC pays for it. 0: no NPC buys it.';

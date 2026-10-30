@@ -49,8 +49,9 @@ test('a creature carries how it behaves', async () => {
   await h.close();
 });
 
-// The instructions tell a model that a 0 modifier and paralysable false are immunities,
-// and a null leaves a value unknown. Mimic's wiki page gives no armor, speed or paralysis.
+// The instructions tell a model that a 0 modifier is an immunity and paralysable false means
+// it cannot be paralysed, and a null leaves a value unknown. Mimic's wiki page gives no
+// armor, speed or paralysis.
 test('a creature reports an immunity as 0 or false and an unknown value as null', async () => {
   const h = await connect();
   const dragon = await get(h, 'Dragon');

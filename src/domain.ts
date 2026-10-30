@@ -417,6 +417,13 @@ export const QUEST_REWARDS =
   `select distinct i.title from quest_reward r join item i on i.article_id = r.item_id
    where r.quest_id = ? order by i.title asc`;
 
+/**
+ * Every client ID of an item, for `db.prepare` with the item's article_id, in the wiki's
+ * order. The first is item.client_id.
+ */
+export const ITEM_CLIENT_IDS =
+  'select client_id from item_client_id where item_id = ? order by position asc';
+
 export const QUEST_SORTS = ['level_recommended', 'level_required', 'title'] as const;
 export type QuestSort = (typeof QUEST_SORTS)[number];
 const QUEST_ORDER: Record<QuestSort, string> = {

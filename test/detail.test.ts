@@ -329,6 +329,32 @@ test('an item carries its client ID, and null where the wiki records none', asyn
   await h.close();
 });
 
+// item.client_id is the first ID, and item_client_id holds every one, in the wiki's order.
+test('an item lists every client ID, the first one as clientId', async () => {
+  const h = await connect();
+  const water = await get(h, 'Shallow Water', 'item');
+  assert.equal(water.clientId, 629);
+  assert.deepEqual(water.clientIds, [629, 630, 631, 632, 633, 634]);
+  assert.deepEqual((await get(h, 'Dragon Shield', 'item')).clientIds, [3416]);
+  assert.deepEqual((await get(h, 'Mud', 'item')).clientIds, []);
+  await h.close();
+});
+
+test('a creature\'s loot rows carry each item\'s first client ID', async () => {
+  const h = await connect();
+  const db = new DatabaseSync(FIXTURE, { readOnly: true });
+  try {
+    const loot = (await get(h, 'Dragon')).loot as Array<{ item: string; clientId: number | null }>;
+    assert.ok(loot.length > 0, 'guard: Dragon has loot');
+    const clientId = db.prepare('select client_id from item where title = ?');
+    for (const row of loot) assert.equal(row.clientId, clientId.get(row.item)!.client_id, row.item);
+    assert.equal(loot.find((row) => row.item === 'Dragon Shield')!.clientId, 3416);
+  } finally {
+    db.close();
+  }
+  await h.close();
+});
+
 test('a creature carries the name, plural and article the game prints', async () => {
   const h = await connect();
   const dragon = await get(h, 'Dragon');

@@ -5,7 +5,7 @@ import {
   ITEM_SORTS, itemSort, eavOperator, statusClause, coerceAttribute, REPORTED_ATTRS,
   ITEM_RESISTANCES, resistanceAttribute, ITEM_SKILLS, ITEM_HANDS, type EavOperator,
   inGameNameSchema, SPELL_ELEMENTS, ITEM_LEECHES, leechAttribute, PRICE_CURRENCY_MEANING,
-  valueBuySchema,
+  valueBuySchema, ITEM_CLIENT_IDS,
 } from '../domain.ts';
 import { encodeCursor, decodeCursor } from '../cursor.ts';
 
@@ -13,6 +13,7 @@ import { encodeCursor, decodeCursor } from '../cursor.ts';
 const outputSchema = z.object({
   results: z.array(z.object({
     title: z.string(),
+    articleId: z.number(),
     actualName: inGameNameSchema,
     itemClass: z.string().nullable(),
     itemType: z.string().nullable(),
@@ -20,6 +21,7 @@ const outputSchema = z.object({
     valueBuy: valueBuySchema,
     valueBuyCurrency: z.string().nullable().describe(PRICE_CURRENCY_MEANING),
     clientId: z.number().nullable(),
+    clientIds: z.array(z.number()),
     isStackable: z.boolean().nullable(),
     isPickupable: z.boolean().nullable(),
     attributes: z.record(z.string(), z.union([z.string(), z.number()])),
@@ -34,6 +36,7 @@ export const NAME = 'tibia_find_items';
 export function registerFindItems(server: McpServer, handle: TibiaDb): void {
   const { db, provenance } = handle;
   const attrs = db.prepare('select name, value from item_attribute where item_id = ?');
+  const clientIds = db.prepare(ITEM_CLIENT_IDS);
 
   server.registerTool(
     NAME,
@@ -66,7 +69,7 @@ export function registerFindItems(server: McpServer, handle: TibiaDb): void {
         is_stackable: z.boolean().optional(),
         is_pickupable: z.boolean().optional(),
         client_ids: z.array(z.number().int().positive()).min(1).max(100).optional()
-          .describe('The item\'s client ID, any listed. Item variants can share one.'),
+          .describe('Matches any of an item\'s client IDs. Item variants can share one.'),
         include_inactive: z.boolean().default(false),
         sort: z.enum(ITEM_SORTS).default('title')
           .describe('weight ascends, armor, attack and defense descend, title is alphabetical. ' +
@@ -142,7 +145,10 @@ export function registerFindItems(server: McpServer, handle: TibiaDb): void {
       if (args.is_stackable !== undefined) bind('i.is_stackable = ?', args.is_stackable ? 1 : 0);
       if (args.is_pickupable !== undefined) bind('i.is_pickupable = ?', args.is_pickupable ? 1 : 0);
       if (args.client_ids !== undefined) {
-        where.push(`i.client_id in (${args.client_ids.map(() => '?').join(', ')})`);
+        where.push(
+          `exists (select 1 from item_client_id c where c.item_id = i.article_id
+            and c.client_id in (${args.client_ids.map(() => '?').join(', ')}))`,
+        );
         params.push(...args.client_ids);
       }
       const status = statusClause('i', args.include_inactive);
@@ -165,6 +171,7 @@ export function registerFindItems(server: McpServer, handle: TibiaDb): void {
           }
           return {
             title: String(row.title),
+            articleId: Number(row.article_id),
             actualName: str(row.actual_name),
             itemClass: str(row.item_class),
             itemType: str(row.item_type),
@@ -172,6 +179,7 @@ export function registerFindItems(server: McpServer, handle: TibiaDb): void {
             valueBuy: num(row.value_buy),
             valueBuyCurrency: str(row.value_buy_currency),
             clientId: num(row.client_id),
+            clientIds: clientIds.all(row.article_id as number).map((c) => Number(c.client_id)),
             isStackable: bool(row.is_stackable),
             isPickupable: bool(row.is_pickupable),
             attributes: bag,

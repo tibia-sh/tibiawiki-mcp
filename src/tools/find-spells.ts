@@ -10,6 +10,7 @@ import { encodeCursor, decodeCursor } from '../cursor.ts';
 const outputSchema = z.object({
   results: z.array(z.object({
     title: z.string(),
+    articleId: z.number(),
     words: z.string().nullable(),
     spellType: z.string().nullable(),
     group: z.string().nullable(),
@@ -98,6 +99,7 @@ export function registerFindSpells(server: McpServer, handle: TibiaDb): void {
       const output = {
         results: rows.map((row) => ({
           title: String(row.title),
+          articleId: Number(row.article_id),
           words: str(row.words),
           spellType: str(row.spell_type),
           group: str(row.group_spell),

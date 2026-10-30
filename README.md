@@ -53,7 +53,7 @@ You ask questions, and your assistant calls these:
 | Tool | Answers |
 |---|---|
 | `tibia_search` | "Is there a page called roughly X?" or "List every mount." Items also match by the name or plural the game prints, like "vial of lifefluid" |
-| `tibia_get` | "Tell me everything about X." X is a wiki title, and can be a creature, item, NPC, quest or spell. An item says its client ID, the name and plural the game prints, whether it stacks, can be picked up or is immobile, and which NPCs buy it, for how much and where. A creature says its name as the game prints it, how it behaves, like when it flees, and its gold per kill. An NPC says what it buys and sells |
+| `tibia_get` | "Tell me everything about X." X is a wiki title or its `articleId`, and can be a creature, item, NPC, quest or spell. An item says its client ID, the name and plural the game prints, whether it stacks, can be picked up or is immobile, and which NPCs buy it, for how much and where. A creature says its name as the game prints it, how it behaves, like when it flees, and its gold per kill. An NPC says what it buys and sells |
 | `tibia_find_creatures` | "Which creatures match these stats?" Also by behaviour, like seeing invisible or being pushable, and ranked by gold per kill |
 | `tibia_find_items` | "Which items match these stats?" Also by resistance, skill bonus, imbuement slots, weight, hands, client ID, weapon element, life or mana leech, and whether it stacks or can be picked up |
 | `tibia_find_spells` | "Which healing spells can a level 30 druid cast?" |

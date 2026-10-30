@@ -9,6 +9,7 @@ import { encodeCursor, decodeCursor } from '../cursor.ts';
 const outputSchema = z.object({
   results: z.array(z.object({
     npc: z.string(),
+    articleId: z.number().describe("The NPC's."),
     city: z.string().nullable(),
     subarea: z.string().nullable(),
     location: z.string().nullable(),
@@ -82,7 +83,7 @@ export function registerFindTravel(server: McpServer, handle: TibiaDb): void {
       if (status) where.push(status);
 
       const routes =
-        `select distinct n.title, n.city, n.subarea, n.location, n.x, n.y, n.z,
+        `select distinct n.title, n.article_id, n.city, n.subarea, n.location, n.x, n.y, n.z,
                 d.name, d.origin, d.price, d.notes
            from npc_destination d join npc n on n.article_id = d.npc_id
           where ${where.join(' and ')}`;
@@ -95,6 +96,7 @@ export function registerFindTravel(server: McpServer, handle: TibiaDb): void {
       const output = {
         results: rows.map((row) => ({
           npc: String(row.title),
+          articleId: Number(row.article_id),
           city: str(row.city),
           subarea: str(row.subarea),
           location: str(row.location),

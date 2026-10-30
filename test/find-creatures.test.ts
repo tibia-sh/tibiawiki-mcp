@@ -677,3 +677,28 @@ test('both tools describe raceId in the same words', async () => {
     await h.close();
   }
 });
+
+test('race_ids keeps exactly the creatures with a listed race ID', async () => {
+  const h = await connect();
+  try {
+    const data = await find(h.client, { race_ids: [34, 39], sort: 'title' });
+    assert.deepEqual(data.results.map((r) => [r.title, r.raceId]), [['Dragon', 34], ['Dragon Lord', 39]]);
+    assert.equal(data.totalMatches, 2);
+    assert.equal((await find(h.client, { race_ids: [999_999] })).totalMatches, 0);
+  } finally {
+    await h.close();
+  }
+});
+
+test('race_ids refuses an empty list, a non-integer and more than 100 IDs', async () => {
+  const h = await connect();
+  try {
+    const ids = Array.from({ length: 101 }, (_, k) => k + 1);
+    for (const race_ids of [[], [34.5], ids]) {
+      const res = await h.client.callTool({ name: 'tibia_find_creatures', arguments: { race_ids } });
+      assert.equal(res.isError, true, `${JSON.stringify(race_ids).slice(0, 40)} must be refused`);
+    }
+  } finally {
+    await h.close();
+  }
+});

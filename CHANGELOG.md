@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.17.2](https://github.com/tibia-sh/tibiawiki-mcp/compare/v0.17.1...v0.17.2) (2026-10-30)
+
+
+### Bug Fixes
+
+* wait longer for npm before the registry ([6ad8ac0](https://github.com/tibia-sh/tibiawiki-mcp/commit/6ad8ac006e379d22f03a40da90cebf903c08dd76))
+
 ## [0.17.1](https://github.com/tibia-sh/tibiawiki-mcp/compare/v0.17.0...v0.17.1) (2026-09-28)
 
 

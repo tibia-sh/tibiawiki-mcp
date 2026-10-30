@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.18.0](https://github.com/tibia-sh/tibiawiki-mcp/compare/v0.17.6...v0.18.0) (2026-10-30)
+
+
+### Features
+
+* require the tool builder columns ([b02bb15](https://github.com/tibia-sh/tibiawiki-mcp/commit/b02bb15ac719652dbb2a30b2274a542c7fd8d07f))
+
 ## [0.17.6](https://github.com/tibia-sh/tibiawiki-mcp/compare/v0.17.5...v0.17.6) (2026-10-30)
 
 

@@ -1269,23 +1269,74 @@ const writeCurlResponses = (dir: string, responses: CurlResponse[]): void => {
 };
 
 /**
- * Runs the registry job's npm wait for v1.2.3, as the checks above run their scripts, with the
- * fake curl and sleep first on PATH. jq and everything else is real.
+ * A clock for a step that reads bash's SECONDS, run in the same shell ahead of the step's script.
+ * The fake sleep returns at once, so the real SECONDS would never pass a deadline. This turns SECONDS
+ * into a plain variable and, before each command of the script, sets it to the time the run has
+ * spent: every sleep the fake sleep recorded, and FAKE_TRY_SECONDS for each curl call. It is not
+ * handed over through BASH_ENV, because bash skips that file when its stdin is a socket, as node's
+ * pipes are, and SHLVL is unset.
  */
-const runNpmWait = (responses: CurlResponse[]) => {
+const FAKE_CLOCK = `unset SECONDS
+SECONDS=0
+fake_clock_events=0
+fake_clock() {
+  local line new
+  if [ -e "$FAKE_RUN/events" ]; then
+    mapfile -t -s "$fake_clock_events" new < "$FAKE_RUN/events"
+    fake_clock_events=$((fake_clock_events + \${#new[@]}))
+    for line in "\${new[@]}"; do
+      case "$line" in
+        curl) SECONDS=$((SECONDS + \${FAKE_TRY_SECONDS:-0})) ;;
+        'sleep '*) SECONDS=$((SECONDS + \${line#sleep })) ;;
+      esac
+    done
+  fi
+}
+trap fake_clock DEBUG
+`;
+
+/**
+ * Runs the registry job's npm wait for v1.2.3, as the checks above run their scripts, with the
+ * fake curl and sleep first on PATH and the fake clock in place of SECONDS. jq and everything else
+ * is real. `env` adds to the run's environment, such as FAKE_TRY_SECONDS or the step's own
+ * POLL_SECONDS and DEADLINE_SECONDS.
+ */
+const runNpmWait = (responses: CurlResponse[], env: Record<string, string> = {}) => {
   const waits = npmWaitSteps();
   assert.equal(waits.length, 1, 'expected exactly one registry job step that polls npm');
   const dir = scratch();
   writeCurlResponses(dir, responses);
-  const env = { TAG: 'v1.2.3', PATH: `${fakeBin()}:${process.env['PATH'] ?? ''}`, FAKE_RUN: dir };
-  const run = bash(stepScript(waits[0]!)!, env, dir);
+  const run = bash(
+    `${FAKE_CLOCK}${stepScript(waits[0]!)!}`,
+    { TAG: 'v1.2.3', PATH: `${fakeBin()}:${process.env['PATH'] ?? ''}`, FAKE_RUN: dir, ...env },
+    dir,
+  );
   return {
     status: run.status,
     stdout: run.stdout,
     output: `${run.stdout}${run.stderr}`,
     calls: recorded(dir, 'calls'),
     sleeps: recorded(dir, 'sleeps'),
+    events: recorded(dir, 'events'),
   };
+};
+
+/**
+ * The fake clock's reading after each of a run's curl calls and sleeps, as `curl` or `sleep` with the
+ * second the event ended at, each curl taking `trySeconds`.
+ */
+const timeline = (events: string[], trySeconds: number): Array<{ event: 'curl' | 'sleep'; at: number }> => {
+  let at = 0;
+  return events.map((line) => {
+    if (line === 'curl') {
+      at += trySeconds;
+      return { event: 'curl', at };
+    }
+    const seconds = /^sleep (\d+)$/.exec(line)?.[1];
+    assert.ok(seconds !== undefined, `the npm wait ran something besides curl and a sleep of whole seconds: ${line}`);
+    at += Number(seconds);
+    return { event: 'sleep', at };
+  });
 };
 
 /** npm's manifest for v1.2.3 of the package server.json registers, as the registry reads it. */
@@ -1336,23 +1387,84 @@ test("the npm wait passes once npm serves the tag's version with the server's mc
   }
 });
 
-test('the npm wait gives up after 40 tries 15 seconds apart', () => {
-  // About 10 minutes, twice the lag npm has shown. The annotation names the version and the
-  // section of the runbook that recovers it.
-  const missing = runNpmWait([NOT_FOUND]);
-  assert.notEqual(missing.status, 0, 'a version npm never serves passes');
-  assert.equal(missing.calls.length, 40, 'the wait is not 40 tries');
-  assert.deepEqual(missing.sleeps, Array<string>(40).fill('15'), 'the tries are not 15 seconds apart');
-  const section = /^::error::.*@1\.2\.3\b.*"([^"]+)" in docs\/RELEASING\.md/m.exec(missing.stdout)?.[1];
-  assert.ok(section, `no ::error:: names the version and a section of docs/RELEASING.md: ${missing.output}`);
-  assert.ok(read('docs/RELEASING.md').split('\n').includes(`## ${section}`), `docs/RELEASING.md has no section "${section}"`);
+test('the npm wait gives up at a 45-minute deadline on the clock, never sleeping past it', () => {
+  // npm once took about 20.5 minutes to serve a version, so the wait runs to more than twice that.
+  // The deadline is on the clock, so a try that runs to curl's 10-second bound counts against it and
+  // cannot stretch the wait. The annotation names the version and the section of the runbook that
+  // recovers it.
+  const deadline = 2700;
+  for (const trySeconds of [0, 10]) {
+    const missing = runNpmWait([NOT_FOUND], { FAKE_TRY_SECONDS: String(trySeconds) });
+    const what = `with tries of ${trySeconds} seconds`;
+    assert.notEqual(missing.status, 0, `a version npm never serves passes ${what}`);
+    assert.ok(missing.sleeps.length > 0 && missing.sleeps.every((sleep) => sleep === '15'), `the tries are not 15 seconds apart ${what}`);
+    const events = timeline(missing.events, trySeconds);
+    for (const { event, at } of events) {
+      if (event === 'sleep') assert.ok(at <= deadline, `a sleep ends at ${at} seconds, past the deadline ${what}`);
+    }
+    // It gives up only once another 15-second sleep would reach the deadline, after a try that started
+    // before it.
+    const end = events.at(-1)!;
+    assert.equal(end.event, 'curl', `the wait gives up after a sleep ${what}`);
+    assert.ok(end.at + 15 >= deadline, `the wait gives up at ${end.at} seconds, before the deadline ${what}`);
+    assert.ok(end.at - trySeconds < deadline, `a try starts at the deadline or past it ${what}`);
+    const section = /^::error::.*@1\.2\.3\b.*"([^"]+)" in docs\/RELEASING\.md/m.exec(missing.stdout)?.[1];
+    assert.ok(section, `no ::error:: names the version and a section of docs/RELEASING.md: ${missing.output}`);
+    assert.ok(read('docs/RELEASING.md').split('\n').includes(`## ${section}`), `docs/RELEASING.md has no section "${section}"`);
+  }
+});
+
+test('the npm wait takes its poll and deadline from the environment, so the tests can shorten them', () => {
+  // A deadline that is no whole number of polls: tries at 0, 15, 30 and 45 seconds, and no sleep to 60.
+  const short = runNpmWait([NOT_FOUND], { POLL_SECONDS: '15', DEADLINE_SECONDS: '50' });
+  assert.notEqual(short.status, 0, 'a version npm never serves passes');
+  assert.equal(short.calls.length, 4, 'the wait does not try at 0, 15, 30 and 45 seconds');
+  assert.deepEqual(short.sleeps, ['15', '15', '15'], 'the wait sleeps past a 50-second deadline');
+  assert.match(short.stdout, /^::error::.*@1\.2\.3\b.* within 50 seconds\./m, `the error does not name the deadline: ${short.output}`);
+  // The last try before the deadline still counts, and the first 200 ends the wait.
+  const last = runNpmWait([NOT_FOUND, NOT_FOUND, NOT_FOUND, { status: 200, body: publishedManifest() }], { POLL_SECONDS: '15', DEADLINE_SECONDS: '50' });
+  assert.equal(last.status, 0, last.output);
+  assert.equal(last.calls.length, 4, 'the try at 45 seconds does not count');
+  assert.deepEqual(last.sleeps, ['15', '15', '15'], 'the wait goes on after the try that passed');
+  // No time to wait is one try.
+  const none = runNpmWait([NOT_FOUND], { DEADLINE_SECONDS: '0' });
+  assert.notEqual(none.status, 0, 'a version npm never serves passes');
+  assert.equal(none.calls.length, 1, 'a deadline of 0 is not one try');
+  assert.deepEqual(none.sleeps, [], 'the wait sleeps with no time to wait');
+  // A value the arithmetic would misread fails before the first try.
+  const invalid = '::error::POLL_SECONDS has to be a whole number of seconds above 0, and DEADLINE_SECONDS a whole number of seconds.';
+  const values: Array<[string, Record<string, string>]> = [
+    ['a poll interval of 0', { POLL_SECONDS: '0' }],
+    ['a poll interval with a leading 0', { POLL_SECONDS: '08' }],
+    ['a fractional poll interval', { POLL_SECONDS: '1.5' }],
+    ['a negative deadline', { DEADLINE_SECONDS: '-1' }],
+    ['a deadline with a leading 0', { DEADLINE_SECONDS: '060' }],
+    ['a deadline that is a command', { DEADLINE_SECONDS: '60; echo' }],
+  ];
+  for (const [what, env] of values) {
+    const run = runNpmWait([NOT_FOUND], env);
+    assert.notEqual(run.status, 0, `${what} passes`);
+    assert.ok(run.stdout.split('\n').includes(invalid), `${what} fails without the error: ${run.output}`);
+    assert.deepEqual(run.calls, [], `${what} reaches npm`);
+  }
+});
+
+test('the registry job has time for the whole npm wait and the publish', () => {
+  // Without a job timeout the job could hold the registry key for 6 hours. With one shorter than the
+  // wait and the publish step's own bound, a slow npm would cancel a publish that was going to pass.
+  const timeout = Number(scalar(registryJob(), 'timeout-minutes'));
+  assert.equal(timeout, 75, 'the registry job does not carry timeout-minutes: 75');
+  const wait = Number(/\$\{DEADLINE_SECONDS:-(\d+)\}/.exec(stepScript(npmWaitSteps()[0]!) ?? '')?.[1]);
+  assert.equal(wait, 2700, 'the npm wait does not default to a 45-minute deadline');
+  const publish = Number(scalar(stepBody(registryPublishStep()), 'timeout-minutes'));
+  assert.ok(timeout >= wait / 60 + publish, `the job's ${timeout} minutes are less than the ${wait / 60}-minute wait and the ${publish}-minute publish`);
 });
 
 test('the npm wait passes nothing the registry would reject', () => {
   // The registry needs a 200 whose mcpName is the server's name. A version with another mcpName
   // never passes, however long npm serves it.
   const manifest = publishedManifest();
-  const foreign = runNpmWait([{ status: 200, body: { ...manifest, mcpName: 'sh.tibia/another' } }]);
+  const foreign = runNpmWait([{ status: 200, body: { ...manifest, mcpName: 'sh.tibia/another' } }], { DEADLINE_SECONDS: '50' });
   assert.notEqual(foreign.status, 0, 'a manifest with another mcpName passes');
   assert.match(foreign.stdout, /^::error::/m, `the wait stops with no ::error::: ${foreign.output}`);
   // Each of these is only another try, so the wait passes on the try after it.

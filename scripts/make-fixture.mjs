@@ -44,8 +44,9 @@ const NAMED_CREATURES = [
 // Moonsilver Axe carried defense "33 +3" through data 3.4.0: the five "numeric"
 // attributes are not always integers, and Number() on that yields NaN, which the tools'
 // outputSchema rejects. From 3.5.0 it reads defense 33 and defense_modifier "+3", so
-// test/regression.test.ts writes the suffixed value back on a copy of this row. Arrow (Weak) is status 'ts-only', so how_to_obtain has a non-active
-// subject with active vendors to warn about. Both are regression anchors.
+// suffixedDefenseFixture in test/harness.ts writes the suffixed value back on a copy.
+// Arrow (Weak) is status 'ts-only', so how_to_obtain has a non-active subject with
+// active vendors to warn about. Both are regression anchors.
 const NAMED_ITEMS = [
   'Magic Longsword', 'Steel Helmet', 'Gold Coin', 'Mud',
   'Moonsilver Axe', 'Arrow (Weak)',

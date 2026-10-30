@@ -3,7 +3,7 @@ import type { McpServer } from '@modelcontextprotocol/server';
 import { str, num, bool, type TibiaDb } from '../db.ts';
 import {
   ELEMENTS, elementSchema, modifierColumn, WEAK_TO, RESISTANT_TO,
-  CREATURE_BESTIARY_LEVELS, CREATURE_SORTS, creatureSort, statusClause, hitpointsExpr, likePattern,
+  CREATURE_BESTIARY_LEVELS, CREATURE_SORTS, creatureSort, statusClause, likePattern,
   runsAtSchema, summonCostSchema, convinceCostSchema, GOLD_PER_KILL, goldPerKillSchema,
   inGameNameSchema, raceIdSchema,
 } from '../domain.ts';
@@ -99,8 +99,8 @@ export function registerFindCreatures(server: McpServer, handle: TibiaDb): void 
       };
       if (args.experience_min !== undefined) bind('c.experience >= ?', args.experience_min);
       if (args.experience_max !== undefined) bind('c.experience <= ?', args.experience_max);
-      if (args.hitpoints_min !== undefined) bind(`${hitpointsExpr('c')} >= ?`, args.hitpoints_min);
-      if (args.hitpoints_max !== undefined) bind(`${hitpointsExpr('c')} <= ?`, args.hitpoints_max);
+      if (args.hitpoints_min !== undefined) bind('c.hitpoints >= ?', args.hitpoints_min);
+      if (args.hitpoints_max !== undefined) bind('c.hitpoints <= ?', args.hitpoints_max);
       if (args.bestiary_class !== undefined) bind('c.bestiary_class = ? collate nocase', args.bestiary_class);
       if (args.is_boss !== undefined) bind('c.is_boss = ?', args.is_boss ? 1 : 0);
       // The wiki records these as 0 or 1, or not at all, so an unrecorded one never matches.
@@ -134,8 +134,7 @@ export function registerFindCreatures(server: McpServer, handle: TibiaDb): void 
         results: rows.map((row) => ({
           title: String(row.title),
           name: str(row.name),
-          // 0 means unrecorded; report it as null rather than as a real value.
-          hitpoints: !row.hitpoints ? null : Number(row.hitpoints),
+          hitpoints: num(row.hitpoints),
           experience: num(row.experience),
           bestiaryClass: str(row.bestiary_class),
           isBoss: Boolean(row.is_boss),

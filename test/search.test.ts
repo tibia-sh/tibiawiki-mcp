@@ -11,7 +11,7 @@ import { connect, connectTo, FIXTURE, tempDirs, withRealIndex } from './harness.
 const scratch = tempDirs('twmcp-search-');
 
 type SearchOut = {
-  results: Array<{ title: string; type: string }>;
+  results: Array<{ title: string; type: string; articleId: number }>;
   nextCursor?: string;
   indexGeneratedAt: string;
 };
@@ -259,7 +259,8 @@ test('an item also matches by the name and plural the game prints, once under it
   await withRealIndex(async (client) => {
     const res = await client.callTool({ name: 'tibia_search', arguments: { query: 'vials of life' } });
     assert.deepEqual(
-      (res.structuredContent as SearchOut).results.filter((r) => r.title === 'Lifefluid'),
+      (res.structuredContent as SearchOut).results.filter((r) => r.title === 'Lifefluid')
+        .map(({ title, type }) => ({ title, type })),
       [{ title: 'Lifefluid', type: 'item' }],
     );
   });
@@ -278,9 +279,10 @@ function expectedMatches(path: string, query: string, includeInactive: boolean):
       const columns = type === 'item' ? ['title', 'actual_name', 'plural'] : ['title'];
       const contains = columns.map((c) => `instr(lower(t.${c}), lower(?1)) > 0`).join(' or ');
       const active = entityHasStatus(type) && !includeInactive ? " and t.status = 'active'" : '';
-      const rows = db.prepare(`select t.title from "${entityTable(type)}" t where (${contains})${active}`)
-        .all(query) as Array<{ title: string }>;
-      found.push(...rows.map((r) => ({ title: r.title, type })));
+      const rows = db.prepare(
+        `select t.title, t.article_id from "${entityTable(type)}" t where (${contains})${active}`,
+      ).all(query) as Array<{ title: string; article_id: number }>;
+      found.push(...rows.map((r) => ({ title: r.title, type, articleId: r.article_id })));
     }
     return found.sort((a, b) =>
       a.title.length - b.title.length || a.title.localeCompare(b.title) || a.type.localeCompare(b.type));

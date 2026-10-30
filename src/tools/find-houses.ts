@@ -7,6 +7,7 @@ import { encodeCursor, decodeCursor } from '../cursor.ts';
 const outputSchema = z.object({
   results: z.array(z.object({
     title: z.string(),
+    articleId: z.number(),
     city: z.string(),
     street: z.string().nullable(),
     rent: z.number().nullable(),
@@ -83,6 +84,7 @@ export function registerFindHouses(server: McpServer, handle: TibiaDb): void {
       const output = {
         results: rows.map((row) => ({
           title: String(row.title),
+          articleId: Number(row.article_id),
           city: String(row.city),
           street: str(row.street),
           rent: num(row.rent),

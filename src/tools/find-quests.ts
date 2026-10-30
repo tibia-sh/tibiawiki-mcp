@@ -7,6 +7,7 @@ import { encodeCursor, decodeCursor } from '../cursor.ts';
 const outputSchema = z.object({
   results: z.array(z.object({
     title: z.string(),
+    articleId: z.number(),
     location: z.string().nullable(),
     levelRequired: z.number().nullable(),
     levelRecommended: z.number().nullable(),
@@ -86,6 +87,7 @@ export function registerFindQuests(server: McpServer, handle: TibiaDb): void {
       const output = {
         results: rows.map((row) => ({
           title: String(row.title),
+          articleId: Number(row.article_id),
           location: str(row.location),
           levelRequired: num(row.level_required),
           levelRecommended: num(row.level_recommended),

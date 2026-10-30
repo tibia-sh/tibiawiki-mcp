@@ -31,7 +31,9 @@ title. If the user says "dragonlord", "that fire dragon" or a name the game prin
 call `tibia_search` first. It matches titles by substring, and for items also the
 in-game name and recorded plural. Results are ordered shortest-name-first, so the
 closest match leads. Guessing a name and getting an error costs a round trip. For
-"list every mount", pass `types` and no `query`.
+"list every mount", pass `types` and no `query`. `tibia_get` and the finders give each
+page's `articleId`, the wiki's page ID, which survives a rename: pass it to `tibia_get`
+as `article_id` instead of `name`.
 
 **Three tools take the names the game prints.** `tibia_where_to_sell`,
 `tibia_how_to_obtain` and `tibia_parse_loot` accept in-game names like "vial of

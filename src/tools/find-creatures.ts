@@ -12,6 +12,7 @@ import { encodeCursor, decodeCursor } from '../cursor.ts';
 const outputSchema = z.object({
   results: z.array(z.object({
     title: z.string(),
+    articleId: z.number(),
     name: inGameNameSchema,
     hitpoints: z.number().nullable(),
     experience: z.number().nullable(),
@@ -66,6 +67,8 @@ export function registerFindCreatures(server: McpServer, handle: TibiaDb): void 
         bestiary_level: z.enum(CREATURE_BESTIARY_LEVELS).optional()
           .describe('Creatures with no recorded bestiary level are excluded from this filter.'),
         location_contains: z.string().optional().describe('Substring of the location text.'),
+        race_ids: z.array(z.number().int()).min(1).max(100).optional()
+          .describe('Race ID, any listed. Boss phases can share one.'),
         include_inactive: z.boolean().default(false),
         sort: z.enum(CREATURE_SORTS).default('experience')
           .describe('experience, hitpoints and gold_per_kill: highest first.'),
@@ -114,6 +117,10 @@ export function registerFindCreatures(server: McpServer, handle: TibiaDb): void 
       if (args.location_contains !== undefined) {
         bind(`lower(c.location) like ? escape '\\'`, likePattern(args.location_contains));
       }
+      if (args.race_ids !== undefined) {
+        where.push(`c.race_id in (${args.race_ids.map(() => '?').join(', ')})`);
+        params.push(...args.race_ids);
+      }
       const status = statusClause('c', args.include_inactive);
       if (status) where.push(status);
 
@@ -133,6 +140,7 @@ export function registerFindCreatures(server: McpServer, handle: TibiaDb): void 
       const output = {
         results: rows.map((row) => ({
           title: String(row.title),
+          articleId: Number(row.article_id),
           name: str(row.name),
           hitpoints: num(row.hitpoints),
           experience: num(row.experience),

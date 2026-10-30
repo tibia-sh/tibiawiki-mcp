@@ -6,9 +6,11 @@ import { sourceBlock } from './get.ts';
 
 const outputSchema = z.object({
   item: z.string(),
+  articleId: z.number(),
   status: z.string().nullable(),
   droppedBy: z.array(z.object({
     creature: z.string(),
+    clientId: z.number().nullable().describe("The item's first client ID."),
     chance: lootChanceSchema,
     min: lootMinSchema,
     max: z.number().nullable(),
@@ -29,7 +31,8 @@ export const NAME = 'tibia_how_to_obtain';
 export function registerHowToObtain(server: McpServer, handle: TibiaDb): void {
   const { db, provenance } = handle;
 
-  const findItem = db.prepare('select article_id, title, status from item where article_id = ?');
+  const findItem = db.prepare(
+    'select article_id, title, status, client_id from item where article_id = ?');
 
   const dropped = (includeInactive: boolean) => {
     const status = statusClause('c', includeInactive);
@@ -96,7 +99,8 @@ export function registerHowToObtain(server: McpServer, handle: TibiaDb): void {
       const [match] = found;
       const item = match === undefined
         ? undefined
-        : findItem.get(match.articleId) as { article_id: number; title: string; status: string | null };
+        : findItem.get(match.articleId) as
+          { article_id: number; title: string; status: string | null; client_id: number | null };
       if (!item) {
         return {
           isError: true,
@@ -111,6 +115,7 @@ export function registerHowToObtain(server: McpServer, handle: TibiaDb): void {
       const id = item.article_id;
       const droppedBy = dropped(include_inactive).all(id).map((r) => ({
         creature: String(r.creature),
+        clientId: num(item.client_id),
         chance: num(r.chance),
         min: num(r.lo),
         max: num(r.hi),
@@ -129,6 +134,7 @@ export function registerHowToObtain(server: McpServer, handle: TibiaDb): void {
       const inactive = status !== null && status !== 'active';
       const output = {
         item: item.title,
+        articleId: item.article_id,
         status,
         droppedBy,
         soldByNpcs,

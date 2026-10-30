@@ -1,5 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { DatabaseSync } from 'node:sqlite';
 import { DB_PATH } from '@tibia.sh/tibiawiki-data';
 import { connect, connectTo, suffixedDefenseFixture, tempDirs, withRealIndex } from './harness.ts';
 import { coerceAttribute } from '../src/domain.ts';
@@ -179,3 +180,33 @@ test('experience 0 is still treated as real data', async () => {
   for (const r of data.results) assert.equal(r.experience, 0);
   await h.close();
 });
+
+// A race ID is not unique: boss phases share one (data 3.5.0 has nine races shared by
+// active creatures, such as The Spellstealer's three phases). race_ids returns every
+// creature holding a listed race, so the rows equal the database's own match.
+test('race_ids returns every creature that shares a listed race', () => withRealIndex(async (client) => {
+  const db = new DatabaseSync(DB_PATH, { readOnly: true });
+  let races: number[];
+  let expected: string[];
+  try {
+    races = db.prepare(
+      `select race_id from creature where race_id is not null and status = 'active'
+        group by race_id having count(*) > 1`,
+    ).all().map((r) => Number(r.race_id));
+    assert.ok(races.length > 0, 'guard: some active creatures share a race');
+    expected = db.prepare(
+      `select title from creature where status = 'active'
+          and race_id in (select value from json_each(?)) order by title`,
+    ).all(JSON.stringify(races)).map((r) => String(r.title));
+  } finally {
+    db.close();
+  }
+  const res = await client.callTool({
+    name: 'tibia_find_creatures', arguments: { race_ids: races, sort: 'title', limit: 100 },
+  });
+  assert.notEqual(res.isError, true, JSON.stringify(res.content));
+  const data = res.structuredContent as { results: Array<{ title: string }>; totalMatches: number };
+  assert.ok(expected.length > races.length, 'guard: more creatures than races');
+  assert.equal(data.totalMatches, expected.length);
+  assert.deepEqual(data.results.map((r) => r.title), expected);
+}));

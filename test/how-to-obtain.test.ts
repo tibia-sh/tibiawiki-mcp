@@ -9,7 +9,10 @@ const scratch = tempDirs('twmcp-obtain-');
 
 type ObtainOut = {
   item: string;
-  droppedBy: Array<{ creature: string; chance: number | null; min: number | null; max: number | null }>;
+  articleId: number;
+  droppedBy: Array<{
+    creature: string; clientId: number | null; chance: number | null; min: number | null; max: number | null;
+  }>;
   soldByNpcs: Array<{ npc: string; city: string | null; price: number; currency: string }>;
   questRewards: string[];
   note: string;
@@ -22,6 +25,24 @@ test('reports which creatures drop an item', async () => {
   });
   const data = res.structuredContent as ObtainOut;
   assert.ok(data.droppedBy.length > 0, 'Steel Helmet should have droppers');
+  await h.close();
+});
+
+test('the item carries its articleId, and each drop the item\'s client ID', async () => {
+  const h = await connect();
+  const res = await h.client.callTool({
+    name: 'tibia_how_to_obtain', arguments: { item_name: 'Dragon Shield' },
+  });
+  const data = res.structuredContent as ObtainOut;
+  const db = new DatabaseSync(FIXTURE, { readOnly: true });
+  try {
+    const row = db.prepare("select article_id from item where title = 'Dragon Shield'").get()!;
+    assert.equal(data.articleId, Number(row.article_id));
+  } finally {
+    db.close();
+  }
+  assert.ok(data.droppedBy.length > 0, 'guard: Dragon Shield has droppers');
+  for (const drop of data.droppedBy) assert.equal(drop.clientId, 3416, drop.creature);
   await h.close();
 });
 

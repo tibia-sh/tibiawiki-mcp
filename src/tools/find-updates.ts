@@ -7,6 +7,7 @@ import { asciiLower, likePattern } from '../domain.ts';
 const outputSchema = z.object({
   results: z.array(z.object({
     title: z.string(),
+    articleId: z.number(),
     name: z.string().nullable(),
     releaseDate: z.string().nullable(),
     version: z.string().nullable(),
@@ -121,7 +122,8 @@ export function registerFindUpdates(server: McpServer, handle: TibiaDb): void {
         { c: number };
       const rows = db
         .prepare(
-          `select u.title, u.name, u.release_date, u.version, u.type_primary, u.summary, u.changes
+          `select u.article_id, u.title, u.name, u.release_date, u.version, u.type_primary,
+                  u.summary, u.changes
            from game_update u ${clause} order by u.release_date desc, u.title asc limit ? offset ?`,
         )
         .all(...params, args.limit, offset);
@@ -129,6 +131,7 @@ export function registerFindUpdates(server: McpServer, handle: TibiaDb): void {
       const output = {
         results: rows.map((row) => ({
           title: String(row.title),
+          articleId: Number(row.article_id),
           name: str(row.name),
           releaseDate: str(row.release_date),
           version: str(row.version),

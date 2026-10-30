@@ -13,7 +13,8 @@ const scratch = tempDirs('twmcp-find-items-');
 
 type ItemsOut = {
   results: Array<{
-    title: string; itemClass: string | null; weight: number | null; clientId: number | null;
+    title: string; articleId: number; itemClass: string | null; weight: number | null;
+    clientId: number | null; clientIds: number[];
     valueBuy: number | null; valueBuyCurrency: string | null;
     actualName: string | null; isStackable: boolean | null; isPickupable: boolean | null;
     attributes: Record<string, string | number>;
@@ -360,6 +361,16 @@ test('client_ids keeps exactly the items holding a listed ID', () => onFixture(a
   assert.equal(data.totalMatches, 2);
 }));
 
+// Shallow Water's itemid lists 629-634. clientId stays the first, and any of them finds it.
+test('client_ids finds an item by any of its client IDs', () => onFixture(async (client) => {
+  const data = await find(client, { client_ids: [630] });
+  assert.deepEqual(
+    data.results.map((r) => [r.title, r.clientId, r.clientIds]),
+    [['Shallow Water', 629, [629, 630, 631, 632, 633, 634]]],
+  );
+  assert.equal(data.totalMatches, 1);
+}));
+
 test('client_ids narrows together with another filter', () => onFixture(async (client) => {
   const shields = await find(client, { client_ids: [3031, 3416], item_type: 'Shields' });
   assert.deepEqual(shields.results.map((r) => r.title), ['Dragon Shield']);
@@ -405,11 +416,13 @@ test('an ID two item variants share returns every variant', () => withRealIndex(
   const titles = data.results.map((r) => r.title);
   assert.ok(titles.includes('Giant Shimmering Pearl'), `got ${JSON.stringify(titles)}`);
   assert.ok(titles.includes('Giant Shimmering Pearl (Green)'), `got ${JSON.stringify(titles)}`);
-  for (const r of data.results) assert.equal(r.clientId, 281, r.title);
+  for (const r of data.results) assert.ok(r.clientIds.includes(281), r.title);
   const db = new DatabaseSync(DB_PATH, { readOnly: true });
   try {
     const expected = db.prepare(
-      "select title from item where client_id = 281 and status = 'active' order by title",
+      `select title from item i where status = 'active' and exists
+         (select 1 from item_client_id c where c.item_id = i.article_id and c.client_id = 281)
+       order by title`,
     ).all().map((row) => String(row.title));
     assert.deepEqual([...titles].sort(), [...expected].sort());
   } finally {

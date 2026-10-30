@@ -9,7 +9,7 @@ import { FARE_MEANING, ORIGIN_MEANING } from '../src/domain.ts';
 import { connect, connectTo, FIXTURE, tempDirs, withRealIndex } from './harness.ts';
 
 type Route = {
-  npc: string; city: string | null; subarea: string | null; location: string | null;
+  npc: string; articleId: number; city: string | null; subarea: string | null; location: string | null;
   position: { x: number | null; y: number | null; z: number | null };
   to: string; origin: string | null; price: number | null; notes: string | null;
 };
@@ -124,7 +124,7 @@ test('the fixture\'s Thais routes come back whole, in fare order with the zero f
     assert.equal(assertFareOrder(page.results), 1);
     const last = page.results.at(-1)!;
     assert.deepEqual(last, {
-      npc: 'Captain Bluebear', city: 'Thais', subarea: null,
+      npc: 'Captain Bluebear', articleId: 4857, city: 'Thais', subarea: null,
       location: 'Thais boat at Harbour and Main Street.',
       position: { x: 32310, y: 32210, z: 6 },
       to: 'Targuna', origin: 'Thais', price: 0,
@@ -235,13 +235,13 @@ function expectedRoutes(path: string, filter: { to?: string; from?: string },
   const db = new DatabaseSync(path, { readOnly: true });
   try {
     return db.prepare(
-      `select distinct n.title, n.city, n.subarea, n.location, n.x, n.y, n.z,
+      `select distinct n.title, n.article_id, n.city, n.subarea, n.location, n.x, n.y, n.z,
               d.name, d.origin, d.price, d.notes
          from npc_destination d join npc n on n.article_id = d.npc_id
         where ${where.join(' and ')}
         order by ${fare}n.title, d.name, d.price, d.notes, d.origin`,
     ).all(...params).map((r) => ({
-      npc: String(r.title), city: r.city as string | null, subarea: r.subarea as string | null,
+      npc: String(r.title), articleId: Number(r.article_id), city: r.city as string | null, subarea: r.subarea as string | null,
       location: r.location as string | null,
       position: { x: r.x as number | null, y: r.y as number | null, z: r.z as number | null },
       to: String(r.name), origin: r.origin as string | null, price: r.price as number | null,

@@ -8,7 +8,7 @@ import {
 import { encodeCursor, decodeCursor } from '../cursor.ts';
 
 const outputSchema = z.object({
-  results: z.array(z.object({ title: z.string(), type: z.string() })),
+  results: z.array(z.object({ title: z.string(), type: z.string(), articleId: z.number() })),
   totalMatches: z.number(),
   nextCursor: z.string().optional(),
   indexGeneratedAt: z.string(),
@@ -38,7 +38,7 @@ export function registerSearch(server: McpServer, handle: TibiaDb): void {
       statements.set(
         `${type}:${includeInactive}`,
         db.prepare(
-          `select t.title from "${entityTable(type)}" t
+          `select t.title, t.article_id from "${entityTable(type)}" t
            where (?1 is null or t.title like ?1 collate nocase escape '\\'${inGame})` +
             (status ? ` and ${status}` : ''),
         ),
@@ -95,11 +95,11 @@ export function registerSearch(server: McpServer, handle: TibiaDb): void {
 
       const wanted: readonly EntityType[] = types ? [...new Set(types)] : ENTITY_TYPES;
       const pattern = query === undefined ? null : likePattern(query);
-      const all: Array<{ title: string; type: EntityType }> = [];
+      const all: Array<{ title: string; type: EntityType; articleId: number }> = [];
       for (const type of wanted) {
         const stmt = statements.get(`${type}:${include_inactive}`)!;
         for (const row of stmt.all(pattern)) {
-          all.push({ title: String(row.title), type });
+          all.push({ title: String(row.title), type, articleId: Number(row.article_id) });
         }
       }
       if (query === undefined) {

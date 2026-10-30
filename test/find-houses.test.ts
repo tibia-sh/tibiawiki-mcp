@@ -184,7 +184,7 @@ test('the fixture houses come back whole', async () => {
     assert.deepEqual(page.results.map((x) => x.title), ['The Tibianic', "Warriors' Guildhall"]);
     const warriors = page.results[1]!;
     assert.deepEqual(warriors, {
-      title: "Warriors' Guildhall", city: 'Thais', street: 'Temple Street', rent: 5_000_000,
+      title: "Warriors' Guildhall", articleId: 7356, city: 'Thais', street: 'Temple Street', rent: 5_000_000,
       beds: 11, size: 305, rooms: 16, floors: 3, isGuildhall: true,
     });
     assert.equal(typeof page.indexGeneratedAt, 'string');

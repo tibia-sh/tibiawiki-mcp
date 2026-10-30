@@ -98,25 +98,75 @@ test('an API-level error arrives as HTTP 200 and is never retried', async () => 
   assert.equal(r.count, 1, 'an API error is permanent; retrying it wastes the budget');
 });
 
-test('500 is permanent while 503 is retried', async () => {
-  const hard = recorder([json({}, 500)]);
-  await assert.rejects(() => createWikiApi({ fetcher: hard.fetcher, clock }).pageWikitext(['A']));
-  assert.equal(hard.count, 1, '500 must not be retried');
-
-  const soft = recorder([json({}, 503), json(pages(['A']))]);
-  await createWikiApi({ fetcher: soft.fetcher, clock }).pageWikitext(['A']);
-  assert.equal(soft.count, 2, '503 must be retried');
+test('500 and 503 are both retried', async () => {
+  // 500 was once treated as permanent; a drift run then died on a transient one.
+  for (const status of [500, 503]) {
+    const r = recorder([json({}, status), json(pages(['A']))]);
+    const out = await createWikiApi({ fetcher: r.fetcher, clock }).pageWikitext(['A']);
+    assert.equal(r.count, 2, `${status} must be retried`);
+    assert.deepEqual(out.map((p) => p.title), ['A']);
+  }
 });
 
-test('a persistent transport failure names the URL', async () => {
-  const r = recorder([() => { throw new Error('ECONNRESET'); }]);
+test('a 404 is permanent and fails after one attempt', async () => {
+  const r = recorder([() => new Response('Not Found', { status: 404 })]);
+  await assert.rejects(
+    () => createWikiApi({ fetcher: r.fetcher, clock }).pageWikitext(['A']),
+    (e: Error) => e.message.includes('HTTP 404') && e.message.includes('Not Found'),
+  );
+  assert.equal(r.count, 1, '404 must not be retried');
+});
+
+test('an empty 200 body is retried, then the JSON that follows is used', async () => {
+  const r = recorder([() => new Response('', { status: 200 }), json(pages(['A']))]);
+  const out = await createWikiApi({ fetcher: r.fetcher, clock }).pageWikitext(['A']);
+  assert.equal(r.count, 2);
+  assert.deepEqual(out.map((p) => p.title), ['A']);
+});
+
+test('a non-JSON body on every try fails after the budget with status and excerpt', async () => {
+  const waits: number[] = [];
+  const body = `<!DOCTYPE html><html>${'x'.repeat(300)}TAIL</html>`;
+  const r = recorder([() => new Response(body, { status: 200 })]);
+  const api = createWikiApi({ fetcher: r.fetcher, clock: { sleep: async (ms) => { waits.push(ms); } } });
+  await assert.rejects(
+    () => api.pageWikitext(['A']),
+    (e: Error) =>
+      e.message.includes('HTTP 200') &&
+      e.message.includes(body.slice(0, 200)) &&
+      !e.message.includes(body.slice(0, 201)),
+  );
+  assert.equal(r.count, 5, 'five attempts in all');
+  assert.deepEqual(waits, [5000, 15000, 30000, 60000], 'the backoff between the five attempts');
+});
+
+test('a 500 on every try fails with the last status and body excerpt', async () => {
+  const r = recorder([() => new Response('upstream exploded', { status: 500 })]);
+  await assert.rejects(
+    () => createWikiApi({ fetcher: r.fetcher, clock }).pageWikitext(['A']),
+    (e: Error) => e.message.includes('HTTP 500') && e.message.includes('upstream exploded'),
+  );
+  assert.equal(r.count, 5);
+});
+
+test('a body read that fails is retried like a failed fetch', async () => {
+  const broken = () => new Response(new ReadableStream({ pull(c) { c.error(new Error('body timeout')); } }));
+  const r = recorder([broken, json(pages(['A']))]);
+  const out = await createWikiApi({ fetcher: r.fetcher, clock }).pageWikitext(['A']);
+  assert.equal(r.count, 2);
+  assert.deepEqual(out.map((p) => p.title), ['A']);
+});
+
+test('a persistent transport failure names the URL and keeps the cause', async () => {
+  const reset = new Error('ECONNRESET');
+  const r = recorder([() => { throw reset; }]);
   const api = createWikiApi({ fetcher: r.fetcher, clock });
   // A rejected fetch has no status, so the message carries the URL and cause.
   await assert.rejects(
     () => api.pageWikitext(['A']),
-    (e: Error) => e.message.includes('api.php') && e.message.includes('ECONNRESET'),
+    (e: Error) => e.message.includes('api.php') && e.message.includes('ECONNRESET') && e.cause === reset,
   );
-  assert.ok(r.count > 1, 'transport failures are retried before giving up');
+  assert.equal(r.count, 5, 'transport failures are retried for the whole budget');
 });
 
 test('every request identifies the client and a contact', async () => {

@@ -81,7 +81,9 @@ A generator pull request that waits in the queue behind other entries is fine. I
 
 ### A failed generator run
 
-`alert.yml` comments `generator failure: <run url>` on the issue. Read the run's red step, fix what it names, and start the workflow again by hand on `main` with the version:
+`alert.yml` comments `generator failure: <run url>` on the issue `Automation needs a look`, or opens it assigned to `drptbl`, as it does for a `release` run that does not succeed. When writing the issue fails, most often on a GitHub API error, it tries again after 30, 60, 120 and 240 seconds. Each try lists the open issues again, so an issue opened before its error is found and commented on: never a second issue, at worst a repeated comment, when one went through before its error. The alert run ends red only when all 5 tries fail.
+
+Read the run's red step, fix what it names, and start the workflow again by hand on `main` with the version:
 
 ```bash
 gh workflow run generator.yml --ref main -f version=X.Y.Z+tibiash.N

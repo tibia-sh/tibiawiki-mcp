@@ -110,31 +110,43 @@ export async function connectTo(path: string, provenance?: Provenance) {
  *
  * This is a self-imposed budget, not an MCP limit. A host that loads every schema pays
  * these bytes each session, and a host that defers them pays them per tool it loads: at
- * roughly four characters per token, 16,000 bytes is about 4,000 tokens. Claude Code gives
+ * roughly four characters per token, 20,000 bytes is about 5,000 tokens. Claude Code gives
  * the model a tool's description and input parameters only, checked on 2026-09-25 by
  * loading this server's tools in a Claude Code session, and it defers MCP schemas, loading
  * tool names and server instructions at startup (https://code.claude.com/docs/en/mcp).
  * There, output schemas do not reach the model, so they do not count here. Other hosts
  * were not checked.
  *
- * On the fixture the helper measures 14,778 bytes model-facing, names included.
- * This is the number meant to force the conversation: if you approach it, trim a
- * description before you raise it. The server instructions are no escape hatch, since
- * they have their own 2,048-character cap in test/server.test.ts, and with a real
- * index's provenance they measure 1,967 characters.
+ * The server instructions are no escape hatch, since they have their own 2,048-character
+ * cap in test/server.test.ts, and with the provenance of data 3.5.0 (generator
+ * 9.0.0+tibiash.10) they measure 1,968 characters.
+ *
+ * Budget ruling for the "Correct Data and IDs" plan, measured on the fixture cut from data
+ * 3.5.0 on 2026-10-30: 12 tools with 94 inputs, at about 101 bytes an input. The plan adds
+ * about 23 inputs and two tools, about 3,150 bytes model-facing:
+ *
+ * |              |    Now | Projected                  | With 10% |    Cap |
+ * |--------------|-------:|----------------------------|---------:|-------:|
+ * | Model-facing | 14,778 | about 17,900               |  ~19,700 | 20,000 |
+ * | Total        | 55,031 | about 64-65k, with outputs |  ~71,000 | 80,000 |
+ *
+ * Each task in the plan records its measured change. A task that would cross a cap stops
+ * and asks for a ruling; it never raises a cap on its own. The next plan starts with about
+ * 10% headroom. Near the cap, trim a description before asking to raise it.
  */
-export const MODEL_FACING_BUDGET = 16_000;
+export const MODEL_FACING_BUDGET = 20_000;
 
 /**
  * Ceiling on the whole serialised `tools/list`, in bytes.
  *
  * Output schemas cost Claude Code's model nothing, but some hosts load every schema into
- * context, and every client carries the full answer over the wire. On the fixture the
- * total is 55,031 bytes, 38,804 of them output schemas, most of it `tibia_get`'s
- * fourteen-member union. 64,000 is about 20% above that, which leaves room for output
- * schemas to grow while still catching runaway growth.
+ * context, and every client carries the full answer over the wire. On the fixture cut
+ * from data 3.5.0 the total is 55,031 bytes, 38,804 of them output schemas, most of it
+ * `tibia_get`'s fourteen-member union. The cap comes from the ruling above
+ * MODEL_FACING_BUDGET: the plan's growth, output schemas included, projects to about
+ * 64-65k, about 71k with 10% on top, under 80,000.
  */
-export const TOOLS_LIST_CEILING = 64_000;
+export const TOOLS_LIST_CEILING = 80_000;
 
 /**
  * Sizes a `tools/list` result in UTF-8 bytes. `modelFacing` sums each tool's name,

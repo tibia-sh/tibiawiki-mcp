@@ -760,8 +760,8 @@ export function registerGet(server: McpServer, handle: TibiaDb): void {
     {
       description:
         'Full detail for one Tibia page of any kind, with a creature\'s loot, abilities and ' +
-        'max damage, the NPCs that buy an item and what an NPC buys and sells. Takes an exact ' +
-        'page name or an article_id. Use tibia_search first for an uncertain or in-game name, or ' +
+        'max damage, the NPCs that buy an item and what an NPC buys and sells. Takes exactly one ' +
+        'of an exact page name or an article_id. Use tibia_search first for an uncertain or in-game name, or ' +
         'tibia_find_updates for an update. Pass `type` for a shared name. ' +
         `Creature abilities may carry an \`area\`: ${AREA_LEGEND}`,
       inputSchema: z.object({

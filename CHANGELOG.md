@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.17.3](https://github.com/tibia-sh/tibiawiki-mcp/compare/v0.17.2...v0.17.3) (2026-10-30)
+
+
+### Bug Fixes
+
+* retry bad wiki responses in the indexer ([20c8540](https://github.com/tibia-sh/tibiawiki-mcp/commit/20c85403e23c2c964b63654d7cfe90285c65c84c))
+
 ## [0.17.2](https://github.com/tibia-sh/tibiawiki-mcp/compare/v0.17.1...v0.17.2) (2026-10-30)
 
 

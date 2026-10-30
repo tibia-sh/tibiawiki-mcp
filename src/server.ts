@@ -61,7 +61,8 @@ export const ATTRIBUTION =
  */
 const FIELD_MEANINGS =
   `What result fields mean. runsAt: ${RUNS_AT_MEANING} summonCost: ${SUMMON_COST_MEANING} ` +
-  `convinceCost: ${CONVINCE_COST_MEANING} goldPerKill: ${GOLD_PER_KILL_MEANING} ` +
+  `convinceCost: ${CONVINCE_COST_MEANING} paralysable false: immune. ` +
+  `goldPerKill: ${GOLD_PER_KILL_MEANING} Loot chance is a percent. ` +
   `image: ${IMAGE_MEANING} ${RASHID_PLACE_MEANING} ${FARE_MEANING} origin: ${ORIGIN_MEANING} ` +
   `raceId: ${RACE_ID_MEANING} priceCurrency and valueBuyCurrency: ${PRICE_CURRENCY_MEANING} `;
 
@@ -80,7 +81,7 @@ export function createServer(handle: TibiaDb): McpServer {
         'TibiaWiki knowledge base: a snapshot of the wiki generated ' +
         `${provenance.generatedAt} by tibiawiki-sql ${provenance.version}, not live game state. ` +
         'Damage modifiers are percentages where 100 is neutral and above 100 the creature takes ' +
-        'extra damage from that element. ' +
+        'extra damage from that element; 0: immune. ' +
         FIELD_MEANINGS + ATTRIBUTION,
     },
   );

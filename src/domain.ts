@@ -150,10 +150,11 @@ export const CREATURE_BESTIARY_LEVELS = [
 ] as const;
 
 /**
- * What a model needs to read a result correctly, written once. Each text is the description
- * of its output fields and a sentence of the server instructions: a host gives the model the
- * instructions and the input schemas, not the output schemas, so the instructions are where
- * the model learns it, and sharing the text keeps the two from drifting.
+ * What a model needs to read a result correctly, written once. Each text is a sentence of the
+ * server instructions and the description of its output fields, or how that description
+ * opens (RUNS_AT_DESCRIPTION adds a sentinel): a host gives the model the instructions and
+ * the input schemas, not the output schemas, so the instructions are where the model learns
+ * it, and sharing the text keeps the two from drifting.
  */
 export const RUNS_AT_MEANING = 'Hit points at which it flees. 0: never flees.';
 export const SUMMON_COST_MEANING = 'Mana. 0: cannot be summoned.';
@@ -176,12 +177,32 @@ export const PRICE_CURRENCY_MEANING =
   'Event Points. null when there is no price.';
 
 /**
+ * Units and sentinels for programmatic consumers, each the description of its output fields
+ * only. A host does not give the model output schemas, so none of these reaches it, and a
+ * meaning a model needs goes in the server instructions instead.
+ */
+export const RUNS_AT_DESCRIPTION = `${RUNS_AT_MEANING} null: unknown.`;
+export const LOOT_CHANCE_DESCRIPTION = 'Drop chance in percent.';
+export const LOOT_MIN_DESCRIPTION = 'Least amount dropped. 0: no range start.';
+export const VALUE_BUY_DESCRIPTION =
+  'Price an NPC sells it for, in valueBuyCurrency. 0: no NPC sells it.';
+export const VALUE_SELL_DESCRIPTION = 'Price an NPC pays for it. 0: no NPC buys it.';
+
+/**
  * Creature numbers the wiki gives a meaning at 0, described once for every tool that
  * reports them. The value is reported as the wiki records it.
  */
-export const runsAtSchema = z.number().nullable().describe(RUNS_AT_MEANING);
+export const runsAtSchema = z.number().nullable().describe(RUNS_AT_DESCRIPTION);
 export const summonCostSchema = z.number().nullable().describe(SUMMON_COST_MEANING);
 export const convinceCostSchema = z.number().nullable().describe(CONVINCE_COST_MEANING);
+
+/** A loot drop's chance and least amount, described once for every tool that reports them. */
+export const lootChanceSchema = z.number().nullable().describe(LOOT_CHANCE_DESCRIPTION);
+export const lootMinSchema = z.number().nullable().describe(LOOT_MIN_DESCRIPTION);
+
+/** An item's NPC prices, described once for every tool that reports them. */
+export const valueBuySchema = z.number().nullable().describe(VALUE_BUY_DESCRIPTION);
+export const valueSellSchema = z.number().nullable().describe(VALUE_SELL_DESCRIPTION);
 
 /** A travel route's recorded fare, described once for every tool that reports it. */
 export const fareSchema = z.number().nullable().describe(FARE_MEANING);
@@ -720,7 +741,8 @@ export const DETAILED_ITEM_FIELDS = ['flavor_text'] as const;
 
 /**
  * Item stats live in `item_attribute` as TEXT, and the "numeric" ones are not always
- * integers: three active items carry a bonus suffix, e.g. Moonsilver Axe has
+ * integers: in data 3.5.0 two active items give their range as "?" (Throwing Cake), and
+ * through data 3.4.0 three carried a bonus suffix, e.g. Moonsilver Axe's
  * `defense = "33 +3"`. `Number()` turns those into NaN, which the tools' outputSchema
  * rejects, failing the whole call. So coercion is best-effort: a clean integer becomes
  * a number, anything else is returned verbatim, which is also more informative.

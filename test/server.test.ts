@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 import {
   CONVINCE_COST_MEANING, FARE_MEANING, GOLD_PER_KILL_MEANING, IMAGE_MEANING, ORIGIN_MEANING,
   PRICE_CURRENCY_MEANING, RACE_ID_MEANING, RASHID_PLACE_MEANING, RUNS_AT_MEANING, SUMMON_COST_MEANING,
+  LOOT_CHANCE_DESCRIPTION, LOOT_MIN_DESCRIPTION, RUNS_AT_DESCRIPTION, VALUE_BUY_DESCRIPTION,
+  VALUE_SELL_DESCRIPTION,
   inGameNameSchema, inGamePluralSchema, inGameArticleSchema,
 } from '../src/domain.ts';
 import { CAPABILITIES } from '../src/server.ts';
@@ -18,10 +20,12 @@ const LICENCE = 'licensed CC BY-SA.';
 /**
  * The `initialize` instructions and `tools/list` of a server on the fixture that reports
  * the provenance of a real index, since the instructions carry it and its length counts.
+ * The generator version is the longest a release is expected to carry, so the cap holds
+ * for every one of them.
  */
 async function realisticHandshake() {
   const h = await connectTo(FIXTURE, {
-    generatedAt: '2026-10-30T22:19:23.340627+00:00', version: '9.0.0+tibiash.10',
+    generatedAt: '2026-10-30T22:19:23.340627+00:00', version: '9.0.0+tibiash.99',
   });
   try {
     return { instructions: String(h.client.getInstructions()), tools: (await h.client.listTools()).tools };
@@ -71,6 +75,13 @@ test('the instructions keep the snapshot, modifier and spell-area caveats', asyn
   assert.match(instructions, /creature area glyphs do not apply/);
 });
 
+test('the instructions say what an immunity and a loot chance read as', async () => {
+  const { instructions } = await realisticHandshake();
+  assert.match(instructions, /extra damage from that element; 0: immune\./);
+  assert.match(instructions, /paralysable false: immune\./);
+  assert.match(instructions, /Loot chance is a percent\./);
+});
+
 // A host gives the model the instructions and the input schemas, not the output schemas,
 // so a meaning a model needs to read a result has to reach it through the instructions.
 test('the instructions tell a model what the zeros and nulls in results mean', async () => {
@@ -116,11 +127,9 @@ test('each meaning in the instructions is the description of its output fields',
   const route = output('tibia_find_travel').properties.results.items.properties;
   const item = output('tibia_find_items').properties.results.items.properties;
   for (const [where, description, meaning] of [
-    ['tibia_find_creatures runsAt', creature.runsAt.description, RUNS_AT_MEANING],
     ['tibia_find_creatures summonCost', creature.summonCost.description, SUMMON_COST_MEANING],
     ['tibia_find_creatures convinceCost', creature.convinceCost.description, CONVINCE_COST_MEANING],
     ['tibia_find_creatures goldPerKill', creature.goldPerKill.description, GOLD_PER_KILL_MEANING],
-    ['tibia_get runsAt', branch('creature').runsAt.description, RUNS_AT_MEANING],
     ['tibia_get summonCost', branch('creature').summonCost.description, SUMMON_COST_MEANING],
     ['tibia_get convinceCost', branch('creature').convinceCost.description, CONVINCE_COST_MEANING],
     ['tibia_get goldPerKill', branch('creature').goldPerKill.description, GOLD_PER_KILL_MEANING],
@@ -144,6 +153,38 @@ test('each meaning in the instructions is the description of its output fields',
   ] as const) {
     assert.equal(description, meaning, where);
   }
+});
+
+// Units and sentinels for programmatic consumers. They live in the output schemas only, so
+// none of them is claimed to reach a model.
+test('each unit and sentinel is the description of its output fields', async () => {
+  const { tools } = await realisticHandshake();
+  const output = (name: string): any => tools.find((t) => t.name === name)!.outputSchema;
+  const branch = (type: string): any => output('tibia_get').oneOf
+    .find((b: any) => b.properties.type.const === type).properties;
+  const creature = output('tibia_find_creatures').properties.results.items.properties;
+  const loot = branch('creature').loot.items.properties;
+  const droppedBy = output('tibia_how_to_obtain').properties.droppedBy.items.properties;
+  const item = output('tibia_find_items').properties.results.items.properties;
+  assert.ok(RUNS_AT_DESCRIPTION.startsWith(`${RUNS_AT_MEANING} `), 'runsAt keeps its meaning');
+  for (const [where, description, expected] of [
+    ['tibia_find_creatures runsAt', creature.runsAt.description, RUNS_AT_DESCRIPTION],
+    ['tibia_get runsAt', branch('creature').runsAt.description, RUNS_AT_DESCRIPTION],
+    ['tibia_get loot chance', loot.chance.description, LOOT_CHANCE_DESCRIPTION],
+    ['tibia_get loot min', loot.min.description, LOOT_MIN_DESCRIPTION],
+    ['tibia_how_to_obtain chance', droppedBy.chance.description, LOOT_CHANCE_DESCRIPTION],
+    ['tibia_how_to_obtain min', droppedBy.min.description, LOOT_MIN_DESCRIPTION],
+    ['tibia_get valueBuy', branch('item').valueBuy.description, VALUE_BUY_DESCRIPTION],
+    ['tibia_find_items valueBuy', item.valueBuy.description, VALUE_BUY_DESCRIPTION],
+    ['tibia_get valueSell', branch('item').valueSell.description, VALUE_SELL_DESCRIPTION],
+  ] as const) {
+    assert.equal(description, expected, where);
+  }
+  assert.match(RUNS_AT_DESCRIPTION, /null: unknown/);
+  assert.match(LOOT_CHANCE_DESCRIPTION, /percent/);
+  assert.match(LOOT_MIN_DESCRIPTION, /0: no range start/);
+  assert.match(VALUE_BUY_DESCRIPTION, /0: no NPC sells it/);
+  assert.match(VALUE_SELL_DESCRIPTION, /0: no NPC buys it/);
 });
 
 test('each in-game name field has one description in every tool', async () => {

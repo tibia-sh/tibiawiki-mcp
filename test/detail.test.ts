@@ -49,6 +49,20 @@ test('a creature carries how it behaves', async () => {
   await h.close();
 });
 
+// The instructions tell a model that a 0 modifier and paralysable false are immunities,
+// and a null leaves a value unknown. Mimic's wiki page gives no armor, speed or paralysis.
+test('a creature reports an immunity as 0 or false and an unknown value as null', async () => {
+  const h = await connect();
+  const dragon = await get(h, 'Dragon');
+  assert.equal(dragon.paralysable, false);
+  assert.equal(dragon.modifiers.fire, 0);
+  const mimic = await get(h, 'Mimic');
+  assert.equal(mimic.armor, null);
+  assert.equal(mimic.speed, null);
+  assert.equal(mimic.paralysable, null);
+  await h.close();
+});
+
 // (creature_id, name) is NOT unique - The Plasmother has three rows all named
 // 'Poison Ball'. A join keyed on name alone would collapse them.
 test('duplicate ability names are all returned, not collapsed', async () => {

@@ -405,7 +405,8 @@ test('both tools describe what 0 means in the same words, and name unrecorded le
       assert.equal(row[field].description, schema.description, `tibia_find_creatures ${field}`);
       assert.ok(get.includes(JSON.stringify(schema.description)), `tibia_get ${field}`);
     }
-    assert.equal(runsAtSchema.description, 'Hit points at which it flees. 0: never flees.');
+    assert.equal(runsAtSchema.description,
+      'Hit points at which it flees. 0: never flees. null: unknown.');
     assert.match(goldPerKillSchema.description!, /NPC prices/);
     assert.match(goldPerKillSchema.description!, /without a recorded chance/);
     assert.match(goldPerKillSchema.description!, /market/);

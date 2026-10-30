@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/server';
 import { str, num, type TibiaDb } from '../db.ts';
-import { resolveItemName, statusClause } from '../domain.ts';
+import { lootChanceSchema, lootMinSchema, resolveItemName, statusClause } from '../domain.ts';
 import { sourceBlock } from './get.ts';
 
 const outputSchema = z.object({
@@ -9,8 +9,8 @@ const outputSchema = z.object({
   status: z.string().nullable(),
   droppedBy: z.array(z.object({
     creature: z.string(),
-    chance: z.number().nullable(),
-    min: z.number().nullable(),
+    chance: lootChanceSchema,
+    min: lootMinSchema,
     max: z.number().nullable(),
   })),
   soldByNpcs: z.array(z.object({

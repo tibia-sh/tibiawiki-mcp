@@ -1,13 +1,33 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { copyFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 import { DB_PATH } from '@tibia.sh/tibiawiki-data';
-import { connect } from './harness.ts';
+import { connect, connectTo, FIXTURE, tempDirs } from './harness.ts';
 import { coerceAttribute } from '../src/domain.ts';
 
+const scratch = tempDirs('twmcp-regression-');
+
 // Regression: item_attribute is TEXT and the "numeric" attributes are not always
-// integers. Three active items carry a bonus suffix (Moonsilver Axe defense "33 +3").
-// Number() made those NaN, which the SDK-enforced outputSchema rejects, turning a
-// legitimate lookup - and an entire page of find_items - into an error.
+// integers. Through data 3.4.0 three active items carried a bonus suffix (Moonsilver Axe
+// defense "33 +3"). Number() made those NaN, which the SDK-enforced outputSchema rejects,
+// turning a legitimate lookup - and an entire page of find_items - into an error.
+// From data 3.5.0 the wiki records that bonus as defense 33 and defense_modifier "+3",
+// so the tests below put the suffixed value back on a copy of the fixture: the wiki can
+// write it again, and the tools must still survive it.
+function suffixedDefenseFixture(): string {
+  const path = join(scratch(), 'index.db');
+  copyFileSync(FIXTURE, path);
+  const db = new DatabaseSync(path);
+  const { changes } = db.prepare(
+    `update item_attribute set value = '33 +3' where name = 'defense'
+       and item_id = (select article_id from item where title = 'Moonsilver Axe')`,
+  ).run();
+  db.close();
+  assert.equal(changes, 1, 'guard: the fixture holds Moonsilver Axe with one defense row');
+  return path;
+}
 test('coerceAttribute keeps a non-integer stat as its raw string', () => {
   assert.equal(coerceAttribute('defense', '40'), 40);
   assert.equal(coerceAttribute('defense', '33 +3'), '33 +3');
@@ -23,7 +43,7 @@ test('coerceAttribute reads a signed resistance or skill bonus as a number', () 
 });
 
 test('tibia_get survives an item whose defense has a bonus suffix', async () => {
-  const h = await connect();
+  const h = await connectTo(suffixedDefenseFixture());
   const res = await h.client.callTool({
     name: 'tibia_get', arguments: { name: 'Moonsilver Axe' },
   });
@@ -33,7 +53,7 @@ test('tibia_get survives an item whose defense has a bonus suffix', async () => 
 });
 
 test('tibia_find_items returns a page containing a suffixed stat', async () => {
-  const h = await connect();
+  const h = await connectTo(suffixedDefenseFixture());
   const res = await h.client.callTool({
     name: 'tibia_find_items', arguments: { weapon_type: 'Axe', limit: 100 },
   });
@@ -45,7 +65,7 @@ test('tibia_find_items returns a page containing a suffixed stat', async () => {
 
 test('SQL filtering still matches a suffixed stat numerically', async () => {
   // SQLite casts '33 +3' to 33, so the filter stays consistent with the raw display.
-  const h = await connect();
+  const h = await connectTo(suffixedDefenseFixture());
   const res = await h.client.callTool({
     name: 'tibia_find_items', arguments: { defense_min: 33, weapon_type: 'Axe', limit: 100 },
   });

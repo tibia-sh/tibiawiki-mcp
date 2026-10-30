@@ -33,7 +33,8 @@ test('a creature carries how it behaves', async () => {
   const dragon = await get(h, 'Dragon');
   assert.equal(dragon.runsAt, 300);
   assert.equal(dragon.seesInvisible, true);
-  assert.equal(dragon.paralysable, true);
+  // paraimmune: Dragon cannot be paralysed.
+  assert.equal(dragon.paralysable, false);
   assert.equal(dragon.pushable, false);
   assert.equal(dragon.pushObjects, true);
   assert.equal(dragon.illusionable, true);

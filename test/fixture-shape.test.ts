@@ -59,6 +59,7 @@ const REQUIRED_NON_EMPTY = [
   'item_key', 'item_sound', 'item_store_offer', 'item_proficiency_perk',
   'npc_job', 'npc_race', 'npc_destination', 'npc_location', 'quest_danger',
   'mcp_area_pattern', 'mcp_ability_area', 'mcp_schema_version', 'mcp_image', 'mcp_spell_area',
+  'item_client_id', 'creature_location_coordinate', 'item_location_coordinate',
 ] as const;
 
 test('every table the tools read has at least one fixture row', () => {
@@ -115,6 +116,13 @@ const ANCHOR_CHILDREN: ReadonlyArray<readonly [string, string, string]> = [
    `select count(*) c from imbuement_material m join imbuement b on b.article_id = m.imbuement_id where b.title = ?`],
   ['Assassin Outfits quests', 'Assassin Outfits',
    `select count(*) c from outfit_quest q join outfit o on o.article_id = q.outfit_id where o.title = ?`],
+  ['War Golem coordinates', 'War Golem',
+   `select count(*) c from creature_location_coordinate l join creature c on c.article_id = l.creature_id
+      where c.title = ?`],
+  ['Lump of Dough coordinates', 'Lump of Dough',
+   `select count(*) c from item_location_coordinate l join item i on i.article_id = l.item_id where i.title = ?`],
+  ['Shallow Water client IDs', 'Shallow Water',
+   `select count(*) c from item_client_id k join item i on i.article_id = k.item_id where i.title = ?`],
 ];
 
 test('each named anchor actually carries its own child rows', () => {
@@ -164,4 +172,60 @@ test('the fixture carries the named anchors the detail tests depend on', () => {
     `select count(*) c from creature_ability a join creature c on c.article_id = a.creature_id
      where c.title = ?`, 'Dragon'), 4);
   db.close();
+});
+
+/**
+ * Anchors for data 3.5.0 (generator 9.0.0+tibiash.10), where an unknown value became
+ * NULL and an explicit one stayed as written. Each names the row a later tool test reads.
+ */
+type CreatureRow = Record<string, number | string | null>;
+const creatureRow = (db: DatabaseSync, title: string, columns: string): CreatureRow | undefined =>
+  db.prepare(`select ${columns} from creature where title = ?`).get(title) as CreatureRow | undefined;
+
+test('Dragon keeps its explicit values: paraimmune, fire-immune, not summonable', () => {
+  const db = new DatabaseSync(FIXTURE, { readOnly: true });
+  const dragon = creatureRow(db, 'Dragon', 'paralysable, modifier_fire, summon_cost');
+  db.close();
+  // paralysable 0 is an explicit "cannot be paralysed", not an unknown read as false.
+  assert.deepEqual({ ...dragon }, { paralysable: 0, modifier_fire: 0, summon_cost: 0 });
+});
+
+test('Mimic carries its unknown armor as NULL', () => {
+  const db = new DatabaseSync(FIXTURE, { readOnly: true });
+  const mimic = creatureRow(db, 'Mimic', 'armor');
+  db.close();
+  assert.ok(mimic, 'guard: Mimic is in the fixture');
+  assert.equal(mimic.armor, null);
+});
+
+test('War Golem carries the haste, debuff and outfit ability kinds', () => {
+  const db = new DatabaseSync(FIXTURE, { readOnly: true });
+  const kinds = db.prepare(
+    `select distinct a.element from creature_ability a join creature c on c.article_id = a.creature_id
+      where c.title = 'War Golem' and a.element in ('haste', 'debuff', 'outfit') order by a.element`,
+  ).all().map((r) => r.element);
+  db.close();
+  assert.deepEqual(kinds, ['debuff', 'haste', 'outfit']);
+});
+
+test('Shallow Water carries every client ID in order', () => {
+  const db = new DatabaseSync(FIXTURE, { readOnly: true });
+  const rows = db.prepare(
+    `select k.client_id, k.position from item_client_id k join item i on i.article_id = k.item_id
+      where i.title = 'Shallow Water' order by k.position`,
+  ).all().map((r) => [r.client_id, r.position]);
+  db.close();
+  // More than one ID, so a lookup by a later client ID has something to find.
+  assert.deepEqual(rows, [[629, 0], [630, 1], [631, 2], [632, 3], [633, 4], [634, 5]]);
+});
+
+test('Lump of Dough has a trade value note and a location', () => {
+  const db = new DatabaseSync(FIXTURE, { readOnly: true });
+  const item = db.prepare(
+    `select trade_value_note, location from item where title = 'Lump of Dough'`,
+  ).get() as { trade_value_note: string | null; location: string | null } | undefined;
+  db.close();
+  assert.ok(item, 'guard: Lump of Dough is in the fixture');
+  assert.equal(item.trade_value_note, 'Negotiable');
+  assert.notEqual(item.location, null);
 });

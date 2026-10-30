@@ -21,7 +21,7 @@ const LICENCE = 'licensed CC BY-SA.';
  */
 async function realisticHandshake() {
   const h = await connectTo(FIXTURE, {
-    generatedAt: '2026-09-27T23:06:43.009245+00:00', version: '9.0.0+tibiash.6',
+    generatedAt: '2026-10-30T22:19:23.340627+00:00', version: '9.0.0+tibiash.10',
   });
   try {
     return { instructions: String(h.client.getInstructions()), tools: (await h.client.listTools()).tools };
@@ -224,7 +224,7 @@ test('Dragon loot is ordered by chance ascending with nulls last', async () => {
   }
   const known = loot.find((d: any) => d.item === 'Dragonbone Staff');
   assert.ok(known, 'Dragonbone Staff should be in Dragon loot');
-  assert.ok(Math.abs((known as any).chance - 0.0557) < 0.001, 'known drop chance');
+  assert.ok(Math.abs((known as any).chance - 0.0535) < 0.001, 'known drop chance');
   await h.close();
 });
 

@@ -8,7 +8,13 @@ committed so tests are deterministic and never touch the network.
 It is not a random sample. Each retained row exists to make a specific test meaningful:
 
 - **Dragon** (`modifier_fire` 0) — the fire-immune case that must be *excluded* from a
-  fire-weakness search. Guards against inverting the comparison.
+  fire-weakness search. Guards against inverting the comparison. It is also the
+  explicit-value anchor: `paralysable` 0 (paraimmune) and `summon_cost` 0 are written
+  values, not unknowns.
+- **Mimic** — `armor`, `speed` and `paralysable` are unknown, stored as NULL since data
+  3.5.0, so an unknown value cannot read as 0 or false.
+- **War Golem** — the only creature with all three of the `haste`, `debuff` and
+  `outfit` ability kinds, and 7 `creature_location_coordinate` rows.
 - **Tarantula** (115) and **Scarab** (118) — genuinely fire-weak, so the headline query
   returns a non-empty set. Without them the test would pass vacuously on an empty array.
 - **Steel Helmet** and its 22 droppers — the vendor case (580 gold on the sell side,
@@ -16,6 +22,13 @@ It is not a random sample. Each retained row exists to make a specific test mean
   the null-chance drop rows that make nulls-last ordering testable.
 - **Magic Longsword** — genuinely unobtainable, so "no source" returns empty lists and
   a note rather than an error.
+- **Shallow Water** — 6 `item_client_id` rows (629 to 634), so an item has client IDs
+  past its first.
+- **Lump of Dough** — a `trade_value_note`, a `location` and an
+  `item_location_coordinate` row.
+- **Moonsilver Axe** — carried `defense` `"33 +3"` through data 3.4.0. From 3.5.0 it
+  reads `defense` 33 and `defense_modifier` `+3`, so `test/regression.test.ts` writes
+  the suffixed value back on a copy of the fixture.
 - **Mud** — the only cross-type title collision in the entire corpus, and therefore the
   only way to exercise the ambiguous-name branch.
 - **Gold Coin** — the currency join target for vendor prices.
@@ -51,6 +64,11 @@ sweep *deletes* an offending row rather than repairing it, so a named row whose
 target were missing would simply vanish. A misspelled name now throws rather than
 yielding an empty table.
 
+`item_client_id`, `creature_location_coordinate` and `item_location_coordinate` keep
+exactly the rows of the retained items and creatures. Their keys are nullable and
+`foreign_key_check` skips a NULL key, so the script prunes them explicitly rather than
+through the orphan sweep.
+
 Tables no tool queries are emptied but kept, so the schema stays identical to a real
 index. That is what keeps the file near 1.3 MB, inside the 1.5 MB budget
 `test/fixture-shape.test.ts` enforces.
@@ -77,8 +95,8 @@ whose key is single-quoted upstream and whose grid uses cell value 4.
 
 ## Reproducing it
 
-The committed fixture was cut from the index `@tibia.sh/tibiawiki-data` 3.4.0 ships,
-whose `database_info` `version` is `9.0.0+tibiash.6`. With that version installed:
+The committed fixture was cut from the index `@tibia.sh/tibiawiki-data` 3.5.0 ships,
+whose `database_info` `version` is `9.0.0+tibiash.10`. With that version installed:
 
 ```bash
 node scripts/make-fixture.mjs node_modules/@tibia.sh/tibiawiki-data/index.db \

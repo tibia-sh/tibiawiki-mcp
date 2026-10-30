@@ -20,22 +20,31 @@ const list = (xs) => (xs.length ? xs.join(',') : '-1');
 // Named creatures: fire-immune (Dragon 0), neutral (Rotworm 100) and fire-weak
 // (Tarantula 115, Scarab 118) so weakness tests have both sides, plus one
 // non-active row so the status filter has something to exclude.
-// The Rootkraken has hitpoints 0 alongside 700,000 experience: the wiki does not
-// record its health, and 0 must not read as a real value. Without it in the fixture
-// the unrecorded-hitpoints tests pass vacuously.
+// Dragon is also the explicit-value anchor: paraimmune makes paralysable 0, and its
+// fire modifier and summon cost are a written 0, not an unknown.
+// The Rootkraken has unrecorded hitpoints (NULL) alongside 700,000 experience: the wiki
+// does not record its health, and it must not read as a real value. Without it in the
+// fixture the unrecorded-hitpoints tests pass vacuously.
 const NAMED_CREATURES = [
   'Dragon', 'Dragon Lord', 'Rotworm', 'Demon', 'Cyclops', 'Tarantula', 'Scarab',
   'The Rootkraken',
   // Three rows all named 'Poison Ball': (creature_id, name) is not unique, so this
   // is the anchor proving detail joins keep all three rather than collapsing them.
   'The Plasmother',
+  // Mimic: armor, speed and paralysable are unknown (NULL), so unknown values cannot
+  // read as 0 or false. It drops nothing, so it adds no items.
+  'Mimic',
+  // War Golem is the only creature with all three of the haste, debuff and outfit
+  // ability kinds, and it carries 7 creature_location_coordinate rows.
+  'War Golem',
 ];
 // Magic Longsword: the zero-source case. Steel Helmet: the vendor case, and its
 // droppers carry the only null-chance rows. Gold Coin: the currency join target.
 // Mud: the corpus's only cross-type title collision, for the ambiguous-name branch.
-// Moonsilver Axe carries defense "33 +3": the five "numeric" attributes are not
-// always integers, and Number() on that yields NaN, which the tools' outputSchema
-// rejects. Arrow (Weak) is status 'ts-only', so how_to_obtain has a non-active
+// Moonsilver Axe carried defense "33 +3" through data 3.4.0: the five "numeric"
+// attributes are not always integers, and Number() on that yields NaN, which the tools'
+// outputSchema rejects. From 3.5.0 it reads defense 33 and defense_modifier "+3", so
+// test/regression.test.ts writes the suffixed value back on a copy of this row. Arrow (Weak) is status 'ts-only', so how_to_obtain has a non-active
 // subject with active vendors to warn about. Both are regression anchors.
 const NAMED_ITEMS = [
   'Magic Longsword', 'Steel Helmet', 'Gold Coin', 'Mud',
@@ -46,6 +55,9 @@ const NAMED_ITEMS = [
   // value_buy_currency anchors: 25 Years Backpack costs 7197 Theons and Blade of Mayhem
   // 50 Gold Tokens, so the value sort has buy prices in currencies other than gold.
   '25 Years Backpack', 'Blade of Mayhem',
+  // Shallow Water has 6 item_client_id rows, so an item has client IDs past its first.
+  // Lump of Dough has a trade_value_note, a location and an item_location_coordinate row.
+  'Shallow Water', 'Lump of Dough',
 ];
 
 // One named row per new entity type, each chosen because it actually HAS the child
@@ -172,6 +184,14 @@ db.exec(`delete from quest_reward where item_id not in (${list(keepItem)})`);
 db.exec(`delete from quest where article_id not in (select quest_id from quest_reward)
          and article_id not in (${list(namedQuestIds)})`);
 db.exec(`delete from item_attribute where item_id not in (${list(keepItem)})`);
+// The client ID and coordinate tables keep exactly the rows of the retained items and
+// creatures. Their keys are nullable, and foreign_key_check skips a NULL key, so the
+// orphan sweep alone would not prune them.
+for (const t of ['item_client_id', 'item_location_coordinate']) {
+  db.exec(`delete from ${t} where item_id is null or item_id not in (${list(keepItem)})`);
+}
+db.exec(`delete from creature_location_coordinate
+         where creature_id is null or creature_id not in (${list(keepCreature)})`);
 
 // Empty every table no tool in this plan queries. The tables themselves are kept so
 // the schema stays identical to a real index; only their rows go. Without this the
@@ -185,6 +205,8 @@ const USED = new Set([
   'item_key', 'item_sound', 'item_store_offer', 'item_proficiency_perk',
   'npc_job', 'npc_race', 'npc_destination', 'npc_location', 'quest_danger',
   'imbuement_material', 'outfit_quest',
+  // Pruned explicitly above, to the retained items and creatures.
+  'item_client_id', 'item_location_coordinate', 'creature_location_coordinate',
 ]);
 // rashid_position has no article_id (day, city, location, x, y, z) and is only 7 rows.
 // The area tables are written by the enrichment pass, not the generator:

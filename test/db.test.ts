@@ -289,6 +289,39 @@ test('openDb rejects an index whose item has no value_buy_currency', () => {
   });
 });
 
+/**
+ * Data 3.5.0 (generator 9.0.0+tibiash.10) added these, and the floor requires each, so an
+ * index without one fails at startup by name instead of serving nulls for it.
+ */
+for (const [table, column] of [
+  ['creature', 'attack_type'], ['creature', 'uses_spells'], ['creature', 'loot_statistics_kills'],
+  ['item', 'slot'], ['item', 'is_usable'], ['item', 'location'], ['item', 'trade_value_note'],
+  ['spell', 'spell_id'], ['creature_drop', 'rarity'],
+  ['creature_ability', 'condition'], ['creature_ability', 'condition_value'],
+] as const) {
+  test(`openDb rejects an index whose ${table} has no ${column}`, () => {
+    const bad = fixtureCopyWith(`alter table ${table} drop column "${column}"`);
+    assert.throws(() => openDb(bad), (e: unknown) => {
+      assert.ok(e instanceof SchemaError, `expected SchemaError, got ${String(e)}`);
+      // Anchored at both ends of the column list, so this must be the only column named.
+      assert.equal((e as Error).message.split('. ')[0],
+        `Index table "${table}" is missing required column(s): ${column}`);
+      return true;
+    });
+  });
+}
+
+for (const table of ['item_client_id', 'item_location_coordinate', 'creature_location_coordinate']) {
+  test(`openDb rejects an index that has no ${table} table`, () => {
+    const bad = fixtureCopyWith(`drop table ${table}`);
+    assert.throws(() => openDb(bad), (e: unknown) => {
+      assert.ok(e instanceof SchemaError, `expected SchemaError, got ${String(e)}`);
+      assert.equal((e as Error).message.split('. ')[0], `Index is missing required table "${table}"`);
+      return true;
+    });
+  });
+}
+
 test('openDb rejects an index that has no npc_location table', () => {
   const bad = fixtureCopyWith('drop table npc_location');
   assert.throws(() => openDb(bad), (e: unknown) => {

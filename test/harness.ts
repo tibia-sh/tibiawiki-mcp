@@ -1,7 +1,9 @@
 import { after } from 'node:test';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import assert from 'node:assert/strict';
+import { copyFileSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 import { DB_PATH } from '@tibia.sh/tibiawiki-data';
 import { InMemoryTransport } from '@modelcontextprotocol/server';
 import { Client, type Tool } from '@modelcontextprotocol/client';
@@ -36,6 +38,27 @@ export function tempDirs(prefix: string): () => string {
     created.push(dir);
     return dir;
   };
+}
+
+/**
+ * A copy of the fixture, in `dir`, whose Moonsilver Axe has defense "33 +3" again.
+ *
+ * The "numeric" item attributes are not always integers. Through data 3.4.0 three active
+ * items carried a bonus suffix, Moonsilver Axe's defense "33 +3" among them. From 3.5.0
+ * the wiki records that bonus as defense 33 and defense_modifier "+3", so no index holds
+ * a suffixed value now. The wiki can write one again, and the tools must still read it.
+ */
+export function suffixedDefenseFixture(dir: string): string {
+  const path = join(dir, 'index.db');
+  copyFileSync(FIXTURE, path);
+  const db = new DatabaseSync(path);
+  const { changes } = db.prepare(
+    `update item_attribute set value = '33 +3' where name = 'defense'
+       and item_id = (select article_id from item where title = 'Moonsilver Axe')`,
+  ).run();
+  db.close();
+  assert.equal(changes, 1, 'guard: the fixture holds Moonsilver Axe with one defense row');
+  return path;
 }
 
 /**

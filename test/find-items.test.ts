@@ -5,7 +5,9 @@ import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import type { Client } from '@modelcontextprotocol/client';
 import { DB_PATH } from '@tibia.sh/tibiawiki-data';
-import { connect, connectTo, FIXTURE, tempDirs, withRealIndex } from './harness.ts';
+import {
+  connect, connectTo, FIXTURE, suffixedDefenseFixture, tempDirs, withRealIndex,
+} from './harness.ts';
 
 const scratch = tempDirs('twmcp-find-items-');
 
@@ -305,11 +307,18 @@ test('sort armor is descending, nulls last, ties by title', () => withRealIndex(
   assertStatOrder(items, 'armor');
 }));
 
-test('sort defense ranks a suffixed value by its leading integer', () => withRealIndex(async (client) => {
-  const items = await findAll(client, { weapon_type: 'Axe', sort: 'defense' });
-  assert.equal(byTitle(items, 'Moonsilver Axe')?.attributes.defense, '33 +3');
-  assertStatOrder(items, 'defense');
-}));
+test('sort defense ranks a suffixed value by its leading integer', async () => {
+  // The fixture's axes put Amber Greataxe (34) above "33 +3" and Fire Axe (16) below it,
+  // and a text sort would put Golden Sickle (6) first.
+  const h = await connectTo(suffixedDefenseFixture(scratch()));
+  try {
+    const items = await findAll(h.client, { weapon_type: 'Axe', sort: 'defense' });
+    assert.equal(byTitle(items, 'Moonsilver Axe')?.attributes.defense, '33 +3');
+    assertStatOrder(items, 'defense');
+  } finally {
+    await h.close();
+  }
+});
 
 test('an item with two rows for a stat sorts by the larger', async () => {
   // No item has two armor rows today, but the filters accept any row, so the sort

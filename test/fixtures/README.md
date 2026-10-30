@@ -27,8 +27,8 @@ It is not a random sample. Each retained row exists to make a specific test mean
 - **Lump of Dough** — a `trade_value_note`, a `location` and an
   `item_location_coordinate` row.
 - **Moonsilver Axe** — carried `defense` `"33 +3"` through data 3.4.0. From 3.5.0 it
-  reads `defense` 33 and `defense_modifier` `+3`, so `test/regression.test.ts` writes
-  the suffixed value back on a copy of the fixture.
+  reads `defense` 33 and `defense_modifier` `+3`, so `suffixedDefenseFixture` in
+  `test/harness.ts` writes the suffixed value back on a copy of the fixture.
 - **Mud** — the only cross-type title collision in the entire corpus, and therefore the
   only way to exercise the ambiguous-name branch.
 - **Gold Coin** — the currency join target for vendor prices.

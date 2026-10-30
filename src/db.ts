@@ -31,7 +31,7 @@ export const MCP_SCHEMA_VERSION = 3;
  * `^MIN_DATA_VERSION`, so npm never pairs this server with an older index in the same
  * major, which would fail the probe below at startup.
  */
-export const MIN_DATA_VERSION = '3.4.0';
+export const MIN_DATA_VERSION = '3.5.0';
 
 /**
  * The shape the tools require. Probed once at startup so a generator-version drift
@@ -44,14 +44,20 @@ export const REQUIRED_COLUMNS: Readonly<Record<string, readonly string[]>> = {
     'mitigation', 'walks_through', 'walks_around', 'status', 'runs_at', 'sees_invisible',
     'paralysable', 'pushable', 'push_objects', 'illusionable', 'summon_cost', 'convince_cost',
     'bestiary_level', 'plural', 'article', 'race_id',
+    'attack_type', 'uses_spells', 'loot_statistics_kills',
     ...ELEMENTS.map((e) => `modifier_${e}`),
   ],
   item: [
     'article_id', 'title', 'item_class', 'item_type', 'type_secondary', 'weight',
     'value_buy', 'value_buy_currency', 'value_sell', 'is_marketable', 'flavor_text', 'status',
     'client_id', 'actual_name', 'plural', 'is_stackable', 'is_pickupable', 'is_immobile',
+    'slot', 'is_usable', 'location', 'trade_value_note',
   ],
   item_attribute: ['item_id', 'name', 'value'],
+  // Every client ID an item has, in the wiki's order; position 0 is item.client_id.
+  item_client_id: ['item_id', 'client_id', 'position'],
+  item_location_coordinate: ['item_id', 'x', 'y', 'z', 'label', 'position'],
+  creature_location_coordinate: ['creature_id', 'x', 'y', 'z', 'label', 'position'],
   // Written by the build-time enrichment pass, not by the generator.
   mcp_area_pattern: ['key', 'width', 'cells'],
   mcp_ability_area: [
@@ -66,7 +72,7 @@ export const REQUIRED_COLUMNS: Readonly<Record<string, readonly string[]>> = {
     'entity_type', 'article_id', 'file_name', 'url', 'description_url',
     'width', 'height', 'mime_type',
   ],
-  creature_drop: ['creature_id', 'item_id', 'chance', 'min', 'max'],
+  creature_drop: ['creature_id', 'item_id', 'chance', 'min', 'max', 'rarity'],
   npc: ['article_id', 'title', 'gender', 'city', 'subarea', 'location', 'x', 'y', 'z', 'status'],
   npc_offer_sell: ['npc_id', 'item_id', 'value', 'currency_id'],
   npc_offer_buy: ['npc_id', 'item_id', 'value', 'currency_id'],
@@ -77,7 +83,7 @@ export const REQUIRED_COLUMNS: Readonly<Record<string, readonly string[]>> = {
   quest_reward: ['quest_id', 'item_id'],
   spell: [
     'article_id', 'title', 'words', 'spell_type', 'element', 'mana', 'level',
-    'soul', 'is_premium', 'cooldown', 'status',
+    'soul', 'is_premium', 'cooldown', 'status', 'spell_id',
   ],
   // Entity tables added when ENTITY_TYPES grew from 5 to 14.
   achievement: ['article_id', 'title', 'grade', 'points', 'description', 'spoiler', 'is_secret', 'is_premium', 'achievement_id', 'status'],
@@ -90,7 +96,7 @@ export const REQUIRED_COLUMNS: Readonly<Record<string, readonly string[]>> = {
   world: ['article_id', 'title', 'location', 'pvp_type', 'is_preview', 'is_experimental', 'online_since', 'offline_since', 'merged_into', 'battleye', 'battleye_type', 'protected_since', 'world_board', 'trade_board'],
   game_update: ['article_id', 'title', 'release_date', 'news_id', 'type_primary', 'type_secondary', 'previous', 'next', 'summary', 'changes'],
   // Child tables the detail sections read.
-  creature_ability: ['creature_id', 'name', 'effect', 'element'],
+  creature_ability: ['creature_id', 'name', 'effect', 'element', 'condition', 'condition_value'],
   creature_max_damage: ['creature_id', 'physical', 'earth', 'fire', 'ice', 'energy', 'death', 'holy', 'drown', 'lifedrain', 'manadrain', 'summons', 'total'],
   creature_sound: ['creature_id', 'content'],
   item_key: ['item_id', 'title', 'number', 'name', 'material', 'location', 'notes'],

@@ -1,16 +1,20 @@
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/server';
 import { str, num, type TibiaDb } from '../db.ts';
-import { lootChanceSchema, lootMinSchema, resolveItemName, statusClause } from '../domain.ts';
+import {
+  ITEM_CLIENT_IDS, lootChanceSchema, lootMinSchema, resolveItemName, statusClause,
+} from '../domain.ts';
 import { sourceBlock } from './get.ts';
 
 const outputSchema = z.object({
   item: z.string(),
   articleId: z.number(),
+  clientId: z.number().nullable().describe('The first client ID.'),
+  clientIds: z.array(z.number()),
   status: z.string().nullable(),
   droppedBy: z.array(z.object({
     creature: z.string(),
-    clientId: z.number().nullable().describe("The item's first client ID."),
+    articleId: z.number(),
     chance: lootChanceSchema,
     min: lootMinSchema,
     max: z.number().nullable(),
@@ -33,11 +37,12 @@ export function registerHowToObtain(server: McpServer, handle: TibiaDb): void {
 
   const findItem = db.prepare(
     'select article_id, title, status, client_id from item where article_id = ?');
+  const clientIds = db.prepare(ITEM_CLIENT_IDS);
 
   const dropped = (includeInactive: boolean) => {
     const status = statusClause('c', includeInactive);
     return db.prepare(
-      `select c.title as creature, d.chance, d.min as lo, d.max as hi
+      `select c.title as creature, c.article_id, d.chance, d.min as lo, d.max as hi
        from creature_drop d join creature c on c.article_id = d.creature_id
        where d.item_id = ?` + (status ? ` and ${status}` : '') + `
        order by (d.chance is null), d.chance desc, c.title asc`,
@@ -115,7 +120,7 @@ export function registerHowToObtain(server: McpServer, handle: TibiaDb): void {
       const id = item.article_id;
       const droppedBy = dropped(include_inactive).all(id).map((r) => ({
         creature: String(r.creature),
-        clientId: num(item.client_id),
+        articleId: Number(r.article_id),
         chance: num(r.chance),
         min: num(r.lo),
         max: num(r.hi),
@@ -135,6 +140,8 @@ export function registerHowToObtain(server: McpServer, handle: TibiaDb): void {
       const output = {
         item: item.title,
         articleId: item.article_id,
+        clientId: num(item.client_id),
+        clientIds: clientIds.all(id).map((c) => Number(c.client_id)),
         status,
         droppedBy,
         soldByNpcs,

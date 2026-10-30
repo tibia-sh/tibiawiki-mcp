@@ -10,8 +10,10 @@ const scratch = tempDirs('twmcp-obtain-');
 type ObtainOut = {
   item: string;
   articleId: number;
+  clientId: number | null;
+  clientIds: number[];
   droppedBy: Array<{
-    creature: string; clientId: number | null; chance: number | null; min: number | null; max: number | null;
+    creature: string; articleId: number; chance: number | null; min: number | null; max: number | null;
   }>;
   soldByNpcs: Array<{ npc: string; city: string | null; price: number; currency: string }>;
   questRewards: string[];
@@ -28,7 +30,7 @@ test('reports which creatures drop an item', async () => {
   await h.close();
 });
 
-test('the item carries its articleId, and each drop the item\'s client ID', async () => {
+test('the item carries its articleId, and each drop the creature\'s, as tibia_get gives it', async () => {
   const h = await connect();
   const res = await h.client.callTool({
     name: 'tibia_how_to_obtain', arguments: { item_name: 'Dragon Shield' },
@@ -42,7 +44,38 @@ test('the item carries its articleId, and each drop the item\'s client ID', asyn
     db.close();
   }
   assert.ok(data.droppedBy.length > 0, 'guard: Dragon Shield has droppers');
-  for (const drop of data.droppedBy) assert.equal(drop.clientId, 3416, drop.creature);
+  for (const drop of data.droppedBy) {
+    const creature = await h.client.callTool({
+      name: 'tibia_get', arguments: { name: drop.creature, type: 'creature' },
+    });
+    assert.notEqual(creature.isError, true, drop.creature);
+    assert.equal(drop.articleId, (creature.structuredContent as { articleId: number }).articleId, drop.creature);
+  }
+  await h.close();
+});
+
+// Shallow Water's itemid lists 629-634, and no creature drops it.
+test('the item carries its first client ID and every one, in order', async () => {
+  const h = await connect();
+  const res = await h.client.callTool({
+    name: 'tibia_how_to_obtain', arguments: { item_name: 'Shallow Water' },
+  });
+  const data = res.structuredContent as ObtainOut;
+  assert.equal(data.clientId, 629);
+  assert.deepEqual(data.clientIds, [629, 630, 631, 632, 633, 634]);
+  await h.close();
+});
+
+test('an item with no source still carries its IDs', async () => {
+  const h = await connect();
+  const res = await h.client.callTool({
+    name: 'tibia_how_to_obtain', arguments: { item_name: 'Magic Longsword' },
+  });
+  const data = res.structuredContent as ObtainOut;
+  assert.deepEqual(data.droppedBy, [], 'guard: no creature drops Magic Longsword');
+  assert.equal(data.articleId, 1464);
+  assert.equal(data.clientId, 3278);
+  assert.deepEqual(data.clientIds, [3278]);
   await h.close();
 });
 

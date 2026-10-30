@@ -204,7 +204,7 @@ test('a result row carries its in-game name and how the creature behaves', async
     assert.equal(dragon.name, 'dragon');
     assert.equal(dragon.runsAt, 300);
     assert.equal(dragon.seesInvisible, true);
-    assert.equal(dragon.paralysable, true);
+    assert.equal(dragon.paralysable, false);
     assert.equal(dragon.pushable, false);
     assert.equal(dragon.summonCost, 0);
     assert.equal(dragon.convinceCost, 0);
@@ -229,13 +229,13 @@ test('sees_invisible, paralysable and pushable filter both ways', async () => {
         for (const c of found) assert.equal(c[field], value, `${c.title} ${field}`);
       }
     }
-    // Dragon sees invisible, is paralysable and cannot be pushed.
+    // Dragon sees invisible, cannot be paralysed (paraimmune) and cannot be pushed.
     const has = async (args: Record<string, unknown>) =>
       (await findAll(h.client, args)).some((c) => c.title === 'Dragon');
     assert.ok(await has({ sees_invisible: true }));
     assert.ok(!(await has({ sees_invisible: false })));
-    assert.ok(await has({ paralysable: true }));
-    assert.ok(!(await has({ paralysable: false })));
+    assert.ok(await has({ paralysable: false }));
+    assert.ok(!(await has({ paralysable: true })));
     assert.ok(await has({ pushable: false }));
     assert.ok(!(await has({ pushable: true })));
   } finally {

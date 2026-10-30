@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.19.0](https://github.com/tibia-sh/tibiawiki-mcp/compare/v0.18.1...v0.19.0) (2026-10-30)
+
+
+### Features
+
+* address entities by stable ids ([80d701f](https://github.com/tibia-sh/tibiawiki-mcp/commit/80d701fd681b515d25835ad8199313b92f576c9d))
+* put item ids atop how to obtain ([d588d75](https://github.com/tibia-sh/tibiawiki-mcp/commit/d588d75fea9c1f50aa0cb4b341b7701f489d1ab7))
+
 ## [0.18.1](https://github.com/tibia-sh/tibiawiki-mcp/compare/v0.18.0...v0.18.1) (2026-10-30)
 
 

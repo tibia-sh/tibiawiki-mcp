@@ -10,6 +10,7 @@ import {
   positionSchema, RASHID, RASHID_SCHEDULE, rashidScheduleSchema, rashidScheduleDay, buyerPlace,
   buyerCitySchema, buyerPositionSchema, IMAGE_MEANING, fareSchema, originSchema, raceIdSchema,
   inGameNameSchema, inGamePluralSchema, inGameArticleSchema, PRICE_CURRENCY_MEANING,
+  lootChanceSchema, lootMinSchema, valueBuySchema, valueSellSchema,
 } from '../domain.ts';
 
 type Row = Record<string, unknown>;
@@ -70,8 +71,8 @@ const creatureOut = z.object({
   modifiers: z.record(z.string(), z.number().nullable()),
   loot: z.array(z.object({
     item: z.string(),
-    chance: z.number().nullable(),
-    min: z.number().nullable(),
+    chance: lootChanceSchema,
+    min: lootMinSchema,
     max: z.number().nullable(),
   })),
   abilities: z.array(z.object({
@@ -102,9 +103,9 @@ const itemOut = z.object({
   itemType: z.string().nullable(),
   typeSecondary: z.string().nullable(),
   weight: z.number().nullable(),
-  valueBuy: z.number().nullable(),
+  valueBuy: valueBuySchema,
   valueBuyCurrency: z.string().nullable().describe(PRICE_CURRENCY_MEANING),
-  valueSell: z.number().nullable(),
+  valueSell: valueSellSchema,
   isMarketable: z.boolean().nullable(),
   isStackable: z.boolean().nullable(),
   isPickupable: z.boolean().nullable(),

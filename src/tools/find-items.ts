@@ -5,6 +5,7 @@ import {
   ITEM_SORTS, itemSort, eavOperator, statusClause, coerceAttribute, REPORTED_ATTRS,
   ITEM_RESISTANCES, resistanceAttribute, ITEM_SKILLS, ITEM_HANDS, type EavOperator,
   inGameNameSchema, SPELL_ELEMENTS, ITEM_LEECHES, leechAttribute, PRICE_CURRENCY_MEANING,
+  valueBuySchema,
 } from '../domain.ts';
 import { encodeCursor, decodeCursor } from '../cursor.ts';
 
@@ -16,7 +17,7 @@ const outputSchema = z.object({
     itemClass: z.string().nullable(),
     itemType: z.string().nullable(),
     weight: z.number().nullable(),
-    valueBuy: z.number().nullable(),
+    valueBuy: valueBuySchema,
     valueBuyCurrency: z.string().nullable().describe(PRICE_CURRENCY_MEANING),
     clientId: z.number().nullable(),
     isStackable: z.boolean().nullable(),

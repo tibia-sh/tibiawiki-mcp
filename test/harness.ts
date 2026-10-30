@@ -119,7 +119,7 @@ export async function connectTo(path: string, provenance?: Provenance) {
  *
  * The server instructions are no escape hatch, since they have their own 2,048-character
  * cap in test/server.test.ts, and with the date of data 3.5.0 and the longest generator
- * version a release is expected to carry (9.0.0+tibiash.99) they measure 2,032 characters.
+ * version a release is expected to carry (9.0.0+tibiash.99) they measure 2,036 characters.
  *
  * Budget ruling for the "Correct Data and IDs" plan, measured on the fixture cut from data
  * 3.5.0 on 2026-10-30: 12 tools with 94 inputs, at about 101 bytes an input. The plan adds

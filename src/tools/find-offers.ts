@@ -30,11 +30,11 @@ export function registerFindOffers(server: McpServer, handle: TibiaDb): void {
     NAME,
     {
       description:
-        'Find NPC trade offers by NPC, item, direction and currency, with prices, for questions ' +
-        'like "everything Rashid buys" or "what can I buy with Gold Tokens".',
+        'Find NPC trade offers with prices by NPC, item, direction and currency, e.g. ' +
+        '"everything Rashid buys" or "what costs Gold Tokens".',
       inputSchema: z.object({
-        npc: z.string().min(1).optional().describe('Exact NPC name, any case.'),
-        item: z.string().min(1).optional().describe('Exact item page name, any case.'),
+        npc: z.string().min(1).optional().describe('Exact title, any case.'),
+        item: z.string().min(1).optional().describe('Exact title, any case.'),
         direction: z.enum(OFFER_DIRECTIONS).optional().describe(OFFER_DIRECTION_MEANING),
         currency: z.string().min(1).optional().describe('e.g. "Gold Coin", any case.'),
         include_inactive: z.boolean().default(false).describe('Include inactive items.'),

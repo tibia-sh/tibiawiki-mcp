@@ -315,6 +315,7 @@ test('tibia_get returns a spell description and its requirements', async () => {
   assert.equal(data.runeGroup, null);
   assert.equal(data.groupCooldown, 2);
   assert.equal(data.secondaryGroupCooldown, null);
+  assert.equal(data.spellId, 105);
   await h.close();
 });
 
@@ -332,7 +333,7 @@ test('tibia_get lists every vocation that casts a spell, in a fixed order', asyn
   await h.close();
 });
 
-test('tibia_get reports an unrecorded spell power and group cooldown as null', async () => {
+test('tibia_get reports an unrecorded spell ID, power and group cooldown as null', async () => {
   const h = await connect();
   const res = await h.client.callTool({
     name: 'tibia_get', arguments: { name: 'Gift of Life', type: 'spell' },
@@ -342,6 +343,7 @@ test('tibia_get reports an unrecorded spell power and group cooldown as null', a
   assert.equal(data.basePower, null);
   assert.equal(data.groupCooldown, null);
   assert.equal(data.secondaryGroupCooldown, null);
+  assert.equal(data.spellId, null);
   await h.close();
 });
 

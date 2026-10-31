@@ -17,7 +17,7 @@ server state. Say so when it matters (a recently changed creature, a new update)
 | Everything about one named page | `tibia_get` |
 | Creatures matching stats | `tibia_find_creatures` |
 | Items matching stats, weapon element, leech or stackability | `tibia_find_items` |
-| Spells by vocation, level, group or element | `tibia_find_spells` |
+| Spells by vocation, level, group, rune group, element or words | `tibia_find_spells` |
 | Quests by level, premium, Rookgaard or location | `tibia_find_quests` |
 | Houses by city, rent, beds or size | `tibia_find_houses` |
 | Where an item comes from | `tibia_how_to_obtain` |
@@ -119,6 +119,11 @@ pages are excluded unless you pass `include_inactive: true`. If a user insists
 something exists and you find nothing, retry with that flag. Then say the page is
 not live content. `world` and `update` have no status at all, so the flag is a no-op
 for them.
+
+**A spell's `group` is its wiki group, not what it does.** Every rune is `support`, so
+find healing or attack runes by `rune_group`. Summon Creature and the familiars are
+`support` too: `group: "summon"` holds only the deprecated Undead Legion, so find
+summons with `tibia_search` for "Summon". `words` matches part of the incantation.
 
 ## Fourteen entity types
 

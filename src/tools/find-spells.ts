@@ -2,8 +2,8 @@ import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/server';
 import { str, num, bool, type TibiaDb } from '../db.ts';
 import {
-  SPELL_ELEMENTS, SPELL_VOCATIONS, vocationColumn, SPELL_GROUPS, SPELL_TYPES,
-  SPELL_SORTS, spellSort, statusClause,
+  SPELL_ELEMENTS, SPELL_VOCATIONS, vocationColumn, SPELL_GROUPS, SPELL_RUNE_GROUPS, SPELL_TYPES,
+  SPELL_SORTS, spellSort, statusClause, likePattern, spellIdSchema,
 } from '../domain.ts';
 import { encodeCursor, decodeCursor } from '../cursor.ts';
 
@@ -11,6 +11,7 @@ const outputSchema = z.object({
   results: z.array(z.object({
     title: z.string(),
     articleId: z.number(),
+    spellId: spellIdSchema,
     words: z.string().nullable(),
     spellType: z.string().nullable(),
     group: z.string().nullable(),
@@ -35,14 +36,15 @@ export function registerFindSpells(server: McpServer, handle: TibiaDb): void {
     NAME,
     {
       description:
-        'Find Tibia spells by vocation, level, group, element and type. Use this for questions ' +
+        'Find Tibia spells by vocation, level, group, element, type and words. Use this for questions ' +
         'like "which healing spells can a level 30 druid cast". Call tibia_get with a title for ' +
         'cooldowns, effect and area.',
       inputSchema: z.object({
         vocation: z.enum(SPELL_VOCATIONS).optional(),
         level_max: z.number().int().nonnegative().optional().describe('Highest level the caster has.'),
-        group: z.enum(SPELL_GROUPS).optional()
-          .describe('Runes are all filed under support, so find attack runes by spell_type and element.'),
+        group: z.enum(SPELL_GROUPS).optional().describe('Runes are all support: use rune_group.'),
+        rune_group: z.enum(SPELL_RUNE_GROUPS).optional(),
+        words: z.string().min(1).optional().describe('Substring of the spell words.'),
         element: z.enum(SPELL_ELEMENTS).optional()
           .describe('Damage element. For healing spells, use group.'),
         spell_type: z.enum(SPELL_TYPES).optional(),
@@ -83,6 +85,10 @@ export function registerFindSpells(server: McpServer, handle: TibiaDb): void {
       if (args.level_max !== undefined) bind('s.level <= ?', args.level_max);
       // The columns hold "Healing", "Fire" and "Rune", the inputs are lowercase.
       if (args.group !== undefined) bind('s.group_spell = ? collate nocase', args.group);
+      if (args.rune_group !== undefined) bind('s.group_rune = ? collate nocase', args.rune_group);
+      if (args.words !== undefined) {
+        bind(`lower(s.words) like ? escape '\\'`, likePattern(args.words));
+      }
       if (args.element !== undefined) bind('s.element = ? collate nocase', args.element);
       if (args.spell_type !== undefined) bind('s.spell_type = ? collate nocase', args.spell_type);
       if (args.is_premium !== undefined) bind('s.is_premium = ?', args.is_premium ? 1 : 0);
@@ -100,6 +106,7 @@ export function registerFindSpells(server: McpServer, handle: TibiaDb): void {
         results: rows.map((row) => ({
           title: String(row.title),
           articleId: Number(row.article_id),
+          spellId: num(row.spell_id),
           words: str(row.words),
           spellType: str(row.spell_type),
           group: str(row.group_spell),

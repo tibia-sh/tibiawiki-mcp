@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.21.0](https://github.com/tibia-sh/tibiawiki-mcp/compare/v0.20.0...v0.21.0) (2026-10-31)
+
+
+### Features
+
+* cap npc offers in get ([2b6a8a1](https://github.com/tibia-sh/tibiawiki-mcp/commit/2b6a8a1e211dfb6a380b8e7aad3db085f4e04173))
+* find offers and npcs ([dbd54fc](https://github.com/tibia-sh/tibiawiki-mcp/commit/dbd54fc480ed5b752ed80c2cfae0443027f05506))
+
 ## [0.20.0](https://github.com/tibia-sh/tibiawiki-mcp/compare/v0.19.0...v0.20.0) (2026-10-31)
 
 

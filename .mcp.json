@@ -4,7 +4,7 @@
       "command": "npx",
       "args": [
         "-y",
-        "tibiawiki-mcp@npm:@tibia.sh/tibiawiki-mcp@0.20.0",
+        "tibiawiki-mcp@npm:@tibia.sh/tibiawiki-mcp@0.21.0",
         "serve"
       ],
       "env": {

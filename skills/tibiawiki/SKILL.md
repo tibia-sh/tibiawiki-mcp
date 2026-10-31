@@ -5,7 +5,7 @@ description: Use when answering questions about Tibia creatures, items, loot mes
 
 # Querying TibiaWiki
 
-Twelve tools over an **offline snapshot** of TibiaWiki. Every response carries
+Fourteen tools over an **offline snapshot** of TibiaWiki. Every response carries
 `indexGeneratedAt`. The data reflects the wiki at that moment, not live game or
 server state. Say so when it matters (a recently changed creature, a new update).
 
@@ -25,6 +25,8 @@ server state. Say so when it matters (a recently changed creature, a new update)
 | Where to sell a list of loot | `tibia_where_to_sell` |
 | What pasted loot messages hold and are worth | `tibia_parse_loot` |
 | Boat and carpet routes to or from a place | `tibia_find_travel` |
+| NPC trade offers by NPC, item, direction or currency, every one paged | `tibia_find_offers` |
+| NPCs by city, job or an item they buy or sell | `tibia_find_npcs` |
 
 **Resolve names before fetching.** `tibia_get` takes an exact page name, the wiki
 title. If the user says "dragonlord", "that fire dragon" or a name the game prints,
@@ -66,6 +68,7 @@ For "who buys X", call `tibia_get` on the item and read `boughtBy`, highest pric
 with each buyer's `city` and `position`. For a whole list of loot, call
 `tibia_where_to_sell` once. It gives each item's best active buyer, grouped by city.
 Rashid moves daily, so both give him city `null`, and `tibia_where_to_sell` adds his week.
+`tibia_find_npcs` gives him city `null` too, so its `city` filter never matches him.
 
 **Client IDs map to items.** Pass `client_ids` to `tibia_find_items` to turn the IDs a
 client uses into item names. Variants can share one, so an ID may return several items.
@@ -141,7 +144,9 @@ NPC, and without a type the call returns an error asking you to choose.
   only, with prices in other currencies last
 - **npc**: `jobs`, `races`, `destinations` (travel with fares and each leg's `origin`),
   `positions` (every recorded spot), `buys`, `sells`. Rashid also carries
-  `rashidSchedule`, his seven-day rotation
+  `rashidSchedule`, his seven-day rotation. `buys` and `sells` list the first 100 each,
+  `buysTotal` and `sellsTotal` count them all, and when a list is capped its `note` says
+  how to page the rest with `tibia_find_offers`
 - **quest**: `dangers` as creature names, `rewards`
 - **imbuement**: `materials` with amounts
 - **mount**: `priceCurrency`, the unit of `price` as the wiki names it, such as Tibia Coins

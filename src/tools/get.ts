@@ -9,7 +9,7 @@ import {
   runsAtSchema, summonCostSchema, convinceCostSchema, GOLD_PER_KILL, goldPerKillSchema,
   positionSchema, RASHID, RASHID_SCHEDULE, rashidScheduleSchema, rashidScheduleDay, buyerPlace,
   buyerCitySchema, buyerPositionSchema, IMAGE_MEANING, fareSchema, originSchema, raceIdSchema,
-  inGameNameSchema, inGamePluralSchema, inGameArticleSchema, PRICE_CURRENCY_MEANING,
+  spellIdSchema, inGameNameSchema, inGamePluralSchema, inGameArticleSchema, PRICE_CURRENCY_MEANING,
   lootChanceSchema, lootMinSchema, valueBuySchema, valueSellSchema, ITEM_CLIENT_IDS, NPC_JOBS,
   OFFER_ORDER, offersQuery, type OfferDirection,
 } from '../domain.ts';
@@ -204,6 +204,7 @@ const spellOut = z.object({
   image: imageSchema,
   title: z.string(),
   articleId: z.number(),
+  spellId: spellIdSchema,
   words: z.string().nullable(),
   spellType: z.string().nullable(),
   element: z.string().nullable(),
@@ -670,7 +671,7 @@ export function registerGet(server: McpServer, handle: TibiaDb): void {
       case 'spell':
         return {
           type: 'spell' as const, image: imageFor('spell', row), areaShape: spellShapeFor(row), title, articleId, words: str(row.words),
-          spellType: str(row.spell_type), element: str(row.element),
+          spellId: num(row.spell_id), spellType: str(row.spell_type), element: str(row.element),
           mana: num(row.mana), level: num(row.level), soul: num(row.soul),
           isPremium: bool(row.is_premium),
           cooldown: num(row.cooldown), effect: str(row.effect),

@@ -214,6 +214,9 @@ export const originSchema = z.string().nullable().describe(ORIGIN_MEANING);
 
 /** A creature's client race ID, described once for every tool that reports it. */
 export const raceIdSchema = z.number().nullable().describe(RACE_ID_MEANING);
+export const spellIdSchema = z.number().nullable().describe(
+  'Tibia spell ID, not unique: a deprecated spell can share one. null: the wiki records none.',
+);
 
 /**
  * Names as the game prints them in look, loot and kill messages, which can differ from the
@@ -389,11 +392,14 @@ export const SPELL_ELEMENTS = [
 ] as const satisfies readonly Element[];
 
 /**
- * The values of `spell.group_spell` and `spell.spell_type`, lowercased like every
- * other input. The columns hold them capitalised, so they match with collate nocase.
+ * The values of `spell.group_spell`, `spell.spell_type` and `spell.group_rune`, lowercased
+ * like every other input. The columns hold them capitalised, so they match with collate
+ * nocase. Every rune's group is support, so a rune is told apart by its rune group, which
+ * only runes have.
  */
-export const SPELL_GROUPS = ['attack', 'healing', 'support', 'conjure'] as const;
+export const SPELL_GROUPS = ['attack', 'healing', 'support', 'conjure', 'summon'] as const;
 export const SPELL_TYPES = ['instant', 'rune'] as const;
+export const SPELL_RUNE_GROUPS = ['attack', 'healing', 'support'] as const;
 
 export const SPELL_SORTS = ['level', 'mana', 'title'] as const;
 export type SpellSort = (typeof SPELL_SORTS)[number];

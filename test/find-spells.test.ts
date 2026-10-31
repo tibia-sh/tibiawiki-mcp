@@ -2,11 +2,12 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { DatabaseSync } from 'node:sqlite';
 import type { Client } from '@modelcontextprotocol/client';
-import { SPELL_ELEMENTS } from '../src/domain.ts';
+import { SPELL_ELEMENTS, SPELL_GROUPS, SPELL_RUNE_GROUPS } from '../src/domain.ts';
 import { connect, FIXTURE } from './harness.ts';
 
 type Spell = {
-  title: string; words: string | null; spellType: string | null; group: string | null;
+  title: string; spellId: number | null; words: string | null; spellType: string | null;
+  group: string | null;
   element: string | null; level: number | null; mana: number | null; vocations: string[];
   isPremium: boolean | null; isPromotion: boolean | null;
 };
@@ -102,6 +103,84 @@ test('the spell elements are exactly the ones the spell table holds', () => {
   }
 });
 
+test('the spell groups and rune groups are exactly the ones the spell table holds', () => {
+  const db = new DatabaseSync(FIXTURE, { readOnly: true });
+  try {
+    const held = (column: string) => (db.prepare(
+      `select distinct lower(${column}) g from spell where ${column} is not null order by g`,
+    ).all() as Array<{ g: string }>).map((r) => r.g);
+    assert.deepEqual([...SPELL_GROUPS].sort(), held('group_spell'));
+    assert.deepEqual([...SPELL_RUNE_GROUPS].sort(), held('group_rune'));
+  } finally {
+    db.close();
+  }
+});
+
+test('rune_group reaches the healing runes, which group files under support', async () => {
+  const h = await connect();
+  try {
+    const found = await findAll(h.client, { rune_group: 'healing', limit: 100 });
+    const titles = found.map((r) => r.title).sort();
+    assert.ok(titles.includes('Ultimate Healing Rune'), titles.join(', '));
+    for (const r of found) {
+      assert.equal(r.spellType, 'Rune', r.title);
+      assert.equal(r.group, 'Support', r.title);
+    }
+    const expected = fixtureTitles(
+      "select title from spell where group_rune = 'Healing' and status = 'active'",
+    );
+    assert.deepEqual(titles, expected.sort());
+  } finally {
+    await h.close();
+  }
+});
+
+test('words matches a substring of the spell words, ignoring case', async () => {
+  const h = await connect();
+  try {
+    const vita = await find(h.client, { words: 'Exura Vita' });
+    assert.deepEqual(vita.results.map((r) => r.title), ['Ultimate Healing']);
+    assert.equal(vita.totalMatches, 1);
+    const familiars = await find(h.client, { words: 'GRAN RES', sort: 'title' });
+    assert.deepEqual(familiars.results.map((r) => r.title), [
+      'Summon Druid Familiar', 'Summon Knight Familiar', 'Summon Monk Familiar',
+      'Summon Paladin Familiar', 'Summon Sorcerer Familiar',
+    ]);
+    // LIKE wildcards in the input match themselves, and no spell's words hold them.
+    for (const wildcard of ['%', '_']) {
+      assert.equal((await find(h.client, { words: wildcard })).totalMatches, 0, wildcard);
+    }
+  } finally {
+    await h.close();
+  }
+});
+
+test('group summon reaches the summon group, whose only spell is deprecated', async () => {
+  const h = await connect();
+  try {
+    const all = await find(h.client, { group: 'summon', include_inactive: true });
+    assert.deepEqual(all.results.map((r) => r.title), ['Undead Legion']);
+    assert.equal(all.results[0]!.group, 'Summon');
+    assert.equal((await find(h.client, { group: 'summon' })).totalMatches, 0);
+  } finally {
+    await h.close();
+  }
+});
+
+test('spellId is the wiki spell ID, and null where the wiki records none', async () => {
+  const h = await connect();
+  try {
+    const [vita] = (await find(h.client, { words: 'exura vita' })).results;
+    assert.equal(vita!.spellId, 3);
+    const healing = await findAll(h.client, { group: 'healing', limit: 100 });
+    const gift = healing.find((r) => r.title === 'Gift of Life');
+    assert.ok(gift, 'Gift of Life is an active healing spell');
+    assert.equal(gift.spellId, null);
+  } finally {
+    await h.close();
+  }
+});
+
 test('the level sort is the default and ascends, with ties by title', async () => {
   const h = await connect();
   try {
@@ -186,8 +265,9 @@ test('an input outside its enum is a schema error', async () => {
   const h = await connect();
   try {
     for (const bad of [
-      { vocation: 'mage' }, { group: 'summon' }, { group: 'Healing' }, { element: 'lava' },
-      { spell_type: 'wand' }, { spell_type: 'Rune' }, { sort: 'rowid' }, { level_max: -1 },
+      { vocation: 'mage' }, { group: 'Healing' }, { element: 'lava' }, { rune_group: 'conjure' },
+      { rune_group: 'Healing' }, { words: '' }, { spell_type: 'wand' }, { spell_type: 'Rune' },
+      { sort: 'rowid' }, { level_max: -1 },
     ]) {
       const res = await h.client.callTool({ name: 'tibia_find_spells', arguments: bad });
       assert.equal(res.isError, true, `${JSON.stringify(bad)} must be rejected`);

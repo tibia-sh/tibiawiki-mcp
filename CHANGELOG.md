@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.20.0](https://github.com/tibia-sh/tibiawiki-mcp/compare/v0.19.0...v0.20.0) (2026-10-31)
+
+
+### Features
+
+* page the droppers of an item ([c03639b](https://github.com/tibia-sh/tibiawiki-mcp/commit/c03639b873f03751f750c0f56173978f54ed1966))
+
+
+### Bug Fixes
+
+* say how droppers page ([1f8eb61](https://github.com/tibia-sh/tibiawiki-mcp/commit/1f8eb610e7c8340b640b46a10e43883e207846f5))
+
 ## [0.19.0](https://github.com/tibia-sh/tibiawiki-mcp/compare/v0.18.1...v0.19.0) (2026-10-30)
 
 

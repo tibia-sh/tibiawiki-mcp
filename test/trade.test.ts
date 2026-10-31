@@ -42,13 +42,18 @@ function rashidBuys(activeOnly: boolean): Offer[] {
   }
 }
 
-test('Rashid lists every item he buys, once each, by title', () => withRealIndex(async (client) => {
+// Rashid buys more than 100 items, so tibia_get lists the first 100 and counts them all.
+test('Rashid lists the first 100 items he buys, once each, by title', () => withRealIndex(async (client) => {
   const rashid = await get(client, { name: 'Rashid', type: 'npc', include_inactive: true });
-  assert.deepEqual(rashid.buys, rashidBuys(false));
-  assert.ok(rashid.buys.some((o: Offer) => o.item === 'Magic Plate Armor' && o.currency === 'Gold Coin'));
+  const every = rashidBuys(false);
+  assert.ok(every.length > 100, 'guard: Rashid buys more than 100 items');
+  assert.deepEqual(rashid.buys, every.slice(0, 100));
+  assert.equal(rashid.buysTotal, every.length);
+  assert.ok(rashid.buys.some((o: Offer) => o.item === 'Dragon Scale Mail' && o.currency === 'Gold Coin'));
 
   const rashidActive = await get(client, { name: 'Rashid', type: 'npc' });
-  assert.deepEqual(rashidActive.buys, rashidBuys(true));
+  assert.deepEqual(rashidActive.buys, rashidBuys(true).slice(0, 100));
+  assert.equal(rashidActive.buysTotal, rashidBuys(true).length);
 }));
 
 // npc_offer_buy holds Alesar's offer for Earth Knight Axe twice, and npc_offer_sell

@@ -11,6 +11,7 @@ import {
   buyerCitySchema, buyerPositionSchema, IMAGE_MEANING, fareSchema, originSchema, raceIdSchema,
   inGameNameSchema, inGamePluralSchema, inGameArticleSchema, PRICE_CURRENCY_MEANING,
   lootChanceSchema, lootMinSchema, valueBuySchema, valueSellSchema, ITEM_CLIENT_IDS, NPC_JOBS,
+  OFFER_ORDER, offersQuery, type OfferDirection,
 } from '../domain.ts';
 
 type Row = Record<string, unknown>;
@@ -28,6 +29,9 @@ const sourceSchema = z.object({
 });
 const detail = z.record(z.string(), z.union([z.string(), z.number(), z.null()])).optional();
 const tradeSchema = z.array(z.object({ item: z.string(), price: z.number(), currency: z.string() }));
+
+/** The most offers an NPC's buys or sells list. tibia_find_offers pages the rest. */
+const NPC_OFFER_CAP = 100;
 
 /**
  * Linked, never stored. `width`/`height` are the sprite image's pixel size - NOT a
@@ -158,8 +162,11 @@ const npcOut = z.object({
   })),
   // Only Rashid has one.
   rashidSchedule: rashidScheduleSchema.optional(),
-  buys: tradeSchema.describe('Items the player can sell to this NPC.'),
-  sells: tradeSchema.describe('Items the player can buy from this NPC.'),
+  buys: tradeSchema.describe(`Items the player can sell to this NPC, the first ${NPC_OFFER_CAP}.`),
+  buysTotal: z.number().describe('Every offer buys would hold uncapped.'),
+  sells: tradeSchema.describe(`Items the player can buy from this NPC, the first ${NPC_OFFER_CAP}.`),
+  sellsTotal: z.number().describe('Every offer sells would hold uncapped.'),
+  note: z.string().describe('Where to read the rest of a capped list, or empty.'),
   detail, source: sourceSchema,
 });
 const questOut = z.object({
@@ -478,15 +485,14 @@ export function registerGet(server: McpServer, handle: TibiaDb): void {
         where o.item_id = ?` + (status ? ` and ${status}` : '') + `
         order by o.value desc, n.title asc, cur.title asc`);
   };
-  const npcTrade = (table: 'npc_offer_buy' | 'npc_offer_sell', includeInactive: boolean) => {
-    const status = statusClause('i', includeInactive);
-    return db.prepare(
-      `select distinct i.title as item, o.value as price, cur.title as currency
-         from ${table} o
-         join item i on i.article_id = o.item_id
-         join item cur on cur.article_id = o.currency_id
-        where o.npc_id = ?` + (status ? ` and ${status}` : '') + `
-        order by i.title asc, o.value asc, cur.title asc`);
+  // Built by offersQuery, as tibia_find_offers' rows are, so an NPC's list is that finder's
+  // first page for the NPC and direction, and its total that finder's total.
+  const npcTrade = (npc: string, direction: OfferDirection, includeInactive: boolean) => {
+    const { sql, params } = offersQuery([direction], { npc, includeInactive });
+    const total = db.prepare(`select count(*) c from (${sql})`).get(...params) as { c: number };
+    const rows = db.prepare(`select * from (${sql}) order by ${OFFER_ORDER} limit ?`)
+      .all(...params, NPC_OFFER_CAP);
+    return { list: rows.map(trade), total: Number(total.c) };
   };
   const outfitQuests = db.prepare(
     // Total order: Assassin Outfits has two rows for the same quest title,
@@ -619,7 +625,11 @@ export function registerGet(server: McpServer, handle: TibiaDb): void {
           source,
         }, DETAILED_ITEM_FIELDS);
       }
-      case 'npc':
+      case 'npc': {
+        const buys = npcTrade(title, 'buy', includeInactive);
+        const sells = npcTrade(title, 'sell', includeInactive);
+        const capped = ([['buys', 'buy', buys.total], ['sells', 'sell', sells.total]] as const)
+          .filter(([, , total]) => total > NPC_OFFER_CAP);
         return {
           type: 'npc' as const, image: imageFor('npc', row), title, articleId, gender: str(row.gender), city: str(row.city),
           subarea: str(row.subarea), location: str(row.location),
@@ -635,10 +645,17 @@ export function registerGet(server: McpServer, handle: TibiaDb): void {
             position: { x: num(p.x), y: num(p.y), z: num(p.z) },
           })),
           ...(title === RASHID ? { rashidSchedule: rashid.all().map(rashidScheduleDay) } : {}),
-          buys: npcTrade('npc_offer_buy', includeInactive).all(row.article_id as number).map(trade),
-          sells: npcTrade('npc_offer_sell', includeInactive).all(row.article_id as number).map(trade),
+          buys: buys.list,
+          buysTotal: buys.total,
+          sells: sells.list,
+          sellsTotal: sells.total,
+          note: capped.map(([list, direction, total]) =>
+            `${list} holds ${NPC_OFFER_CAP} of ${total} offers. Call tibia_find_offers with npc ` +
+            `"${title}", direction "${direction}" and include_inactive: ${includeInactive} for ` +
+            'all of them, following nextCursor.').join(' '),
           source,
         };
+      }
       case 'quest':
         return {
           type: 'quest' as const, title, articleId, location: str(row.location),

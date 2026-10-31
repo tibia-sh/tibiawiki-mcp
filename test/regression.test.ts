@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { DatabaseSync } from 'node:sqlite';
 import { DB_PATH } from '@tibia.sh/tibiawiki-data';
+import type { Client } from '@modelcontextprotocol/client';
 import { connect, connectTo, suffixedDefenseFixture, tempDirs, withRealIndex } from './harness.ts';
 import { coerceAttribute } from '../src/domain.ts';
 
@@ -323,4 +324,60 @@ test('paging Rashid\'s buy offers returns every distinct offer once', () =>
     } while (cursor !== undefined);
     assert.ok(pages > 1, 'guard: Rashid\'s buy offers span several pages of 100');
     assert.deepEqual(paged.sort(), expected);
+  }));
+
+type NpcOffers = {
+  buys: Array<{ item: string; price: number; currency: string }>;
+  sells: Array<{ item: string; price: number; currency: string }>;
+  buysTotal: number; sellsTotal: number; note: string;
+};
+
+async function npcOffers(client: Client, include_inactive: boolean): Promise<NpcOffers> {
+  const res = await client.callTool({
+    name: 'tibia_get', arguments: { name: 'Rashid', type: 'npc', include_inactive },
+  });
+  assert.notEqual(res.isError, true, JSON.stringify(res.content));
+  return res.structuredContent as NpcOffers;
+}
+
+async function offerPage(client: Client, args: Record<string, unknown>) {
+  const res = await client.callTool({ name: 'tibia_find_offers', arguments: args });
+  assert.notEqual(res.isError, true, JSON.stringify(res.content));
+  return res.structuredContent as {
+    results: Array<{ item: string; price: number; currency: string }>; totalMatches: number;
+  };
+}
+
+// Review Focus 5: a capped list reports its total and names the paged tool for the rest.
+// Rashid's buys pass 100 either way (157 and 197 on data 3.5.0, noted above), and his
+// sells stay under it.
+test('tibia_get caps Rashid\'s buys at 100 and names tibia_find_offers for the rest', () =>
+  withRealIndex(async (client) => {
+    for (const include_inactive of [false, true]) {
+      const rashid = await npcOffers(client, include_inactive);
+      assert.ok(rashid.buysTotal > 100, `guard: Rashid buys more than 100 items (${include_inactive})`);
+      assert.equal(rashid.buys.length, 100);
+      const first = await offerPage(client, { npc: 'Rashid', direction: 'buy', include_inactive });
+      assert.deepEqual(rashid.buys, first.results.map(({ item, price, currency }) => ({ item, price, currency })),
+        'the capped list is the finder\'s first page');
+      assert.ok(rashid.sellsTotal <= 100, 'guard: Rashid\'s sells are not capped');
+      assert.equal(rashid.sells.length, rashid.sellsTotal);
+      assert.match(rashid.note, new RegExp(`100 of ${rashid.buysTotal}`));
+      assert.match(rashid.note, /tibia_find_offers/);
+      assert.match(rashid.note, /"Rashid"/);
+      assert.match(rashid.note, /direction "buy"/);
+      assert.match(rashid.note, new RegExp(`include_inactive: ${include_inactive}`));
+      assert.doesNotMatch(rashid.note, /sells/);
+    }
+  }));
+
+test('tibia_get\'s buysTotal and sellsTotal equal tibia_find_offers\' totals', () =>
+  withRealIndex(async (client) => {
+    for (const include_inactive of [false, true]) {
+      const rashid = await npcOffers(client, include_inactive);
+      for (const [direction, total] of [['buy', rashid.buysTotal], ['sell', rashid.sellsTotal]] as const) {
+        const page = await offerPage(client, { npc: 'Rashid', direction, include_inactive });
+        assert.equal(total, page.totalMatches, `${direction} include_inactive: ${include_inactive}`);
+      }
+    }
   }));

@@ -158,13 +158,16 @@ test('direction and currency narrow the offers, and sell matches tibia_get\'s se
     const sam = await h.client.callTool({ name: 'tibia_get', arguments: { name: 'Sam', type: 'npc' } });
     const npc = sam.structuredContent as {
       articleId: number; sells: Array<{ item: string; price: number; currency: string }>;
-      buys: unknown[];
+      buys: unknown[]; sellsTotal: number; buysTotal: number; note: string;
     };
     assert.deepEqual(sells.results.map(({ item, price, currency }) => ({ item, price, currency })), npc.sells);
+    assert.equal(npc.sellsTotal, sells.totalMatches);
     for (const o of sells.results) assert.equal(o.npcArticleId, npc.articleId);
 
     const buys = await find(h.client, { npc: 'Sam', direction: 'buy' });
+    assert.equal(npc.buysTotal, buys.totalMatches);
     assert.equal(npc.buys.length, buys.totalMatches);
+    assert.equal(npc.note, '', 'no list is capped');
     assert.ok(buys.results.every((o) => o.direction === 'buy'));
     assert.equal((await find(h.client, { npc: 'Sam', currency: 'Scarab Coin' })).totalMatches, 0);
   } finally {

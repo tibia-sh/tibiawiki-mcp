@@ -210,3 +210,74 @@ test('race_ids returns every creature that shares a listed race', () => withReal
   assert.equal(data.totalMatches, expected.length);
   assert.deepEqual(data.results.map((r) => r.title), expected);
 }));
+
+// Census on data 3.5.0, as on 3.4.1: Gold Coin has 754 droppers by default and 809 with
+// include_inactive: true, so droppedBy pages. Those counts are noted, not asserted: the
+// invariant is that paging reaches every row the database holds for the filter, none lost
+// and none repeated. Rootthing Nutshell drops Ruthless Axe twice in identical rows, and at
+// a limit of 1 each lands on its own page, so both must come back.
+test('paging droppedBy returns every drop row once, with and without inactive creatures', () =>
+  withRealIndex(async (client) => {
+    const db = new DatabaseSync(DB_PATH, { readOnly: true });
+    try {
+      for (const [item, limit] of [['Gold Coin', 100], ['Ruthless Axe', 1]] as const) {
+        for (const include_inactive of [false, true]) {
+          const expected = db.prepare(
+            `select c.article_id, d.chance, d.min, d.max
+               from creature_drop d join creature c on c.article_id = d.creature_id
+              where d.item_id = (select article_id from item where title = ?)` +
+              (include_inactive ? '' : " and c.status = 'active'"),
+          ).all(item).map((r) => JSON.stringify([r.article_id, r.chance, r.min, r.max])).sort();
+          const paged: string[] = [];
+          let pages = 0;
+          let cursor: string | undefined;
+          do {
+            const res = await client.callTool({
+              name: 'tibia_how_to_obtain',
+              arguments: { item_name: item, include_inactive, limit, ...(cursor ? { cursor } : {}) },
+            });
+            assert.notEqual(res.isError, true, JSON.stringify(res.content));
+            const data = res.structuredContent as {
+              droppedBy: Array<{ articleId: number; chance: number | null; min: number; max: number }>;
+              droppedByTotal: number; nextCursor?: string;
+            };
+            assert.equal(data.droppedByTotal, expected.length, `${item} ${include_inactive}`);
+            for (const d of data.droppedBy) paged.push(JSON.stringify([d.articleId, d.chance, d.min, d.max]));
+            pages += 1;
+            cursor = data.nextCursor;
+          } while (cursor !== undefined);
+          assert.ok(pages > 1, `guard: ${item} spans several pages of ${limit}`);
+          assert.deepEqual(paged.sort(), expected, `${item} include_inactive: ${include_inactive}`);
+        }
+      }
+      assert.ok(
+        db.prepare(
+          `select 1 from creature_drop d join creature c on c.article_id = d.creature_id
+             join item i on i.article_id = d.item_id
+            where i.title = 'Ruthless Axe' and c.title = 'Rootthing Nutshell'
+            group by d.chance, d.min, d.max having count(*) > 1`,
+        ).get(),
+        'guard: Rootthing Nutshell drops Ruthless Axe in two identical rows',
+      );
+    } finally {
+      db.close();
+    }
+  }));
+
+// soldByNpcs and questRewards come whole on every page of droppedBy, so they must stay
+// short. Their raw rows bound what the tool returns, which applies distinct and a status
+// filter: on data 3.5.0 the most are 61 offers and 24 quests for one item.
+test('no item has more than 100 vendor offers or quest rewards', () => {
+  const db = new DatabaseSync(DB_PATH, { readOnly: true });
+  try {
+    for (const table of ['npc_offer_sell', 'quest_reward']) {
+      const { most } = db.prepare(
+        `select max(n) as most from (select count(*) as n from ${table} group by item_id)`,
+      ).get() as { most: number };
+      assert.ok(most > 0, `guard: ${table} holds rows`);
+      assert.ok(most <= 100, `an item has ${most} rows in ${table}`);
+    }
+  } finally {
+    db.close();
+  }
+});

@@ -17,8 +17,29 @@ type ObtainOut = {
   }>;
   soldByNpcs: Array<{ npc: string; city: string | null; price: number; currency: string }>;
   questRewards: string[];
+  droppedByTotal: number;
+  nextCursor?: string;
   note: string;
 };
+
+/** Every page of an item's droppedBy, following nextCursor until it is absent. */
+async function dropPages(
+  client: Awaited<ReturnType<typeof connect>>['client'],
+  args: { item_name: string; include_inactive?: boolean; limit?: number },
+): Promise<ObtainOut[]> {
+  const pages: ObtainOut[] = [];
+  let cursor: string | undefined;
+  do {
+    const res = await client.callTool({
+      name: 'tibia_how_to_obtain', arguments: { ...args, ...(cursor ? { cursor } : {}) },
+    });
+    assert.notEqual(res.isError, true, JSON.stringify(res.content));
+    const page = res.structuredContent as ObtainOut;
+    pages.push(page);
+    cursor = page.nextCursor;
+  } while (cursor !== undefined);
+  return pages;
+}
 
 test('reports which creatures drop an item', async () => {
   const h = await connect();
@@ -212,6 +233,100 @@ test('one NPC selling at one price in several currencies is ordered by currency'
     const data = res.structuredContent as ObtainOut;
     const asima = data.soldByNpcs.filter((v) => v.npc === 'Asima').map((v) => v.currency);
     assert.deepEqual(asima, ['Crystal Coin', 'Gold Coin', 'Scarab Coin']);
+  } finally {
+    await h.close();
+  }
+});
+
+// The fixture keeps 73 Gold Coin drops, 70 of them from active creatures, and two of them
+// share a chance, so a page of 10 crosses pages and ties.
+test('paged drops follow the total order: chance, creature, min, max, articleId', async () => {
+  const db = new DatabaseSync(FIXTURE, { readOnly: true });
+  let expected: Array<[number, number | null, number, number]>;
+  try {
+    expected = db.prepare(
+      `select c.article_id, d.chance, d.min, d.max
+         from creature_drop d join creature c on c.article_id = d.creature_id
+        where d.item_id = (select article_id from item where title = 'Gold Coin')
+          and c.status = 'active'
+        order by (d.chance is null), d.chance desc, c.title asc, d.min asc, d.max asc,
+                 c.article_id asc`,
+    ).all().map((r) => [Number(r.article_id), r.chance as number | null, Number(r.min), Number(r.max)]);
+    const tied = db.prepare(
+      `select 1 from creature_drop
+        where item_id = (select article_id from item where title = 'Gold Coin')
+        group by chance having count(*) > 1`,
+    ).get();
+    assert.ok(tied, 'guard: two Gold Coin drops share a chance');
+  } finally {
+    db.close();
+  }
+  const h = await connect();
+  try {
+    const pages = await dropPages(h.client, { item_name: 'Gold Coin', limit: 10 });
+    assert.ok(pages.length > 1, 'guard: Gold Coin spans several pages of 10');
+    const paged = pages.flatMap((p) => p.droppedBy)
+      .map((d) => [d.articleId, d.chance, d.min, d.max]);
+    assert.deepEqual(paged, expected);
+  } finally {
+    await h.close();
+  }
+});
+
+test('paging drops ends without a cursor, keeping vendors and quests whole on every page', async () => {
+  const h = await connect();
+  try {
+    const whole = (await h.client.callTool({
+      name: 'tibia_how_to_obtain', arguments: { item_name: 'Gold Coin' },
+    })).structuredContent as ObtainOut;
+    assert.equal(whole.nextCursor, undefined, 'guard: one page of 100 holds every fixture drop');
+    assert.ok(whole.questRewards.length > 0, 'guard: quests reward Gold Coin');
+
+    const pages = await dropPages(h.client, { item_name: 'Gold Coin', limit: 10 });
+    assert.equal(pages.length, Math.ceil(whole.droppedByTotal / 10));
+    for (const [i, page] of pages.entries()) {
+      const last = i === pages.length - 1;
+      assert.equal(page.droppedBy.length, last ? whole.droppedByTotal - 10 * i : 10);
+      assert.deepEqual(page.soldByNpcs, whole.soldByNpcs);
+      assert.deepEqual(page.questRewards, whole.questRewards);
+      // Review Focus 5: a capped list names its total and the call that returns the rest.
+      if (last) {
+        assert.equal(page.note, '');
+      } else {
+        assert.match(page.note, new RegExp(`10 of ${whole.droppedByTotal}`));
+        assert.match(page.note, /tibia_how_to_obtain/);
+        assert.match(page.note, /cursor/);
+      }
+    }
+  } finally {
+    await h.close();
+  }
+});
+
+test('droppedByTotal counts every drop paged, with and without inactive creatures', async () => {
+  const h = await connect();
+  try {
+    const totals: number[] = [];
+    for (const include_inactive of [false, true]) {
+      const pages = await dropPages(h.client, { item_name: 'Gold Coin', include_inactive, limit: 10 });
+      const rows = pages.flatMap((p) => p.droppedBy);
+      for (const page of pages) assert.equal(page.droppedByTotal, rows.length);
+      totals.push(rows.length);
+    }
+    assert.deepEqual(totals, [70, 73]);
+  } finally {
+    await h.close();
+  }
+});
+
+test('a malformed drops cursor is a model-recoverable error', async () => {
+  const h = await connect();
+  try {
+    const res = await h.client.callTool({
+      name: 'tibia_how_to_obtain', arguments: { item_name: 'Gold Coin', cursor: 'nope' },
+    });
+    assert.equal(res.isError, true);
+    assert.match((res.content as Array<{ text: string }>)[0]!.text, /Invalid cursor: nope/);
   } finally {
     await h.close();
   }

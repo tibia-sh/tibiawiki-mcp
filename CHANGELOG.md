@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.22.0](https://github.com/tibia-sh/tibiawiki-mcp/compare/v0.21.0...v0.22.0) (2026-10-31)
+
+
+### Features
+
+* reach every spell ([7bcb289](https://github.com/tibia-sh/tibiawiki-mcp/commit/7bcb28928297c0bf8845948917f42911861e571c))
+
+
+### Bug Fixes
+
+* say where live summons are ([347404e](https://github.com/tibia-sh/tibiawiki-mcp/commit/347404e4623597752062e431f0f057e7614ee7e0))
+
 ## [0.21.0](https://github.com/tibia-sh/tibiawiki-mcp/compare/v0.20.0...v0.21.0) (2026-10-31)
 
 

@@ -107,6 +107,7 @@ test('every finder row carries the articleId of its page', async () => {
     ['tibia_find_updates', {}, (r) => ['update', r.title]],
     // A travel row is a leg of the NPC's route, so its id is the NPC's.
     ['tibia_find_travel', { to: 'Carlin' }, (r) => ['npc', r.npc]],
+    ['tibia_find_npcs', {}, (r) => ['npc', r.title]],
   ];
   for (const [name, args, page] of finders) {
     const res = await h.client.callTool({ name, arguments: args });

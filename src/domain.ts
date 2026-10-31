@@ -424,6 +424,78 @@ export const QUEST_REWARDS =
 export const ITEM_CLIENT_IDS =
   'select client_id from item_client_id where item_id = ? order by position asc';
 
+/** An NPC's jobs, for `db.prepare` with the NPC's article_id, alphabetically. */
+export const NPC_JOBS = 'select name from npc_job where npc_id = ? order by name asc';
+
+/**
+ * Trade directions, from the NPC's side: `buy` is the NPC buying from the player
+ * (npc_offer_buy), `sell` the NPC selling to the player (npc_offer_sell).
+ */
+export const OFFER_DIRECTIONS = ['buy', 'sell'] as const;
+export const OFFER_DIRECTION_MEANING =
+  'sell: the NPC sells to the player. buy: the NPC buys from the player.';
+export type OfferDirection = (typeof OFFER_DIRECTIONS)[number];
+const OFFER_TABLES: Record<OfferDirection, string> = { buy: 'npc_offer_buy', sell: 'npc_offer_sell' };
+
+/** What narrows NPC offers. Names match exactly, any case. */
+export type OfferFilter = {
+  npc?: string; item?: string; currency?: string; includeInactive: boolean;
+};
+
+/**
+ * The NPC offers in `directions` that match `filter`, as a subquery with `params` to bind:
+ * `npc`, `npc_article_id`, `item`, `item_article_id`, `price`, `currency` and `direction`.
+ * Both offer tables hold exact duplicate rows (Satsu's Cocktail Glass nine times), hence
+ * `distinct`. include_inactive reads the offered item's status, not the NPC's. Every count
+ * and list of offers is built here, so a total always counts the rows its list pages.
+ */
+export function offersQuery(
+  directions: readonly OfferDirection[], filter: OfferFilter,
+): { sql: string; params: string[] } {
+  const where: string[] = [];
+  const params: string[] = [];
+  if (filter.npc !== undefined) {
+    where.push('n.title = ? collate nocase');
+    params.push(filter.npc);
+  }
+  if (filter.item !== undefined) {
+    where.push('i.title = ? collate nocase');
+    params.push(filter.item);
+  }
+  if (filter.currency !== undefined) {
+    where.push('cur.title = ? collate nocase');
+    params.push(filter.currency);
+  }
+  const status = statusClause('i', filter.includeInactive);
+  if (status) where.push(status);
+  const clause = where.length ? `where ${where.join(' and ')}` : '';
+  const sides = directions.map((direction) => {
+    if (!Object.hasOwn(OFFER_TABLES, direction)) {
+      throw new Error(`Unknown direction: ${String(direction)}`);
+    }
+    return `select distinct n.title as npc, n.article_id as npc_article_id,
+                   i.title as item, i.article_id as item_article_id,
+                   o.value as price, cur.title as currency, '${direction}' as direction
+              from ${OFFER_TABLES[direction]} o
+              join npc n on n.article_id = o.npc_id
+              join item i on i.article_id = o.item_id
+              join item cur on cur.article_id = o.currency_id
+             ${clause}`;
+  });
+  // The directions differ in their direction column, so no row repeats across them.
+  return { sql: sides.join(' union all '), params: directions.flatMap(() => params) };
+}
+
+/**
+ * How offersQuery's rows sort. Its rows are distinct and this orders on every column, so
+ * the order is total and a cursor's offset stays stable without a rowid. NPC, item and
+ * currency titles are unique in any case, so sorting them nocase, as their columns do,
+ * never ties two of them.
+ */
+export const OFFER_ORDER =
+  'npc collate nocase asc, direction asc, item collate nocase asc, price asc, ' +
+  'currency collate nocase asc, npc_article_id asc, item_article_id asc';
+
 export const QUEST_SORTS = ['level_recommended', 'level_required', 'title'] as const;
 export type QuestSort = (typeof QUEST_SORTS)[number];
 const QUEST_ORDER: Record<QuestSort, string> = {
@@ -469,6 +541,17 @@ export function travelSort(key: TravelSort): string {
     throw new Error(`Unknown sort key: ${String(key)}`);
   }
   return TRAVEL_ORDER[key];
+}
+
+export const NPC_SORTS = ['title'] as const;
+export type NpcSort = (typeof NPC_SORTS)[number];
+/** npc.title is unique, so ordering by it is total. The query must alias the npc table `n`. */
+const NPC_ORDER: Record<NpcSort, string> = { title: 'n.title asc' };
+export function npcSort(key: NpcSort): string {
+  if (!Object.hasOwn(NPC_ORDER, key)) {
+    throw new Error(`Unknown sort key: ${String(key)}`);
+  }
+  return NPC_ORDER[key];
 }
 
 const EAV_OPERATORS = { gt: '>', gte: '>=', lte: '<=' } as const;

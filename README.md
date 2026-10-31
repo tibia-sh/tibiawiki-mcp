@@ -64,6 +64,8 @@ You ask questions, and your assistant calls these:
 | `tibia_where_to_sell` | "Where do I sell all this loot?" The NPC paying the most for each item, grouped by city. It takes the names the game prints too, like "gold coins", and lists a name several items share with those items |
 | `tibia_parse_loot` | "What is this loot worth?" Paste loot messages as the game prints them and get each item's count and NPC value in gold, with client IDs per line on request |
 | `tibia_find_travel` | "Which boat goes to Svargrond, and for how much?" Boat and carpet routes to or from a place, with fares. Each row is one leg with its start, not a planned journey |
+| `tibia_find_offers` | "What does Rashid buy, and for how much?" NPC trade offers by NPC, item, direction and currency, every one of them a page at a time |
+| `tibia_find_npcs` | "Who in Thais buys Dragon Shield?" NPCs by city, job and the items they buy or sell |
 
 The server tells your assistant how to read the data, for example that a damage modifier of 100
 is neutral. [What the skill adds](https://github.com/tibia-sh/tibiawiki-mcp/blob/main/docs/USAGE.md#what-the-skill-adds)

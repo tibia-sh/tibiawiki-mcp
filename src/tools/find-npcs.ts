@@ -30,16 +30,14 @@ export function registerFindNpcs(server: McpServer, handle: TibiaDb): void {
     NAME,
     {
       description:
-        'Find NPCs by city, job and the items they buy or sell, for questions like "who in ' +
-        'Thais buys Dragon Shield". Call tibia_get on a title for its offers and travel.',
+        'Find NPCs by city, job and the items they buy or sell, e.g. "who in Thais buys ' +
+        'Dragon Shield". tibia_get has the rest.',
       inputSchema: z.object({
-        city: z.string().min(1).optional().describe('Exact city name, e.g. "Thais", any case.'),
+        city: z.string().min(1).optional().describe('Exact, any case, e.g. "Thais".'),
         job: z.string().min(1).optional()
-          .describe('Exact job, e.g. "Shopkeeper", any case. Matches any of an NPC\'s jobs.'),
-        buys: z.string().min(1).optional()
-          .describe('Exact item page name, any case: NPCs that buy it from the player.'),
-        sells: z.string().min(1).optional()
-          .describe('Exact item page name, any case: NPCs that sell it to the player.'),
+          .describe('Exact, any case, e.g. "Shopkeeper". Any of an NPC\'s jobs.'),
+        buys: z.string().min(1).optional().describe('Exact item title, any case.'),
+        sells: z.string().min(1).optional().describe('Exact item title, any case.'),
         include_inactive: z.boolean().default(false)
           .describe('Include inactive NPCs, and inactive items for buys and sells.'),
         sort: z.enum(NPC_SORTS).default('title'),

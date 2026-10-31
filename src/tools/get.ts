@@ -10,7 +10,7 @@ import {
   positionSchema, RASHID, RASHID_SCHEDULE, rashidScheduleSchema, rashidScheduleDay, buyerPlace,
   buyerCitySchema, buyerPositionSchema, IMAGE_MEANING, fareSchema, originSchema, raceIdSchema,
   inGameNameSchema, inGamePluralSchema, inGameArticleSchema, PRICE_CURRENCY_MEANING,
-  lootChanceSchema, lootMinSchema, valueBuySchema, valueSellSchema, ITEM_CLIENT_IDS,
+  lootChanceSchema, lootMinSchema, valueBuySchema, valueSellSchema, ITEM_CLIENT_IDS, NPC_JOBS,
 } from '../domain.ts';
 
 type Row = Record<string, unknown>;
@@ -446,7 +446,7 @@ export function registerGet(server: McpServer, handle: TibiaDb): void {
      order by proficiency_level asc, effect asc`);
   const itemSounds = db.prepare(
     'select content from item_sound where item_id = ? order by content asc');
-  const npcJobs = db.prepare('select name from npc_job where npc_id = ? order by name asc');
+  const npcJobs = db.prepare(NPC_JOBS);
   const npcRaces = db.prepare('select name from npc_race where npc_id = ? order by name asc');
   // Total order, so legs that differ only in notes or origin keep one order.
   const destinations = db.prepare(

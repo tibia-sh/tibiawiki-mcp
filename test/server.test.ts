@@ -126,6 +126,7 @@ test('each meaning in the instructions is the description of its output fields',
   const city = output('tibia_where_to_sell').properties.cities.items.properties;
   const route = output('tibia_find_travel').properties.results.items.properties;
   const item = output('tibia_find_items').properties.results.items.properties;
+  const npc = output('tibia_find_npcs').properties.results.items.properties;
   for (const [where, description, meaning] of [
     ['tibia_find_creatures summonCost', creature.summonCost.description, SUMMON_COST_MEANING],
     ['tibia_find_creatures convinceCost', creature.convinceCost.description, CONVINCE_COST_MEANING],
@@ -139,6 +140,8 @@ test('each meaning in the instructions is the description of its output fields',
     ['tibia_where_to_sell city', city.city.description, RASHID_PLACE_MEANING],
     ['tibia_where_to_sell position',
       city.buyers.items.properties.position.description, RASHID_PLACE_MEANING],
+    ['tibia_find_npcs city', npc.city.description, RASHID_PLACE_MEANING],
+    ['tibia_find_npcs position', npc.position.description, RASHID_PLACE_MEANING],
     ['tibia_get destinations price',
       branch('npc').destinations.items.properties.price.description, FARE_MEANING],
     ['tibia_find_travel price', route.price.description, FARE_MEANING],
@@ -396,6 +399,8 @@ test('every paged tool refuses a cursor offset past a safe integer', async () =>
     ['tibia_find_houses', {}],
     ['tibia_find_travel', { to: 'Carlin' }],
     ['tibia_find_updates', {}],
+    ['tibia_find_offers', { npc: 'Sam' }],
+    ['tibia_find_npcs', {}],
   ] as const) {
     const res = await h.client.callTool({ name, arguments: { ...args, cursor: huge } });
     assert.equal(res.isError, true, `${name} must refuse the cursor`);

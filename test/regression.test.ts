@@ -281,3 +281,46 @@ test('no item has more than 100 vendor offers or quest rewards', () => {
     db.close();
   }
 });
+
+// Census on data 3.5.0, from S0: Rashid buys 157 items by default and 197 with
+// include_inactive: true, more than one page of 100. Those counts are noted, not asserted:
+// the invariant is that paging reaches every distinct offer the database holds, none lost
+// and none repeated. Offer rows are distinct, unlike droppers, so the expected multiset is
+// the database's distinct rows.
+test('paging Rashid\'s buy offers returns every distinct offer once', () =>
+  withRealIndex(async (client) => {
+    const db = new DatabaseSync(DB_PATH, { readOnly: true });
+    let expected: string[];
+    try {
+      expected = db.prepare(
+        `select distinct n.article_id as npc_id, i.article_id as item_id, o.value, c.title as currency
+           from npc_offer_buy o join npc n on n.article_id = o.npc_id
+           join item i on i.article_id = o.item_id join item c on c.article_id = o.currency_id
+          where n.title = 'Rashid'`,
+      ).all().map((r) => JSON.stringify([r.npc_id, r.item_id, r.value, r.currency])).sort();
+    } finally {
+      db.close();
+    }
+    const paged: string[] = [];
+    let pages = 0;
+    let cursor: string | undefined;
+    do {
+      const res = await client.callTool({
+        name: 'tibia_find_offers',
+        arguments: { npc: 'Rashid', direction: 'buy', include_inactive: true, ...(cursor ? { cursor } : {}) },
+      });
+      assert.notEqual(res.isError, true, JSON.stringify(res.content));
+      const data = res.structuredContent as {
+        results: Array<{ npcArticleId: number; itemArticleId: number; price: number; currency: string }>;
+        totalMatches: number; nextCursor?: string;
+      };
+      assert.equal(data.totalMatches, expected.length);
+      for (const o of data.results) {
+        paged.push(JSON.stringify([o.npcArticleId, o.itemArticleId, o.price, o.currency]));
+      }
+      pages += 1;
+      cursor = data.nextCursor;
+    } while (cursor !== undefined);
+    assert.ok(pages > 1, 'guard: Rashid\'s buy offers span several pages of 100');
+    assert.deepEqual(paged.sort(), expected);
+  }));

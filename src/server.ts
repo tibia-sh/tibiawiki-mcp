@@ -19,6 +19,8 @@ import { registerFindUpdates, NAME as FIND_UPDATES } from './tools/find-updates.
 import { registerWhereToSell, NAME as WHERE_TO_SELL } from './tools/where-to-sell.ts';
 import { registerParseLoot, NAME as PARSE_LOOT } from './tools/parse-loot.ts';
 import { registerFindTravel, NAME as FIND_TRAVEL } from './tools/find-travel.ts';
+import { registerFindOffers, NAME as FIND_OFFERS } from './tools/find-offers.ts';
+import { registerFindNpcs, NAME as FIND_NPCS } from './tools/find-npcs.ts';
 
 /**
  * What both servers report in the MCP handshake. The version is package.json's, read at
@@ -68,7 +70,7 @@ const FIELD_MEANINGS =
 
 export const TOOL_NAMES = [
   GET, SEARCH, FIND_CREATURES, FIND_ITEMS, FIND_SPELLS, FIND_QUESTS, FIND_HOUSES, HOW_TO_OBTAIN,
-  FIND_UPDATES, WHERE_TO_SELL, PARSE_LOOT, FIND_TRAVEL,
+  FIND_UPDATES, WHERE_TO_SELL, PARSE_LOOT, FIND_TRAVEL, FIND_OFFERS, FIND_NPCS,
 ] as const;
 
 export function createServer(handle: TibiaDb): McpServer {
@@ -100,6 +102,8 @@ export function createServer(handle: TibiaDb): McpServer {
   registerWhereToSell(server, handle);
   registerParseLoot(server, handle);
   registerFindTravel(server, handle);
+  registerFindOffers(server, handle);
+  registerFindNpcs(server, handle);
 
   return server;
 }

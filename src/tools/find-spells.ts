@@ -42,7 +42,8 @@ export function registerFindSpells(server: McpServer, handle: TibiaDb): void {
       inputSchema: z.object({
         vocation: z.enum(SPELL_VOCATIONS).optional(),
         level_max: z.number().int().nonnegative().optional().describe('Highest level the caster has.'),
-        group: z.enum(SPELL_GROUPS).optional().describe('Runes are all support: use rune_group.'),
+        group: z.enum(SPELL_GROUPS).optional()
+          .describe('Runes and live summons are support: use rune_group, or tibia_search "Summon".'),
         rune_group: z.enum(SPELL_RUNE_GROUPS).optional(),
         words: z.string().min(1).optional().describe('Substring of the spell words.'),
         element: z.enum(SPELL_ELEMENTS).optional()

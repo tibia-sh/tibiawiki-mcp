@@ -167,6 +167,22 @@ test('group summon reaches the summon group, whose only spell is deprecated', as
   }
 });
 
+test('the group input tells the model where runes and live summons are filed', async () => {
+  const h = await connect();
+  try {
+    const { tools } = await h.client.listTools();
+    const spells = tools.find((t) => t.name === 'tibia_find_spells');
+    assert.ok(spells, 'guard: tibia_find_spells is listed');
+    const group = (spells.inputSchema.properties as Record<string, { description?: string }>).group;
+    const text = group?.description ?? '';
+    assert.match(text, /rune_group/, text);
+    assert.match(text, /summons are support/i, text);
+    assert.match(text, /tibia_search "Summon"/, text);
+  } finally {
+    await h.close();
+  }
+});
+
 test('spellId is the wiki spell ID, and null where the wiki records none', async () => {
   const h = await connect();
   try {

@@ -4,6 +4,7 @@ import { copyFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { connect, connectTo, FIXTURE, tempDirs, withRealIndex } from './harness.ts';
+import { encodeCursor } from '../src/cursor.ts';
 
 const scratch = tempDirs('twmcp-obtain-');
 
@@ -327,6 +328,30 @@ test('a malformed drops cursor is a model-recoverable error', async () => {
     });
     assert.equal(res.isError, true);
     assert.match((res.content as Array<{ text: string }>)[0]!.text, /Invalid cursor: nope/);
+  } finally {
+    await h.close();
+  }
+});
+
+// Quests reward Gold Coin, so its note could never say "no source". Battle Shield's only
+// sources are creatures, so its past-the-end page is what shows the note reads the total.
+test('a drops cursor past the end gives an empty page, not a missing source', async () => {
+  const h = await connect();
+  try {
+    for (const item_name of ['Gold Coin', 'Battle Shield']) {
+      const res = await h.client.callTool({
+        name: 'tibia_how_to_obtain', arguments: { item_name, cursor: encodeCursor(1000) },
+      });
+      assert.notEqual(res.isError, true, JSON.stringify(res.content));
+      const data = res.structuredContent as ObtainOut;
+      assert.deepEqual(data.droppedBy, [], item_name);
+      assert.ok(data.droppedByTotal > 0, `guard: creatures drop ${item_name}`);
+      assert.equal(data.nextCursor, undefined, item_name);
+      assert.doesNotMatch(data.note, /No creature drop/, item_name);
+      if (item_name === 'Battle Shield') {
+        assert.deepEqual([data.soldByNpcs, data.questRewards], [[], []], 'guard: only creatures');
+      }
+    }
   } finally {
     await h.close();
   }

@@ -88,9 +88,10 @@ export function registerHowToObtain(server: McpServer, handle: TibiaDb): void {
     NAME,
     {
       description:
-        'Every in-game source for one item in a single call: which creatures drop it and how ' +
-        'likely, which NPCs sell it and for how much (the price the player pays), and which ' +
-        'quests reward it. Prefer this over three separate lookups.',
+        'Every in-game source for one item: which creatures drop it and how likely, which NPCs ' +
+        'sell it and for how much (the price the player pays), and which quests reward it. ' +
+        'Droppers come up to 100 at a time, with a cursor for the rest. Vendors and quest ' +
+        'rewards always come whole. Prefer this over three separate lookups.',
       inputSchema: z.object({
         item_name: z.string().min(1)
           .describe('Item page name or the name the game prints, e.g. "Dragon Shield".'),
@@ -188,7 +189,8 @@ export function registerHowToObtain(server: McpServer, handle: TibiaDb): void {
             : '',
           nextCursor !== undefined
             ? `droppedBy holds ${droppedBy.length} of ${droppedByTotal} creature drops. Call ` +
-              'tibia_how_to_obtain again with cursor set to nextCursor for the next page.'
+              'tibia_how_to_obtain again with the same item_name and include_inactive, and ' +
+              'cursor set to nextCursor, for the next page.'
             : '',
         ].filter(Boolean).join(' '),
         source: sourceBlock(item.title, provenance),
